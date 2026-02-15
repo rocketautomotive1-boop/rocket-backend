@@ -1,0 +1,96 @@
+
+
+=== Searching for: "part-detail-v2-linkages-tab" ===
+
+--- MATCH #1 ---
+-tabpanel><!----><!----><!----><!----><p-tabpanel _ngcontent-ng-c1748784428="" class="p-element ng-star-inserted"><div role="tabpanel" class="p-tabview-panel ng-star-inserted" id="pn_id_79_content" aria-hidden="true" aria-labelledby="pn_id_79_header_action" data-pc-name="tabpanel" hidden=""><!----><part-detail-v2-linkages-tab _ngcontent-ng-c1748784428="" _nghost-ng-c2850881129=""><div _ngcontent-ng-c2850881129="" class="d-flex flex-column pl-2"><div _ngcontent-ng-c2850881129="" class="tab-content-header mb-2 d-md-none font-weight-bold"><i _ngcontent-ng-c2850881129="" class="ta-icon ta-icon-car"></i> Vehicle linkage </div><p-dropdown _ngcontent-ng-c2850881129="" styleclass="p-inputtext-xxs" class="p-element p-inputwrapper ng-untouched ng-pristine ng-valid ng-star-inserted p-inputwrapper-filled"><div id="pn_id_81" class="p-inputtext-xxs p-dropdown p-component p-inputwrapper" style="width: 250px;"><span role="combobox" pautofocus="" class="p-element p-dropdown-label p-inputtext p-placeholder ng-star-inserted" aria-disabled="false" aria-label="All" aria-haspopup="listbox" aria-expanded="false" tabindex="0">All<!----><!----><!----><!----></span><!----><!----><!----><!----><div role="button" aria-label="dropdown trigger" aria-haspopup="listbox" class="p-dropdown-trigger" aria-expanded=
+--- MATCH #2 ---
+-3 d-flex flex-wrap"><li _ngcontent-ng-c2850881129="" class="col col-12 col-md-3 px-0 ng-star-inserted"><a _ngcontent-ng-c2850881129="" href="" ta-name="linkage-brand" ta-value="121"><i _ngcontent-ng-c2850881129="" class="ta-icon ta-icon-open-window pr-1"></i> VW </a></li><!----></ul><!----></div></part-detail-v2-linkages-tab><!----></div><!----></p-tabpanel><!----><!----><!----><!----><p-tabpanel _ngcontent-ng-c1748784428="" class="p-element ng-star-inserted"><div role="tabpanel" class="p-tabview-panel ng-star-inserted" id="pn_id_80_content" aria-hidden="false" aria-labelledby="pn_id_80_header_action" data-pc-name="tabpanel"><!----><part-detail-v2-brand-tab _ngcontent-ng-c1748784428=""><div class="d-flex flex-column"><div class="tab-content-header mb-2 d-md-none font-weight-bold"><i class="ta-icon ta-icon-manufactor"></i> Manufacturer address </div><!----><table class="table table-sm table-2c-list table-border-top-0 mb-0"><tbody><tr ta-name="name" class="ng-star-inserted"><th scope="row">Name</th><td>Nakata</td></tr><!----><tr ta-name="street" class="ng-star-inserted"><th scope="row">Street</th><td>Avenida Presidente Medici, 939</td></tr><!----><!----><!----><tr ta-name="country" class="ng-star-inserted"><th scope="row">Country</th><td>BR</td></tr><!----><tr ta-name="city" class
+
+=== Searching for: "linkage-row" ===
+No matches found.
+
+
+=== Searching for: "manufacturer-link" ===
+No matches found.
+
+
+=== Searching for: "model-series-link" ===
+No matches found.
+
+
+=== Searching for: "<tr" ===
+
+--- MATCH #1 ---
+lumn"><div _ngcontent-ng-c2802346107="" class="summary-details-container w-100"><part-detail-v2-summary-table _ngcontent-ng-c2802346107="" class="summary" _nghost-ng-c1794642268=""><table _ngcontent-ng-c1794642268="" class="table table-sm table-2c-list pr-3 mb-1"><tbody _ngcontent-ng-c1794642268=""><tr _ngcontent-ng-c1794642268=""><th _ngcontent-ng-c1794642268="" scope="row">Brand</th><td _ngcontent-ng-c1794642268=""><span _ngcontent-ng-c1794642268="">NAKATA</span><brand-status-overlay-panel _ngcontent-ng-c1794642268="" _nghost-ng-c2282275084=""><a _ngcontent-ng-c2282275084="" href="" class="btn-brand-status"><i _ngcontent-ng-c2282275084="" class="pl-1 ta-icon ta-icon-warranty cds"></i></a><p-overlaypanel _ngcontent-ng-c2282275084="" class="p-element ng-tns-c2421636214-24 ng-star-inserted"><!----></p-overlaypanel></brand-status-overlay-panel></td></tr><tr _ngcontent-ng-c1794642268=""><th _ngcontent-ng-c1794642268="" scope="row">Article number</th><td _ngcontent-ng-c1794642268="">AC 25001</td></tr><tr _ngcontent-ng-c1794642268=""><th _ngcontent-ng-c1794642268="" scope="row">Product group </th><td _ngcontent-ng-c1794642268="">Shock Absorber </td></tr><!----><!----><tr _ngcontent-ng-c1794642268="" class="ng-star-inserted" style=""><th _ngcontent-ng-c1794642268="" scope="row">GTIN/EA
+--- MATCH #2 ---
+t-ng-c2282275084="" href="" class="btn-brand-status"><i _ngcontent-ng-c2282275084="" class="pl-1 ta-icon ta-icon-warranty cds"></i></a><p-overlaypanel _ngcontent-ng-c2282275084="" class="p-element ng-tns-c2421636214-24 ng-star-inserted"><!----></p-overlaypanel></brand-status-overlay-panel></td></tr><tr _ngcontent-ng-c1794642268=""><th _ngcontent-ng-c1794642268="" scope="row">Article number</th><td _ngcontent-ng-c1794642268="">AC 25001</td></tr><tr _ngcontent-ng-c1794642268=""><th _ngcontent-ng-c1794642268="" scope="row">Product group </th><td _ngcontent-ng-c1794642268="">Shock Absorber </td></tr><!----><!----><tr _ngcontent-ng-c1794642268="" class="ng-star-inserted" style=""><th _ngcontent-ng-c1794642268="" scope="row">GTIN/EAN</th><td _ngcontent-ng-c1794642268=""><div _ngcontent-ng-c1794642268="" class="ng-star-inserted"> ­7897499900019 </div><!----></td></tr><!----><!----><!----><!----><!----><!----><!----></tbody></table></part-detail-v2-summary-table><part-detail-v2-cart-toolbar _ngcontent-ng-c2802346107="" class="toolbar" _nghost-ng-c1975665651=""><div _ngcontent-ng-c1975665651="" class="cart-toolbar d-flex flex-column align-items-center bg-light p-3"><!----><progress-task _ngcontent-ng-c1975665651=""><!----><loading class="ng-tns-c3207577519-25 ng-star-inserted d-none"><!--
+--- MATCH #3 ---
+el _ngcontent-ng-c2282275084="" class="p-element ng-tns-c2421636214-24 ng-star-inserted"><!----></p-overlaypanel></brand-status-overlay-panel></td></tr><tr _ngcontent-ng-c1794642268=""><th _ngcontent-ng-c1794642268="" scope="row">Article number</th><td _ngcontent-ng-c1794642268="">AC 25001</td></tr><tr _ngcontent-ng-c1794642268=""><th _ngcontent-ng-c1794642268="" scope="row">Product group </th><td _ngcontent-ng-c1794642268="">Shock Absorber </td></tr><!----><!----><tr _ngcontent-ng-c1794642268="" class="ng-star-inserted" style=""><th _ngcontent-ng-c1794642268="" scope="row">GTIN/EAN</th><td _ngcontent-ng-c1794642268=""><div _ngcontent-ng-c1794642268="" class="ng-star-inserted"> ­7897499900019 </div><!----></td></tr><!----><!----><!----><!----><!----><!----><!----></tbody></table></part-detail-v2-summary-table><part-detail-v2-cart-toolbar _ngcontent-ng-c2802346107="" class="toolbar" _nghost-ng-c1975665651=""><div _ngcontent-ng-c1975665651="" class="cart-toolbar d-flex flex-column align-items-center bg-light p-3"><!----><progress-task _ngcontent-ng-c1975665651=""><!----><loading class="ng-tns-c3207577519-25 ng-star-inserted d-none"><!----></loading><!----></progress-task><div _ngcontent-ng-c1975665651="" class="d-flex w-100 position-relative ng-star-inserted" style=""><price-picker
+--- MATCH #4 ---
+-c1794642268=""><th _ngcontent-ng-c1794642268="" scope="row">Article number</th><td _ngcontent-ng-c1794642268="">AC 25001</td></tr><tr _ngcontent-ng-c1794642268=""><th _ngcontent-ng-c1794642268="" scope="row">Product group </th><td _ngcontent-ng-c1794642268="">Shock Absorber </td></tr><!----><!----><tr _ngcontent-ng-c1794642268="" class="ng-star-inserted" style=""><th _ngcontent-ng-c1794642268="" scope="row">GTIN/EAN</th><td _ngcontent-ng-c1794642268=""><div _ngcontent-ng-c1794642268="" class="ng-star-inserted"> ­7897499900019 </div><!----></td></tr><!----><!----><!----><!----><!----><!----><!----></tbody></table></part-detail-v2-summary-table><part-detail-v2-cart-toolbar _ngcontent-ng-c2802346107="" class="toolbar" _nghost-ng-c1975665651=""><div _ngcontent-ng-c1975665651="" class="cart-toolbar d-flex flex-column align-items-center bg-light p-3"><!----><progress-task _ngcontent-ng-c1975665651=""><!----><loading class="ng-tns-c3207577519-25 ng-star-inserted d-none"><!----></loading><!----></progress-task><div _ngcontent-ng-c1975665651="" class="d-flex w-100 position-relative ng-star-inserted" style=""><price-picker _ngcontent-ng-c1975665651="" _nghost-ng-c1568800073=""><!----><div _ngcontent-ng-c1568800073="" class="w-100 d-flex justify-content-center ng-star-inserted"><price-pick
+--- MATCH #5 ---
+name="tabpanel" hidden=""><!----><part-detail-v2-criteria-tab _ngcontent-ng-c1748784428=""><div class="tab-content-header mb-1 d-md-none font-weight-bold"><i class="ta-icon ta-icon-criteria"></i> Criteria </div><table class="table table-sm table-2c-list table-border-top-0 mb-0"><tbody><!----><!----><tr class="ng-star-inserted"><td colspan="2" style="border-bottom: none; padding-top: 5px;"><span class="text-primary font-weight-bold"> Article criteria </span></td></tr><tr ta-name="Fitting Position" class="ng-star-inserted"><th scope="row" class="ng-star-inserted">Fitting Position</th><td class="ng-star-inserted"><span class="ng-star-inserted"><span class="">Front Axle</span>, <span class="">Right</span>, <span class="">Left</span></span><!----></td><!----></tr><tr ta-name="Weight" class="ng-star-inserted"><th scope="row" class="ng-star-inserted">Weight</th><td class="ng-star-inserted"><span class="ng-star-inserted"><span class="">1.389 kg</span></span><!----></td><!----></tr><tr ta-name="Shock Absorber Type" class="ng-star-inserted"><th scope="row" class="ng-star-inserted">Shock Absorber Type</th><td class="ng-star-inserted"><span class="ng-star-inserted"><span class="">Oil Pressure</span></span><!----></td><!----></tr><tr ta-name="Shock Absorber Design" class="ng-star-inserted"><t
+
+=== Searching for: "<li" ===
+
+--- MATCH #1 ---
+viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no, width=device-width">
+    <meta name="description" content="TecDoc Catalogue by TecAlliance - one of the world's leading global vehicle and spare parts catalogues for the automotive aftermarket based on the TecDoc standard.">
+    <link id="favicon" rel="icon" type="image/x-icon" href="https://catalog-files.tecalliance.services/B7ZwBm6BTh4s1sAcvWyd6/images/favicon-2021-10-22.7.48.51.ico">
+    <!-- Roboto font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+
+    <!-- <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@100;300;400;500;700&display=swap" rel="stylesheet"> -->
+    <style type="text/css">
+      @font-face {font-family:'Roboto';font-style:normal;font-weight:100;font-display:swap;src:url(https://fonts.gstatic.com/s/roboto/v29/KFOkCnqEu92Fr1MmgVxFIzIFKw.woff2) format('woff2');unicode-range: U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;}
+      @font-face {font-family:'Roboto';font-style:normal;font-weight:100;font-display:swap;src:url(https://fonts.gstatic.com/s/roboto/v29/KFOkCnqEu92Fr1MmgVxMIzIFKw.woff2) format('woff2');unicode-range: U+0400-045F, U+0490-0491, U+04B0-04
+--- MATCH #2 ---
+ global vehicle and spare parts catalogues for the automotive aftermarket based on the TecDoc standard.">
+    <link id="favicon" rel="icon" type="image/x-icon" href="https://catalog-files.tecalliance.services/B7ZwBm6BTh4s1sAcvWyd6/images/favicon-2021-10-22.7.48.51.ico">
+    <!-- Roboto font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+
+    <!-- <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@100;300;400;500;700&display=swap" rel="stylesheet"> -->
+    <style type="text/css">
+      @font-face {font-family:'Roboto';font-style:normal;font-weight:100;font-display:swap;src:url(https://fonts.gstatic.com/s/roboto/v29/KFOkCnqEu92Fr1MmgVxFIzIFKw.woff2) format('woff2');unicode-range: U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;}
+      @font-face {font-family:'Roboto';font-style:normal;font-weight:100;font-display:swap;src:url(https://fonts.gstatic.com/s/roboto/v29/KFOkCnqEu92Fr1MmgVxMIzIFKw.woff2) format('woff2');unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;}
+      @font-face {font-family:'Roboto';font-style:normal;font-weight:100;font-display:swap;src:url(https://fonts.gstatic.com/s/roboto/v29/KFOkCnqEu92Fr1MmgVxEIzIFKw.woff2) forma
+--- MATCH #3 ---
+termarket based on the TecDoc standard.">
+    <link id="favicon" rel="icon" type="image/x-icon" href="https://catalog-files.tecalliance.services/B7ZwBm6BTh4s1sAcvWyd6/images/favicon-2021-10-22.7.48.51.ico">
+    <!-- Roboto font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+
+    <!-- <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@100;300;400;500;700&display=swap" rel="stylesheet"> -->
+    <style type="text/css">
+      @font-face {font-family:'Roboto';font-style:normal;font-weight:100;font-display:swap;src:url(https://fonts.gstatic.com/s/roboto/v29/KFOkCnqEu92Fr1MmgVxFIzIFKw.woff2) format('woff2');unicode-range: U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;}
+      @font-face {font-family:'Roboto';font-style:normal;font-weight:100;font-display:swap;src:url(https://fonts.gstatic.com/s/roboto/v29/KFOkCnqEu92Fr1MmgVxMIzIFKw.woff2) format('woff2');unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;}
+      @font-face {font-family:'Roboto';font-style:normal;font-weight:100;font-display:swap;src:url(https://fonts.gstatic.com/s/roboto/v29/KFOkCnqEu92Fr1MmgVxEIzIFKw.woff2) format('woff2');unicode-range: U+1F00-1FFF;}
+      @font-face {font-f
+--- MATCH #4 ---
+image/x-icon" href="https://catalog-files.tecalliance.services/B7ZwBm6BTh4s1sAcvWyd6/images/favicon-2021-10-22.7.48.51.ico">
+    <!-- Roboto font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+
+    <!-- <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@100;300;400;500;700&display=swap" rel="stylesheet"> -->
+    <style type="text/css">
+      @font-face {font-family:'Roboto';font-style:normal;font-weight:100;font-display:swap;src:url(https://fonts.gstatic.com/s/roboto/v29/KFOkCnqEu92Fr1MmgVxFIzIFKw.woff2) format('woff2');unicode-range: U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;}
+      @font-face {font-family:'Roboto';font-style:normal;font-weight:100;font-display:swap;src:url(https://fonts.gstatic.com/s/roboto/v29/KFOkCnqEu92Fr1MmgVxMIzIFKw.woff2) format('woff2');unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;}
+      @font-face {font-family:'Roboto';font-style:normal;font-weight:100;font-display:swap;src:url(https://fonts.gstatic.com/s/roboto/v29/KFOkCnqEu92Fr1MmgVxEIzIFKw.woff2) format('woff2');unicode-range: U+1F00-1FFF;}
+      @font-face {font-family:'Roboto';font-style:normal;font-weight:100;font-display:swap;src:url(https:/
+--- MATCH #5 ---
+nts.gstatic.com/s/roboto/v29/KFOlCnqEu92Fr1MmWUlfBBc4.woff2) format('woff2');unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
+    </style>
+
+    <!-- Open Sans font -->
+    <!-- <link href="https://fonts.googleapis.com/css?family=Open+Sans:400,600,300" rel="stylesheet" type="text/css"> -->
+    <style type="text/css">
+      @font-face{font-family:'Open Sans';font-style:normal;font-weight:300;font-stretch:100%;src:url(https://fonts.gstatic.com/s/opensans/v26/memvYaGs126MiZpBA-UvWbX2vVnXBbObj2OVTSKmu0SC55K5gw.woff2) format('woff2');unicode-range:U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;}
+      @font-face{font-family:'Open Sans';font-style:normal;font-weight:300;font-stretch:100%;src:url(https://fonts.gstatic.com/s/opensans/v26/memvYaGs126MiZpBA-UvWbX2vVnXBbObj2OVTSumu0SC55K5gw.woff2) format('woff2');unicode-range:U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;}
+      @font-face{font-family:'Open Sans';font-style:normal;font-weight:300;font-stretch:100%;src:url(https://fonts.gstatic.com/s/opensans/v26/memvYaGs126MiZpBA-UvWbX2vVnXBbObj2OVTSOmu0SC55K5gw.woff2) format('woff2');unicode-range:U+1F00-1FFF;}
+      @font-face{font-family:'Ope

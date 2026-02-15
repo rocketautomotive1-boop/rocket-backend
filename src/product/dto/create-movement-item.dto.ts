@@ -1,0 +1,20 @@
+import { IsNumber, IsNotEmpty, Min } from 'class-validator';
+
+export class CreateMovementItemDto {
+  @IsNumber()
+  @IsNotEmpty()
+  movementId: number;
+
+  @IsNumber()
+  @IsNotEmpty()
+  productId: number;
+
+  @IsNumber()
+  @IsNotEmpty()
+  conditionId: number;
+
+  @IsNumber()
+  @IsNotEmpty()
+  @Min(1)
+  quantity: number;
+} 

@@ -1,0 +1,358 @@
+
+import { Injectable, Logger } from '@nestjs/common';
+import { XMLBuilder } from 'fast-xml-parser';
+import { v4 as uuidv4 } from 'uuid';
+import { FiscalDocumentModel } from '../schemas/fiscal.schema';
+import { FiscalIssuerModel } from '../schemas/fiscal.schema';
+
+@Injectable()
+export class XmlBuilderService {
+  private readonly logger = new Logger(XmlBuilderService.name);
+  private readonly builder: XMLBuilder;
+
+  constructor() {
+    this.builder = new XMLBuilder({
+      ignoreAttributes: false,
+      format: false,
+      suppressBooleanAttributes: false,
+    });
+  }
+
+  async buildNFeXml(nfe: FiscalDocumentModel, orderData: any, issuer: FiscalIssuerModel): Promise<string> {
+    this.logger.log(`Building NFe XML for order ${nfe.orderId}`);
+
+    // Basic Validation
+    if (!orderData.buyer || !orderData.items) {
+      throw new Error('Dados do pedido inválidos para emissão de NFe');
+    }
+
+    const isProduction = nfe.environment === 'PRODUCTION';
+    const tpAmb = isProduction ? '1' : '2';
+
+    // Generate accurate cNF (Random 8 digits for now, but part of key)
+    const cNF = Math.floor(Math.random() * 99999999).toString().padStart(8, '0');
+
+    const nfeData: any = {
+      NFe: {
+        '@_xmlns': 'http://www.portalfiscal.inf.br/nfe',
+        infNFe: {
+          '@_versao': '4.00',
+          ide: {
+            cUF: this.getStateIbgeCode(this.getStateCode(issuer.address.state)),
+            cNF: cNF,
+            natOp: 'VENDA DE MERCADORIA',
+            mod: '55',
+            serie: String(nfe.series),
+            nNF: String(nfe.number),
+            // Adjusted for Timezone (UTC-3) and Safety Buffer (10 min)
+            // We subtract 3h (180min) + 10min = 190min to ensure the ISO string (which is UTC)
+            // visually matches the local time minus buffer, so when we append -03:00 it is correct.
+            dhEmi: new Date(Date.now() - (3 * 60 + 10) * 60 * 1000).toISOString().split('.')[0] + '-03:00',
+            tpNF: '1', // 1=Saída
+            idDest: '1', // 1=Internal
+            cMunFG: issuer.address.ibgeCode,
+            tpImp: '1', // Portrait
+            tpEmis: '1', // Normal
+            cDV: '0', // Will update after key calc
+            tpAmb: tpAmb,
+            finNFe: '1', // Normal
+            indFinal: '1', // Consumidor final
+            indPres: '2', // Internet
+            indIntermed: '1', // 1=Intermediador/Marketplace
+            procEmi: '0', // App proprietário
+            verProc: 'Rocket 1.0',
+          },
+          emit: {
+            CNPJ: issuer.cnpj.replace(/\D/g, ''),
+            xNome: (issuer.companyName || '').substring(0, 60),
+            xFant: (issuer.fantasyName || '').substring(0, 60),
+            enderEmit: {
+              xLgr: issuer.address.street,
+              nro: issuer.address.number,
+              xBairro: issuer.address.neighborhood,
+              cMun: issuer.address.ibgeCode,
+              xMun: issuer.address.city,
+              UF: this.getStateCode(issuer.address.state),
+              CEP: issuer.address.zipCode.replace(/\D/g, ''),
+              cPais: '1058',
+              xPais: 'BRASIL',
+              ...(issuer.address.phone ? { fone: issuer.address.phone.replace(/\D/g, '') } : {})
+            },
+            IE: issuer.ie.replace(/\D/g, ''),
+            CRT: issuer.taxRegime === 'SIMPLES_NACIONAL' ? '1' : '3',
+          },
+          dest: {
+            ...(orderData.buyer.cnpj ? { CNPJ: orderData.buyer.cnpj.replace(/\D/g, '') } : { CPF: (orderData.buyer.cpf || orderData.buyer.document || '00000000000').replace(/\D/g, '') }),
+            xNome: (orderData.buyer.name || (orderData.buyer.first_name || '') + ' ' + (orderData.buyer.last_name || '')).substring(0, 60),
+            // Fix 275: Use Capital Code if city_ibge is missing but State is known
+            enderDest: {
+              xLgr: orderData.buyer.address?.street || 'Rua Desconhecida',
+              nro: orderData.buyer.address?.number || 'S/N',
+              xBairro: orderData.buyer.address?.neighborhood || 'Centro',
+              cMun: orderData.buyer.address?.city_ibge || this.getCapitalIbgeCode(this.getStateCode(orderData.buyer.address?.state || 'SP')),
+              xMun: orderData.buyer.address?.city || 'Cidade',
+              UF: this.getStateCode(orderData.buyer.address?.state || 'SP'),
+              CEP: (orderData.buyer.address?.zipCode || '00000000').replace(/\D/g, ''),
+              cPais: '1058',
+              xPais: 'BRASIL',
+              ...(orderData.buyer.phone ? { fone: orderData.buyer.phone.replace(/\D/g, '') } : {})
+            },
+            indIEDest: '9',
+          },
+          det: orderData.items.map((item: any, index: number) => ({
+            '@_nItem': index + 1,
+            prod: {
+              cProd: String(item.internalProduct?.id || item.seller_custom_field || item.sku || item.id),
+              cEAN: 'SEM GTIN',
+              xProd: (item.title || 'Produto sem título').substring(0, 120),
+              NCM: item.ncm || '87089990',
+              CFOP: '5102',
+              uCom: 'UN',
+              qCom: Number(item.quantity),
+              vUnCom: Number(item.unit_price).toFixed(2),
+              vProd: (Number(item.quantity) * Number(item.unit_price)).toFixed(2),
+              cEANTrib: 'SEM GTIN',
+              uTrib: 'UN',
+              qTrib: Number(item.quantity),
+              vUnTrib: Number(item.unit_price).toFixed(2),
+              indTot: '1',
+            },
+            imposto: {
+              ICMS: issuer.taxRegime === 'SIMPLES_NACIONAL' ? {
+                ICMSSN102: {
+                  orig: item.origin || '0',
+                  CSOSN: '102'
+                }
+              } : {
+                // Fix 591/508: Normal Regime (CRT=3)
+                // Use CST 41 (Não tributada) to avoid '508 - CST incompatível com não contribuinte'
+                // and avoid complex tax calculations (BC, Aliquota) of CST 00/90 for now.
+                ICMS40: {
+                  orig: item.origin || '0',
+                  CST: '41', // 41 = Não tributada
+                  // No BC/ICMS fields needed for 41
+                }
+              },
+              PIS: {
+                PISOutr: {
+                  CST: '99',
+                  vBC: '0.00',
+                  pPIS: '0.00',
+                  vPIS: '0.00'
+                }
+              },
+              COFINS: {
+                COFINSOutr: {
+                  CST: '99',
+                  vBC: '0.00',
+                  pCOFINS: '0.00',
+                  vCOFINS: '0.00'
+                }
+              }
+            }
+          })),
+          total: {
+            ICMSTot: {
+              vBC: '0.00',
+              vICMS: '0.00',
+              vICMSDeson: '0.00',
+              vFCP: '0.00',
+              vBCST: '0.00',
+              vST: '0.00',
+              vFCPST: '0.00',
+              vFCPSTRet: '0.00',
+              vProd: Number(orderData.totals?.amount || orderData.total_amount || 0).toFixed(2),
+              vFrete: Number(orderData.totals?.freight || 0).toFixed(2),
+              vSeg: '0.00',
+              vDesc: Number(orderData.totals?.discount || 0).toFixed(2),
+              vII: '0.00',
+              vIPI: '0.00',
+              vIPIDevol: '0.00',
+              vPIS: '0.00',
+              vCOFINS: '0.00',
+              vOutro: '0.00',
+              vNF: Number(orderData.totals?.amount || orderData.total_amount || 0).toFixed(2),
+            }
+          },
+          transp: {
+            modFrete: '9',
+          },
+          pag: {
+            detPag: {
+              tPag: this.getPaymentType(orderData.payment?.paymentType),
+              vPag: Number(orderData.totals?.amount || orderData.total_amount || 0).toFixed(2),
+              ...((orderData.payment?.paymentType === 'credit_card' || orderData.payment?.paymentType === 'debit_card') ? {
+                card: {
+                  tpIntegra: '1', // Integrado
+                  CNPJ: '03007331000141', // CNPJ da Credenciadora (Mercado Pago/ML)
+                  tBand: this.getTBand(orderData.payment?.paymentMethodId),
+                  cAut: (orderData.payment?.authorizationCode || '').substring(0, 20)
+                }
+              } : {})
+            }
+          },
+          // Fix 972/973: Resp Tecnico
+          infRespTec: {
+            CNPJ: issuer.cnpj.replace(/\D/g, ''), // Use Issuer CNPJ (Proprietary System)
+            xContato: 'Responsavel Tecnico',
+            email: 'suporte@rocket.com',
+            fone: '11999999999'
+          },
+          infAdic: {
+            infCpl: (
+              (issuer.taxRegime === 'SIMPLES_NACIONAL'
+                ? 'DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. NAO GERA DIREITO A CREDITO FISCAL DE IPI. '
+                : '') +
+              (orderData.additionalInfo || '')
+            ).trim()
+          }
+        }
+      }
+    };
+
+    // Access Key Calculation
+    let generatedKey = nfe.accessKey;
+
+    // Always regenerate Access Key to ensure synchronization with current tag values (cNF, dhEmi, cUF)
+    // especially when reusing NFe number where 'cNF' is random generated on every build.
+    generatedKey = this.generateAccessKey(
+      nfeData.NFe.infNFe.ide.cUF,
+      nfeData.NFe.infNFe.ide.dhEmi,
+      nfeData.NFe.infNFe.emit.CNPJ,
+      nfeData.NFe.infNFe.ide.mod,
+      nfeData.NFe.infNFe.ide.serie,
+      nfeData.NFe.infNFe.ide.nNF,
+      nfeData.NFe.infNFe.ide.tpEmis,
+      nfeData.NFe.infNFe.ide.cNF
+    );
+    // Update NFe entity so we save this key later
+    nfe.accessKey = generatedKey;
+
+    nfeData.NFe.infNFe['@_Id'] = `NFe${generatedKey}`;
+    nfeData.NFe.infNFe.ide.cDV = generatedKey.slice(-1);
+
+    return this.builder.build(nfeData);
+  }
+
+  private generateAccessKey(cUF: string, dhEmi: string, cnpj: string, mod: string, serie: string, nNF: string, tpEmis: string, cNF: string): string {
+    const year = dhEmi.substring(2, 4); // YY
+    const month = dhEmi.substring(5, 7); // MM
+
+    const keyBase = `${cUF}${year}${month}${cnpj}${mod}${serie.padStart(3, '0')}${nNF.padStart(9, '0')}${tpEmis}${cNF}`;
+    const cDV = this.calculateCheckDigit(keyBase);
+
+    return `${keyBase}${cDV}`;
+  }
+
+  private calculateCheckDigit(keyBase: string): string {
+    let weight = 2;
+    let sum = 0;
+
+    for (let i = keyBase.length - 1; i >= 0; i--) {
+      sum += parseInt(keyBase[i]) * weight;
+      weight++;
+      if (weight > 9) weight = 2;
+    }
+
+    const remainder = sum % 11;
+    const digit = remainder < 2 ? 0 : 11 - remainder;
+    return digit.toString();
+  }
+
+  private getStateCode(stateName: string): string {
+    if (!stateName) return 'SP'; // Default
+    if (stateName.length === 2) return stateName.toUpperCase();
+
+    const normalized = stateName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+    const states: { [key: string]: string } = {
+      'acre': 'AC', 'alagoas': 'AL', 'amapa': 'AP', 'amazonas': 'AM', 'bahia': 'BA', 'ceara': 'CE',
+      'distrito federal': 'DF', 'espirito santo': 'ES', 'goias': 'GO', 'maranhao': 'MA', 'mato grosso': 'MT',
+      'mato grosso do sul': 'MS', 'minas gerais': 'MG', 'para': 'PA', 'paraiba': 'PB', 'parana': 'PR',
+      'pernambuco': 'PE', 'piaui': 'PI', 'rio de janeiro': 'RJ', 'rio grande do norte': 'RN',
+      'rio grande do sul': 'RS', 'rondonia': 'RO', 'roraima': 'RR', 'santa catarina': 'SC',
+      'sao paulo': 'SP', 'sergipe': 'SE', 'tocantins': 'TO'
+    };
+
+    return states[normalized] || 'SP';
+  }
+
+  private getStateIbgeCode(uf: string): string {
+    const codes: { [key: string]: string } = {
+      'AC': '12', 'AL': '27', 'AP': '16', 'AM': '13', 'BA': '29', 'CE': '23',
+      'DF': '53', 'ES': '32', 'GO': '52', 'MA': '21', 'MT': '51', 'MS': '50',
+      'MG': '31', 'PA': '15', 'PB': '25', 'PR': '41', 'PE': '26', 'PI': '22',
+      'RJ': '33', 'RN': '24', 'RS': '43', 'RO': '11', 'RR': '14', 'SC': '42',
+      'SP': '35', 'SE': '28', 'TO': '17'
+    };
+    return codes[uf] || '35'; // Default SP
+  }
+
+  private getCapitalIbgeCode(uf: string): string {
+    // Map State to Capital City IBGE Code
+    const capitals: { [key: string]: string } = {
+      'AC': '1200401', 'AL': '2704302', 'AP': '1600303', 'AM': '1302603', 'BA': '2927408',
+      'CE': '2304400', 'DF': '5300108', 'ES': '3205309', 'GO': '5208707', 'MA': '2111300',
+      'MT': '5103403', 'MS': '5002704', 'MG': '3106200', 'PA': '1501402', 'PB': '2507507',
+      'PR': '4106902', 'PE': '2611606', 'PI': '2211001', 'RJ': '3304557', 'RN': '2408102',
+      'RS': '4314902', 'RO': '1100205', 'RR': '1400100', 'SC': '4205407', 'SP': '3550308',
+      'SE': '2800308', 'TO': '1721000'
+    };
+    return capitals[uf] || '3550308'; // Default SP - Sao Paulo
+  }
+
+  private getPaymentType(type: string): string {
+    const map: { [key: string]: string } = {
+      'credit_card': '03',
+      'debit_card': '04',
+      'ticket': '15',
+      'bank_transfer': '17', // PIX usually
+      'account_money': '99',
+    };
+    // Fallback: If type is missing, assume 99 (Outros) or check logic
+    return map[type] || '99';
+  }
+
+  private getTBand(methodId: string): string {
+    if (!methodId) return '99';
+
+    const normalized = methodId.toLowerCase();
+
+    // Flags Map
+    // 01=Visa, 02=Mastercard, 03=Amex, 04=Sorocred, 05=Diners, 06=Elo, 07=Hipercard
+    const map: { [key: string]: string } = {
+      'visa': '01',
+      'master': '02',
+      'mastercard': '02',
+      'amex': '03',
+      'american_express': '03',
+      'sorocred': '04',
+      'diners': '05',
+      'elo': '06',
+      'hipercard': '07',
+      'aura': '08',
+      'cabal': '09',
+      'alelo': '10',
+      'banescard': '11',
+      'calcard': '12',
+      'credz': '13',
+      'discover': '14',
+      'goodcard': '15',
+      'greencard': '16',
+      'hiper': '17',
+      'jcb': '18',
+      'mais': '19',
+      'maxvan': '20',
+      'policard': '21',
+      'redecompras': '22',
+      'sodexo': '23',
+      'valecard': '24',
+      'verocheque': '25',
+      'vr': '26',
+      'ticket': '27'
+    };
+
+    return map[normalized] || '99';
+  }
+}
+

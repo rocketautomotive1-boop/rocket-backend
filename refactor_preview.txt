@@ -1,0 +1,90 @@
+
+Original: Acessórios para Veículos > Aces. de Carros e Caminhonetes
+Suggested: Acessórios Internos > Acabamento Interno > Capas de Banco
+Synonyms: Capa para Banco, Forro de Assento, Proteção de Banco
+Usage: Utilizado para proteger ou customizar os bancos originais de carros e caminhonetes.
+Relevance: 95
+Attributes: Material, Cor, Compatibilidade Veicular, Número de Bancos
+Reason: A categoria original é muito genérica. 'Acessórios de Carros e Caminhonetes' é melhor mapeado para categorias mais específicas da Rocket, como 'Acessórios Internos' para itens que ficam dentro da cabine.
+----------------------------------------
+
+Original: Acessórios para Veículos > Acessórios Náuticos
+Suggested: Acessórios Náuticos
+Synonyms: Acessórios para Barcos, Equipamentos Náuticos, Peças para Embarcações
+Usage: Itens de conveniência, segurança ou manutenção aplicados diretamente em embarcações (lanchas, barcos, jet-skis).
+Relevance: 95
+Attributes: Aplicação (Barco/Jet-ski), Material, Cor, Marca do Motor (se aplicável)
+Reason: A categoria original ('Acessórios para Veículos > Acessórios Náuticos') é muito ampla e redundante. Como a Rocket foca em peças automotivas/veiculares especializadas, criar uma categoria de nível superior direta para 'Náutica' faz sentido para segregar este tipo de item.
+----------------------------------------
+
+Original: Acessórios para Veículos > Aces. de Motos e Quadriciclos
+Suggested: Acessórios para Motos e Quadriciclos
+Synonyms: Aces. de Motos e Quadriciclos, Acessórios para Motos, Acessórios para Quadriciclos
+Usage: Categoria destinada a todos os itens de customização, proteção e utilidade que não são peças de reposição mecânica para motocicletas e quadriciclos.
+Relevance: 95
+Attributes: Tipo de Veículo (Moto/Quadriciclo), Modelo da Moto, Ano do Veículo
+Reason: A categoria original é específica para Motos e Quadriciclos. Uma categoria de nível único é suficiente, pois a especialização ('Peças de Reposição' ou 'Som e Vídeo') será definida pelo produto específico dentro dela, seguindo a estrutura da loja 'Rocket Automotive'.
+----------------------------------------
+
+Original: Acessórios para Veículos > Acessórios de Linha Pesada
+Suggested: Peças de Reposição > Linha Pesada > Acessórios Diversos
+Synonyms: Acessórios para Linha Pesada, Acessórios Caminhões e Ônibus, Itens de Linha Pesada
+Usage: Categoria destinada a acessórios e peças de reposição específicas para veículos de grande porte (caminhões, ônibus, implementos agrícolas/rodoviários).
+Relevance: 95
+Attributes: Aplicação (Marca/Modelo), Tipo de Veículo (Caminhão, Ônibus, Implemento), Material, Dimensões
+Reason: A categoria original ('Acessórios para Veículos > Acessórios de Linha Pesada') é muito genérica. O termo 'Linha Pesada' é mantido como subcategoria direta sob 'Peças de Reposição' para agrupar itens específicos de caminhões e ônibus, separando-os dos veículos leves.
+----------------------------------------
+
+Original: Acessórios para Veículos > Instalações de pneus
+Suggested: Ferramentas > Equipamentos de Oficina > Instalação de Pneus e Rodas
+Synonyms: Instalação de Pneus, Acessórios para Pneus, Borracharia
+Usage: Categoriza ferramentas, equipamentos e acessórios específicos para montagem, desmontagem, balanceamento e reparo de pneus e rodas.
+Relevance: 95
+Attributes: Tipo de Equipamento, Compatibilidade de Roda/Pneu, Capacidade Máxima (toneladas/psi)
+Reason: A categoria 'Instalações de pneus' refere-se a equipamentos e ferramentas usados na oficina para manipular pneus, alinhando-se melhor com 'Ferramentas/Equipamentos de Oficina' do que com 'Acessórios Externos/Internos' ou 'Peças de Reposição'.
+----------------------------------------
+
+Original: Acessórios para Veículos > GNV
+Suggested: Peças de Reposição > Sistemas de Combustível > GNV/GPL
+Synonyms: Kits GNV, Componentes Gás Natural Veicular, Conversão GNV
+Usage: Componentes e kits completos para sistemas de Gás Natural Veicular (GNV) instalados em automóveis.
+Relevance: 98
+Attributes: Tipo de Kit (3ª/5ª Geração), Capacidade do Cilindro, Marca, Compatibilidade do Veículo
+Reason: GNV é um sistema de propulsão/combustível alternativo que se encaixa melhor em 'Peças de Reposição' > 'Sistemas de Combustível', em vez de ser apenas um 'Acessório'.
+----------------------------------------
+
+Original: Acessórios para Veículos > Ferramentas para Veículos
+Suggested: Ferramentas > Geral
+Synonyms: Ferramentas para Veículos, Ferramentas Automotivas, Kits de Ferramentas
+Usage: Produtos utilizados para manutenção, reparo ou diagnóstico de veículos, não classificados como peças de reposição.
+Relevance: 95
+Attributes: Tipo de Ferramenta, Uso Específico, Material
+Reason: A categoria original 'Ferramentas para Veículos' mapeia diretamente para a categoria 'Ferramentas' na estrutura Rocket, removendo a redundância inicial.
+----------------------------------------
+
+Original: Acessórios para Veículos > Lubrificantes e Fluidos
+Suggested: Peças de Reposição > Fluidos e Lubrificantes
+Synonyms: Lubrificantes, Óleos, Aditivos, Fluidos de Freio, Aditivos de Radiador
+Usage: Para produtos que servem para lubrificação, refrigeração, limpeza ou manutenção do sistema mecânico e operacional do veículo.
+Relevance: 98
+Attributes: Tipo de Fluido, Viscosidade (para óleos), Volume/Capacidade, Aplicação (Motor, Câmbio, Freio, Direção)
+Reason: A categoria original ('Lubrificantes e Fluidos') se encaixa perfeitamente dentro de 'Peças de Reposição', focando em fluidos funcionais essenciais.
+----------------------------------------
+
+Original: Acessórios para Veículos > Limpeza Automotiva
+Suggested: Acessórios Internos > Limpeza e Higienização
+Synonyms: Produtos de Limpeza Automotiva, Itens de Higiene Veicular, Shampoos e Ceras
+Usage: Produtos usados para a limpeza, polimento e manutenção estética interna e externa do veículo (ex: ceras, shampoos, pretinhos, panos de microfibra, aromatizantes).
+Relevance: 95
+Attributes: Tipo de Produto, Superfície de Aplicação, Composição, Volume/Peso
+Reason: A categoria original 'Limpeza Automotiva' se encaixa perfeitamente como uma subcategoria de 'Acessórios Internos' (embora a limpeza seja externa, o contexto de 'acessórios de cuidado' se alinha melhor aqui, separando de 'Peças de Reposição' ou 'Ferramentas').
+----------------------------------------
+
+Original: Acessórios para Veículos > Motos
+Suggested: Peças de Reposição > Motor e Transmissão > Componentes do Motor
+Synonyms: Peças para Motos, Componentes de Motor de Moto, Peças Motores
+Usage: Para todas as peças relacionadas diretamente ao funcionamento do motor de motocicletas (pistões, anéis, bielas, juntas, etc.).
+Relevance: 95
+Attributes: Marca da Moto, Modelo da Moto, Cilindrada, Ano de Aplicação
+Reason: A categoria original foca em 'Motos'. O foco é migrar para 'Peças de Reposição' e especializar no subsistema 'Motor' para motos.
+----------------------------------------

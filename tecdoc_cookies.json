@@ -1,0 +1,47 @@
+[
+  {
+    "name": "ppms_privacy_8a972a68-0675-4404-af9c-8a71883dbd13",
+    "value": "{%22visitorId%22:%22c7152bd5-c48a-4ddf-9736-e6cb59e28607%22%2C%22domain%22:{%22normalized%22:%22web.tecalliance.net%22%2C%22isWildcard%22:false%2C%22pattern%22:%22web.tecalliance.net%22}%2C%22consents%22:{%22analytics%22:{%22status%22:-1}}%2C%22staleCheckpoint%22:%222026-01-13T17:41:11.376Z%22}",
+    "domain": "web.tecalliance.net",
+    "path": "/",
+    "expires": 1799862071,
+    "size": 344,
+    "httpOnly": false,
+    "secure": false,
+    "session": false,
+    "sameSite": "Strict",
+    "priority": "Medium",
+    "sameParty": false,
+    "sourceScheme": "Secure"
+  },
+  {
+    "name": "_pk_ses.8a972a68-0675-4404-af9c-8a71883dbd13.c3bd",
+    "value": "*",
+    "domain": "web.tecalliance.net",
+    "path": "/tecdocbr",
+    "expires": 1768476056,
+    "size": 50,
+    "httpOnly": false,
+    "secure": false,
+    "session": false,
+    "sameSite": "Lax",
+    "priority": "Medium",
+    "sameParty": false,
+    "sourceScheme": "Secure"
+  },
+  {
+    "name": "_pk_id.8a972a68-0675-4404-af9c-8a71883dbd13.c3bd",
+    "value": "3553c102bda2be6b.1768474254.1.1768474254.1768474254.",
+    "domain": "web.tecalliance.net",
+    "path": "/tecdocbr",
+    "expires": 1768476056,
+    "size": 100,
+    "httpOnly": false,
+    "secure": false,
+    "session": false,
+    "sameSite": "Lax",
+    "priority": "Medium",
+    "sameParty": false,
+    "sourceScheme": "Secure"
+  }
+]

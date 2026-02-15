@@ -1,0 +1,85 @@
+
+
+=== Searching for: "class="ag-cell" ===
+
+--- MATCH #1 ---
+Press Space to toggle all rows selection (unchecked)">
+                </div>
+            </div>
+            <div ref="eHeaderCompWrapper" class="ag-header-cell-comp-wrapper" role="presentation"><div class="ag-cell-label-container" role="presentation">
+            
+            <div ref="eLabel" class="ag-header-cell-label" role="presentation">
+                <span ref="eText" class="ag-header-cell-text"></span>
+                <span ref="eFilter" class="ag-header-icon ag-header-label-icon ag-filter-icon ag-hidden" aria-hidden="true"><span class="ag-icon ag-icon-filter" unselectable="on" role="presentation"></span></span>
+                <!--AG-SORT-INDICATOR--><span class="ag-sort-indicator-container" ref="eSortIndicator">
+            <span ref="eSortOrder" class="ag-sort-indicator-icon ag-sort-order ag-hidden" aria-hidden="true"></span>
+            <span ref="eSortAsc" class="ag-sort-indicator-icon ag-sort-ascending-icon ag-hidden" aria-hidden="true"></span>
+            <span ref="eS
+--- MATCH #2 ---
+Press Space to toggle all rows selection (unchecked)">
+                </div>
+            </div>
+            <div ref="eHeaderCompWrapper" class="ag-header-cell-comp-wrapper" role="presentation"><div class="ag-cell-label-container ag-header-cell-sorted-asc" role="presentation">
+            
+            <div ref="eLabel" class="ag-header-cell-label" role="presentation">
+                <span ref="eText" class="ag-header-cell-text">Article number</span>
+                <span ref="eFilter" class="ag-header-icon ag-header-label-icon ag-filter-icon ag-hidden" aria-hidden="true"><span class="ag-icon ag-icon-filter" unselectable="on" role="presentation"></span></span>
+                <!--AG-SORT-INDICATOR--><span class="ag-sort-indicator-container" ref="eSortIndicator">
+            <span ref="eSortOrder" class="ag-sort-indicator-icon ag-sort-order ag-hidden" aria-hidden="true">1</span>
+            <span ref="eSortAsc" class="ag-sort-indicator-icon ag-sort-ascending-icon" aria-hidden="true"><s
+--- MATCH #3 ---
+Press Space to toggle all rows selection (unchecked)">
+                </div>
+            </div>
+            <div ref="eHeaderCompWrapper" class="ag-header-cell-comp-wrapper" role="presentation"><div class="ag-cell-label-container" role="presentation">
+            
+            <div ref="eLabel" class="ag-header-cell-label" role="presentation">
+                <span ref="eText" class="ag-header-cell-text">Description</span>
+                <span ref="eFilter" class="ag-header-icon ag-header-label-icon ag-filter-icon ag-hidden" aria-hidden="true"><span class="ag-icon ag-icon-filter" unselectable="on" role="presentation"></span></span>
+                <!--AG-SORT-INDICATOR--><span class="ag-sort-indicator-container" ref="eSortIndicator">
+            <span ref="eSortOrder" class="ag-sort-indicator-icon ag-sort-order ag-hidden" aria-hidden="true"></span>
+            <span ref="eSortAsc" class="ag-sort-indicator-icon ag-sort-ascending-icon ag-hidden" aria-hidden="true"></span>
+            <s
+--- MATCH #4 ---
+Press Space to toggle all rows selection (unchecked)">
+                </div>
+            </div>
+            <div ref="eHeaderCompWrapper" class="ag-header-cell-comp-wrapper" role="presentation"><div class="ag-cell-label-container" role="presentation">
+            
+            <div ref="eLabel" class="ag-header-cell-label" role="presentation">
+                <span ref="eText" class="ag-header-cell-text">Article status</span>
+                <span ref="eFilter" class="ag-header-icon ag-header-label-icon ag-filter-icon ag-hidden" aria-hidden="true"><span class="ag-icon ag-icon-filter" unselectable="on" role="presentation"></span></span>
+                <!--AG-SORT-INDICATOR--><span class="ag-sort-indicator-container" ref="eSortIndicator">
+            <span ref="eSortOrder" class="ag-sort-indicator-icon ag-sort-order ag-hidden" aria-hidden="true"></span>
+            <span ref="eSortAsc" class="ag-sort-indicator-icon ag-sort-ascending-icon ag-hidden" aria-hidden="true"></span>
+           
+--- MATCH #5 ---
+inline-editing ag-row ag-row-level-0 cursor-pointer ag-row-position-absolute ag-row-first" aria-rowindex="2" aria-label="Press SPACE to select this row." row-id="[4831]-[AC 25001]"><div comp-id="241" class="ag-cell-value ag-cell ag-cell-not-inline-editing ag-cell-normal-height" role="gridcell" col-id="articleComparison" tabindex="-1" aria-colindex="1" style="left: 0px; width: 30px;"><span><div class="ag-cell-content"><div class="p-checkbox p-widget"><input class="d-none" type="checkbox" data-article-id="178759831"><div class="p-checkbox-box p-widget p-corner-all p-state-default "><span class="p-checkbox-icon p-clickable "></span></div></div></div></span></div><div comp-id="242" class="ag-cell-value ag-cell-focus ag-cell ag-cell-not-inline-editing ag-cell-normal-height ag-cell-wrap-text" role="gridcell" col-id="articleNo" tabindex="-1" aria-colindex="4" style="left: 30px; width: 144px;"><span><div class="ag-cell-content"><div class="text-wrap text-primary"><a>AC 25001</a></div></div></s
+
+=== Searching for: "articleNo" ===
+
+--- MATCH #1 ---
+ip="" class="p-element ng-star-inserted" data-pc-section="menuitem"><a class="p-menuitem-link ng-star-inserted" target="undefined" href="/tecdocbr/en/parts/search?brands=4831&amp;sortDir=asc&amp;sort=articleNo#@brc/search:Search%20by%20brands%20and%20product%20groups;brands:4831;sortDir:asc;sort:articleNo" tabindex="0"><!----><span class="p-menuitem-text ng-star-inserted">Search by brands and product groups</span><!----><!----><!----><!----><!----><!----><!----></a><!----><!----></li><!----><!----><!----></ol></nav></p-breadcrumb></div><div class="flex-fill px-2 ng-star-inserted"><filter-chips _nghost-ng-c2271436919=""><div _ngcontent-ng-c2271436919="" class="chips-wrapper text-nowrap flex-grow-0 d-flex flex-wrap" maxlines="1"><a _ngcontent-ng-c2271436919="" class="filter-chip ng-star-inserted"><span _ngcontent-ng-c2271436919="">NAKATA (4016)</span><i _ngcontent-ng-c2271436919="" class="ta-icon-cancel ng-star-inserted"></i><!----></a><!----></div></filter-chips></div><!----><span class
+--- MATCH #2 ---
+star-inserted" target="undefined" href="/tecdocbr/en/parts/search?brands=4831&amp;sortDir=asc&amp;sort=articleNo#@brc/search:Search%20by%20brands%20and%20product%20groups;brands:4831;sortDir:asc;sort:articleNo" tabindex="0"><!----><span class="p-menuitem-text ng-star-inserted">Search by brands and product groups</span><!----><!----><!----><!----><!----><!----><!----></a><!----><!----></li><!----><!----><!----></ol></nav></p-breadcrumb></div><div class="flex-fill px-2 ng-star-inserted"><filter-chips _nghost-ng-c2271436919=""><div _ngcontent-ng-c2271436919="" class="chips-wrapper text-nowrap flex-grow-0 d-flex flex-wrap" maxlines="1"><a _ngcontent-ng-c2271436919="" class="filter-chip ng-star-inserted"><span _ngcontent-ng-c2271436919="">NAKATA (4016)</span><i _ngcontent-ng-c2271436919="" class="ta-icon-cancel ng-star-inserted"></i><!----></a><!----></div></filter-chips></div><!----><span class="toolbar-filter-box d-flex flex-nowrap align-items-center pr-3 ng-star-inserted"><reset-filters-
+--- MATCH #3 ---
+>
+        </span>
+            </div>
+        </div></div>
+        </div><div class="ag-header-cell ag-header-cell-sortable ag-focus-managed ag-header-active" role="columnheader" tabindex="-1" col-id="articleNo" aria-sort="ascending" aria-description="Press ENTER to sort." aria-colindex="4" style="width: 144px; top: 0px; height: 32px; left: 30px;">
+            <div ref="eResize" class="ag-header-cell-resize ag-hidden" role="presentation" aria-hidden="true"></div><div role="presentation" class="ag-labeled ag-label-align-right ag-checkbox ag-input-field ag-header-select-all ag-hidden" aria-hidden="true">
+                <div ref="eLabel" class="ag-input-field-label ag-label ag-hidden ag-checkbox-label" aria-hidden="true" role="presentation"></div>
+                <div ref="eWrapper" class="ag-wrapper ag-input-wrapper ag-checkbox-input-wrapper" role="presentation">
+                    <input ref="eInput" class="ag-input-field-input ag-checkbox-input" type="checkbox" id="ag-32-input" tabind
+--- MATCH #4 ---
+kable "></span></div></div></div></span></div><div comp-id="242" class="ag-cell-value ag-cell-focus ag-cell ag-cell-not-inline-editing ag-cell-normal-height ag-cell-wrap-text" role="gridcell" col-id="articleNo" tabindex="-1" aria-colindex="4" style="left: 30px; width: 144px;"><span><div class="ag-cell-content"><div class="text-wrap text-primary"><a>AC 25001</a></div></div></span></div><div comp-id="243" class="ag-cell-value ag-cell ag-cell-not-inline-editing ag-cell-normal-height" role="gridcell" col-id="image" tabindex="-1" aria-colindex="5" style="left: 174px; width: 120px;"><span><div class="ag-cell-content"><div class="d-flex justify-content-center align-items-center" style="height: 124px"><img alt="" class="image-center" src="https://digital-assets.tecalliance.services/images/100/04d7887609725c57336147ac6aeb62f006acebd1.jpg?ver=3.126.0.ab7fac8e41" onerror="this.onerror = null;this.src = 'assets/images/no-image-available.jpg'" title="Shock Absorber"></div></div></span></div><div co
+--- MATCH #5 ---
+ox-icon p-clickable "></span></div></div></div></span></div><div comp-id="249" class="ag-cell-value ag-cell ag-cell-not-inline-editing ag-cell-normal-height ag-cell-wrap-text" role="gridcell" col-id="articleNo" tabindex="-1" aria-colindex="4" style="left: 30px; width: 144px;"><span><div class="ag-cell-content"><div class="text-wrap text-primary"><a>AC 25003</a></div></div></span></div><div comp-id="250" class="ag-cell-value ag-cell ag-cell-not-inline-editing ag-cell-normal-height" role="gridcell" col-id="image" tabindex="-1" aria-colindex="5" style="left: 174px; width: 120px;"><span><div class="ag-cell-content"><div class="d-flex justify-content-center align-items-center" style="height: 124px"><img alt="" class="image-center" src="https://digital-assets.tecalliance.services/images/100/49191302771aa49b91a65cee555fec7b5ba31f3a.jpg?ver=3.126.0.ab7fac8e41" onerror="this.onerror = null;this.src = 'assets/images/no-image-available.jpg'" title="Shock Absorber"></div></div></span></div><div co
+
+=== Searching for: "page-part-detail" ===
+No matches found.
+
+
+=== Searching for: "part-detail-v2" ===
+No matches found.

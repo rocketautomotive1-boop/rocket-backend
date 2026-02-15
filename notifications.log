@@ -1,0 +1,582 @@
+[2025-12-26T20:08:31.675Z] Registering token for user 0: ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]
+[2025-12-26T20:08:31.677Z] Missing userId or token
+[2025-12-26T20:24:48.122Z] Registering token for user 0: ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]
+[2025-12-26T20:24:48.123Z] Missing userId or token
+[2025-12-26T20:26:51.016Z] Registering token for user 0: ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]
+[2025-12-26T20:26:51.017Z] Missing userId or token
+[2025-12-26T20:29:43.393Z] Registering token for user 0: ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]
+[2025-12-26T20:29:43.395Z] Missing userId or token
+[2025-12-26T20:33:28.367Z] Registering token for user 0: ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]
+[2025-12-26T20:33:28.368Z] Missing userId or token
+[2025-12-26T20:34:53.296Z] Registering token for user 1: ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]
+[2025-12-26T20:34:54.052Z] Token saved for user 1
+[2025-12-26T20:35:17.581Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-26T20:35:17.940Z] Push sent successfully
+[2025-12-26T20:36:59.747Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-26T20:37:00.145Z] Push sent successfully
+[2025-12-26T21:04:29.704Z] Registering token for user 1: ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]
+[2025-12-26T21:04:29.840Z] Token already exists for user 1
+[2025-12-26T21:04:35.988Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-26T21:04:36.368Z] Push sent successfully
+[2025-12-26T21:14:59.915Z] Registering token for user 1: ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]
+[2025-12-26T21:15:00.034Z] Token already exists for user 1
+[2025-12-26T21:15:07.633Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-26T21:15:08.004Z] Push sent successfully
+[2025-12-26T21:16:12.021Z] Registering token for user 1: ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]
+[2025-12-26T21:16:12.137Z] Token already exists for user 1
+[2025-12-26T21:19:30.352Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-26T21:19:30.688Z] Push sent successfully
+[2025-12-26T21:19:50.985Z] Registering token for user 1: ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]
+[2025-12-26T21:19:51.104Z] Token already exists for user 1
+[2025-12-26T21:20:02.155Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-26T21:20:02.543Z] Push sent successfully
+[2025-12-26T21:23:32.925Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-26T21:23:33.502Z] Push sent successfully
+[2025-12-26T21:23:55.787Z] Registering token for user 1: ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]
+[2025-12-26T21:23:55.911Z] Token already exists for user 1
+[2025-12-26T21:30:09.432Z] Registering token for user 1: ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]
+[2025-12-26T21:30:09.567Z] Token already exists for user 1
+[2025-12-26T21:30:15.464Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-26T21:30:15.906Z] Push sent successfully
+[2025-12-26T21:30:49.969Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-26T21:30:50.311Z] Push sent successfully
+[2025-12-26T21:35:48.130Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-26T21:35:48.948Z] Token saved for user 1
+[2025-12-26T21:35:59.221Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-26T21:35:59.589Z] Push sent successfully
+[2025-12-26T21:35:59.589Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-26T21:35:59.799Z] Push sent successfully
+[2025-12-26T21:38:10.012Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-26T21:38:10.135Z] Token already exists for user 1
+[2025-12-26T21:38:14.720Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-26T21:38:15.054Z] Push sent successfully
+[2025-12-26T21:38:15.055Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-26T21:38:15.274Z] Push sent successfully
+[2025-12-27T10:06:44.591Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-27T10:06:45.057Z] Push sent successfully
+[2025-12-27T10:06:45.057Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-27T10:06:45.266Z] Push sent successfully
+[2025-12-27T10:14:53.126Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-27T10:14:53.240Z] Token already exists for user 1
+[2025-12-27T10:17:44.614Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-27T10:17:44.737Z] Token already exists for user 1
+[2025-12-27T10:17:46.236Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-27T10:17:46.362Z] Token already exists for user 1
+[2025-12-27T10:18:30.415Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-27T10:18:30.546Z] Token already exists for user 1
+[2025-12-27T10:19:16.914Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-27T10:19:17.036Z] Token already exists for user 1
+[2025-12-27T10:19:20.172Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-27T10:19:20.284Z] Token already exists for user 1
+[2025-12-27T10:20:07.155Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-27T10:20:07.577Z] Push sent successfully
+[2025-12-27T10:20:07.578Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-27T10:20:07.817Z] Push sent successfully
+[2025-12-27T10:20:34.227Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-27T10:20:34.556Z] Push sent successfully
+[2025-12-27T10:20:34.557Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-27T10:20:34.767Z] Push sent successfully
+[2025-12-27T10:20:35.894Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-27T10:20:36.108Z] Push sent successfully
+[2025-12-27T10:20:36.110Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-27T10:20:36.320Z] Push sent successfully
+[2025-12-27T10:21:33.510Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-27T10:21:33.626Z] Token already exists for user 1
+[2025-12-27T10:21:49.305Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-27T10:21:49.420Z] Token already exists for user 1
+[2025-12-27T10:22:43.971Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-27T10:22:44.094Z] Token already exists for user 1
+[2025-12-27T10:32:26.808Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-27T10:32:26.924Z] Token already exists for user 1
+[2025-12-27T10:32:34.125Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-27T10:32:34.489Z] Push sent successfully
+[2025-12-27T10:32:34.490Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-27T10:32:34.693Z] Push sent successfully
+[2025-12-27T10:37:46.809Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-27T10:37:46.970Z] Token already exists for user 1
+[2025-12-27T10:39:10.701Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-27T10:39:11.099Z] Push sent successfully
+[2025-12-27T10:39:11.100Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-27T10:39:11.320Z] Push sent successfully
+[2025-12-27T10:45:34.212Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-27T10:45:34.335Z] Token already exists for user 1
+[2025-12-27T10:52:13.775Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-27T10:52:13.892Z] Token already exists for user 1
+[2025-12-27T11:00:53.703Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-27T11:00:54.200Z] Push sent successfully
+[2025-12-27T11:00:54.201Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-27T11:00:54.409Z] Push sent successfully
+[2025-12-27T11:03:17.414Z] Registering token for user 1: ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]
+[2025-12-27T11:03:17.530Z] Token already exists for user 1
+[2025-12-27T11:03:23.695Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-27T11:03:24.014Z] Push sent successfully
+[2025-12-27T11:03:24.040Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-27T11:03:24.229Z] Push sent successfully
+[2025-12-27T11:13:43.152Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-27T11:13:43.877Z] Token saved for user 1
+[2025-12-27T11:14:06.706Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Pergunta no Mercado Livre
+[2025-12-27T11:14:07.028Z] Push sent successfully
+[2025-12-27T11:14:07.029Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-27T11:14:07.224Z] Push sent successfully
+[2025-12-27T11:14:07.225Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-27T11:14:07.415Z] Push sent successfully
+[2025-12-27T12:11:29.640Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-27T12:11:29.759Z] Token already exists for user 1
+[2025-12-27T12:11:51.934Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-27T12:11:52.047Z] Token already exists for user 1
+[2025-12-27T13:35:57.123Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-27T13:35:57.255Z] Token already exists for user 1
+[2025-12-27T16:43:26.545Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-27T16:43:26.664Z] Token already exists for user 1
+[2025-12-27T16:46:07.275Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-27T16:46:07.393Z] Token already exists for user 1
+[2025-12-27T16:46:33.966Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-27T16:46:34.079Z] Token already exists for user 1
+[2025-12-27T16:53:58.128Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-27T16:53:58.252Z] Token already exists for user 1
+[2025-12-27T16:58:53.487Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-27T16:58:53.603Z] Token already exists for user 1
+[2025-12-27T17:02:33.444Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-27T17:02:33.559Z] Token already exists for user 1
+[2025-12-27T17:08:54.342Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-27T17:08:54.474Z] Token already exists for user 1
+[2025-12-27T17:32:39.403Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-27T17:32:39.520Z] Token already exists for user 1
+[2025-12-27T17:53:21.117Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-27T17:53:21.492Z] Push sent successfully
+[2025-12-27T17:53:21.493Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-27T17:53:21.695Z] Push sent successfully
+[2025-12-27T17:53:21.695Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-27T17:53:21.887Z] Push sent successfully
+[2025-12-27T17:53:22.085Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-27T17:53:22.290Z] Push sent successfully
+[2025-12-27T17:53:22.291Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-27T17:53:22.480Z] Push sent successfully
+[2025-12-27T17:53:22.481Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-27T17:53:22.675Z] Push sent successfully
+[2025-12-27T18:31:38.879Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-27T18:31:39.011Z] Token already exists for user 1
+[2025-12-27T18:34:46.558Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-27T18:34:46.672Z] Token already exists for user 1
+[2025-12-28T01:41:58.315Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T01:41:58.438Z] Token already exists for user 1
+[2025-12-28T01:47:59.907Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-28T01:48:00.272Z] Push sent successfully
+[2025-12-28T01:48:00.272Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-28T01:48:00.598Z] Push sent successfully
+[2025-12-28T01:48:00.598Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-28T01:48:00.816Z] Push sent successfully
+[2025-12-28T01:48:39.124Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-28T01:48:39.520Z] Push sent successfully
+[2025-12-28T01:48:39.521Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-28T01:48:39.793Z] Push sent successfully
+[2025-12-28T01:48:39.794Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-28T01:48:40.080Z] Push sent successfully
+[2025-12-28T01:50:17.153Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-28T01:50:17.525Z] Push sent successfully
+[2025-12-28T01:50:17.526Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-28T01:50:17.717Z] Push sent successfully
+[2025-12-28T01:50:17.718Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-28T01:50:17.913Z] Push sent successfully
+[2025-12-28T01:53:20.740Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T01:53:20.862Z] Token already exists for user 1
+[2025-12-28T02:08:22.132Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T02:08:22.264Z] Token already exists for user 1
+[2025-12-28T02:10:26.082Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T02:10:26.211Z] Token already exists for user 1
+[2025-12-28T02:47:51.215Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T02:47:51.417Z] Token already exists for user 1
+[2025-12-28T02:54:27.327Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T02:54:27.456Z] Token already exists for user 1
+[2025-12-28T02:54:59.659Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T02:54:59.777Z] Token already exists for user 1
+[2025-12-28T03:15:12.259Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T03:15:12.380Z] Token already exists for user 1
+[2025-12-28T03:17:18.815Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T03:17:18.949Z] Token already exists for user 1
+[2025-12-28T03:21:12.368Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T03:21:12.855Z] Token already exists for user 1
+[2025-12-28T03:29:24.900Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T03:29:25.027Z] Token already exists for user 1
+[2025-12-28T03:35:59.992Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T03:36:00.029Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T03:36:00.122Z] Token already exists for user 1
+[2025-12-28T03:36:00.505Z] Token already exists for user 1
+[2025-12-28T03:38:52.467Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T03:38:52.615Z] Token already exists for user 1
+[2025-12-28T03:40:41.654Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T03:40:41.658Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T03:40:41.772Z] Token already exists for user 1
+[2025-12-28T03:40:41.780Z] Token already exists for user 1
+[2025-12-28T03:41:21.844Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T03:41:22.222Z] Token already exists for user 1
+[2025-12-28T03:46:47.154Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T03:46:47.279Z] Token already exists for user 1
+[2025-12-28T04:20:17.229Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T04:20:17.362Z] Token already exists for user 1
+[2025-12-28T04:23:07.214Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T04:23:07.335Z] Token already exists for user 1
+[2025-12-28T04:28:42.138Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T04:28:42.268Z] Token already exists for user 1
+[2025-12-28T04:30:16.041Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T04:30:16.168Z] Token already exists for user 1
+[2025-12-28T11:58:57.235Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T11:58:57.359Z] Token already exists for user 1
+[2025-12-28T13:50:12.279Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-28T13:50:12.409Z] Token already exists for user 1
+[2025-12-28T14:05:30.110Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Pergunta no Mercado Livre
+[2025-12-28T14:05:30.503Z] Push sent successfully
+[2025-12-28T14:05:30.504Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-28T14:05:30.737Z] Push sent successfully
+[2025-12-28T14:05:30.738Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-28T14:05:31.131Z] Push sent successfully
+[2025-12-28T14:08:11.845Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Pergunta no Mercado Livre
+[2025-12-28T14:08:12.552Z] Push sent successfully
+[2025-12-28T14:08:12.553Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-28T14:08:12.762Z] Push sent successfully
+[2025-12-28T14:08:12.763Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-28T14:08:12.965Z] Push sent successfully
+[2025-12-28T16:09:04.605Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-28T16:09:04.954Z] Push sent successfully
+[2025-12-28T16:09:04.955Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-28T16:09:05.186Z] Push sent successfully
+[2025-12-28T16:09:05.187Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-28T16:09:05.404Z] Push sent successfully
+[2025-12-28T16:09:05.487Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-28T16:09:05.704Z] Push sent successfully
+[2025-12-28T16:09:05.705Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-28T16:09:05.914Z] Push sent successfully
+[2025-12-28T16:09:05.915Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-28T16:09:06.117Z] Push sent successfully
+[2025-12-28T23:23:34.575Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Pergunta no Mercado Livre
+[2025-12-28T23:23:35.101Z] Push sent successfully
+[2025-12-28T23:23:35.102Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-28T23:23:35.316Z] Push sent successfully
+[2025-12-28T23:23:35.317Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-28T23:23:35.536Z] Push sent successfully
+[2025-12-29T04:30:28.263Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-29T04:30:29.081Z] Token already exists for user 1
+[2025-12-29T04:54:32.786Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-29T04:54:32.965Z] Token already exists for user 1
+[2025-12-29T04:59:06.461Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-29T04:59:06.522Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-29T04:59:06.592Z] Token already exists for user 1
+[2025-12-29T04:59:06.642Z] Token already exists for user 1
+[2025-12-29T10:14:32.661Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-29T10:14:32.800Z] Token already exists for user 1
+[2025-12-29T10:21:38.930Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T10:21:39.323Z] Push sent successfully
+[2025-12-29T10:21:39.324Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T10:21:39.536Z] Push sent successfully
+[2025-12-29T10:21:39.536Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T10:21:39.735Z] Push sent successfully
+[2025-12-29T10:21:39.945Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T10:21:40.143Z] Push sent successfully
+[2025-12-29T10:21:40.144Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T10:21:40.341Z] Push sent successfully
+[2025-12-29T10:21:40.341Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T10:21:40.528Z] Push sent successfully
+[2025-12-29T10:21:44.685Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T10:21:44.890Z] Push sent successfully
+[2025-12-29T10:21:44.891Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T10:21:45.086Z] Push sent successfully
+[2025-12-29T10:21:45.087Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T10:21:45.289Z] Push sent successfully
+[2025-12-29T10:23:24.020Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T10:23:24.391Z] Push sent successfully
+[2025-12-29T10:23:24.393Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T10:23:24.598Z] Push sent successfully
+[2025-12-29T10:23:24.599Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T10:23:24.795Z] Push sent successfully
+[2025-12-29T10:26:31.554Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-29T10:26:31.666Z] Token already exists for user 1
+[2025-12-29T10:31:35.601Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-29T10:31:35.790Z] Token already exists for user 1
+[2025-12-29T15:35:28.048Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T15:35:28.535Z] Push sent successfully
+[2025-12-29T15:35:28.535Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T15:35:28.739Z] Push sent successfully
+[2025-12-29T15:35:28.740Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T15:35:28.798Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T15:35:28.960Z] Push sent successfully
+[2025-12-29T15:35:29.127Z] Push sent successfully
+[2025-12-29T15:35:29.128Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T15:35:29.452Z] Push sent successfully
+[2025-12-29T15:35:29.454Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T15:35:29.665Z] Push sent successfully
+[2025-12-29T16:07:23.351Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Pergunta no Mercado Livre
+[2025-12-29T16:07:23.774Z] Push sent successfully
+[2025-12-29T16:07:23.775Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-29T16:07:23.968Z] Push sent successfully
+[2025-12-29T16:07:23.968Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-29T16:07:24.158Z] Push sent successfully
+[2025-12-29T16:17:27.831Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T16:17:28.259Z] Push sent successfully
+[2025-12-29T16:17:28.260Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T16:17:28.498Z] Push sent successfully
+[2025-12-29T16:17:28.499Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T16:17:28.773Z] Push sent successfully
+[2025-12-29T16:17:30.261Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T16:17:30.479Z] Push sent successfully
+[2025-12-29T16:17:30.480Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T16:17:30.681Z] Push sent successfully
+[2025-12-29T16:17:30.682Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T16:17:30.888Z] Push sent successfully
+[2025-12-29T16:26:36.327Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-29T16:26:36.445Z] Token already exists for user 1
+[2025-12-29T16:28:25.682Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T16:28:26.043Z] Push sent successfully
+[2025-12-29T16:28:26.044Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T16:28:26.262Z] Push sent successfully
+[2025-12-29T16:28:26.264Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T16:28:26.470Z] Push sent successfully
+[2025-12-29T16:28:44.978Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T16:28:45.307Z] Push sent successfully
+[2025-12-29T16:28:45.309Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T16:28:45.496Z] Push sent successfully
+[2025-12-29T16:28:45.497Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T16:28:45.687Z] Push sent successfully
+[2025-12-29T16:28:46.412Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T16:28:46.598Z] Push sent successfully
+[2025-12-29T16:28:46.599Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T16:28:46.787Z] Push sent successfully
+[2025-12-29T16:28:46.788Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T16:28:46.978Z] Push sent successfully
+[2025-12-29T16:30:04.850Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T16:30:05.174Z] Push sent successfully
+[2025-12-29T16:30:05.175Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T16:30:05.370Z] Push sent successfully
+[2025-12-29T16:30:05.371Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T16:30:05.589Z] Push sent successfully
+[2025-12-29T16:31:13.107Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T16:31:13.444Z] Push sent successfully
+[2025-12-29T16:31:13.445Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T16:31:13.636Z] Push sent successfully
+[2025-12-29T16:31:13.638Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T16:31:13.839Z] Push sent successfully
+[2025-12-29T17:00:53.320Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-29T17:00:53.442Z] Token already exists for user 1
+[2025-12-29T17:17:39.745Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-29T17:17:39.869Z] Token already exists for user 1
+[2025-12-29T17:20:51.887Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-29T17:20:52.013Z] Token already exists for user 1
+[2025-12-29T17:30:58.308Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-29T17:30:58.422Z] Token already exists for user 1
+[2025-12-29T17:35:47.511Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-29T17:35:47.637Z] Token already exists for user 1
+[2025-12-29T17:48:56.602Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Pergunta no Mercado Livre
+[2025-12-29T17:48:56.949Z] Push sent successfully
+[2025-12-29T17:48:56.950Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-29T17:48:57.142Z] Push sent successfully
+[2025-12-29T17:48:57.143Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-29T17:48:57.338Z] Push sent successfully
+[2025-12-29T17:50:28.619Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Pergunta no Mercado Livre
+[2025-12-29T17:50:28.955Z] Push sent successfully
+[2025-12-29T17:50:28.955Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-29T17:50:29.149Z] Push sent successfully
+[2025-12-29T17:50:29.150Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-29T17:50:29.346Z] Push sent successfully
+[2025-12-29T18:19:04.663Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T18:19:05.067Z] Push sent successfully
+[2025-12-29T18:19:05.068Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T18:19:05.256Z] Push sent successfully
+[2025-12-29T18:19:05.258Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T18:19:05.462Z] Push sent successfully
+[2025-12-29T18:19:10.741Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T18:19:11.072Z] Push sent successfully
+[2025-12-29T18:19:11.072Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T18:19:11.264Z] Push sent successfully
+[2025-12-29T18:19:11.265Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T18:19:11.453Z] Push sent successfully
+[2025-12-29T18:41:24.517Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Pergunta no Mercado Livre
+[2025-12-29T18:41:24.945Z] Push sent successfully
+[2025-12-29T18:41:24.945Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-29T18:41:25.133Z] Push sent successfully
+[2025-12-29T18:41:25.134Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-29T18:41:25.323Z] Push sent successfully
+[2025-12-29T23:58:06.241Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T23:58:06.706Z] Push sent successfully
+[2025-12-29T23:58:06.706Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T23:58:06.939Z] Push sent successfully
+[2025-12-29T23:58:06.940Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T23:58:07.138Z] Push sent successfully
+[2025-12-29T23:59:35.094Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-29T23:59:35.422Z] Push sent successfully
+[2025-12-29T23:59:35.423Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-29T23:59:35.615Z] Push sent successfully
+[2025-12-29T23:59:35.616Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-29T23:59:35.804Z] Push sent successfully
+[2025-12-30T03:27:31.271Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T03:27:31.665Z] Push sent successfully
+[2025-12-30T03:27:31.666Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T03:27:31.859Z] Push sent successfully
+[2025-12-30T03:27:31.860Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T03:27:32.057Z] Push sent successfully
+[2025-12-30T03:27:34.120Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T03:27:34.309Z] Push sent successfully
+[2025-12-30T03:27:34.310Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T03:27:34.504Z] Push sent successfully
+[2025-12-30T03:27:34.505Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T03:27:34.696Z] Push sent successfully
+[2025-12-30T03:28:20.549Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T03:28:20.862Z] Push sent successfully
+[2025-12-30T03:28:20.864Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T03:28:21.047Z] Push sent successfully
+[2025-12-30T03:28:21.048Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T03:28:21.236Z] Push sent successfully
+[2025-12-30T10:19:17.187Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-30T10:19:17.314Z] Token already exists for user 1
+[2025-12-30T10:20:50.290Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-30T10:20:50.425Z] Token already exists for user 1
+[2025-12-30T10:23:40.587Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-30T10:23:40.722Z] Token already exists for user 1
+[2025-12-30T12:51:42.837Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-30T12:51:42.967Z] Token already exists for user 1
+[2025-12-30T13:30:17.026Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T13:30:17.384Z] Push sent successfully
+[2025-12-30T13:30:17.385Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T13:30:17.590Z] Push sent successfully
+[2025-12-30T13:30:17.591Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T13:30:17.796Z] Push sent successfully
+[2025-12-30T13:30:17.934Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T13:30:18.123Z] Push sent successfully
+[2025-12-30T13:30:18.124Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T13:30:18.313Z] Push sent successfully
+[2025-12-30T13:30:18.314Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T13:30:18.504Z] Push sent successfully
+[2025-12-30T13:31:48.571Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T13:31:48.897Z] Push sent successfully
+[2025-12-30T13:31:48.898Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T13:31:49.084Z] Push sent successfully
+[2025-12-30T13:31:49.085Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T13:31:49.285Z] Push sent successfully
+[2025-12-30T14:36:25.606Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T14:36:26.053Z] Push sent successfully
+[2025-12-30T14:36:26.058Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T14:36:26.301Z] Push sent successfully
+[2025-12-30T14:36:26.302Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T14:36:26.488Z] Push sent successfully
+[2025-12-30T14:36:26.931Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T14:36:27.123Z] Push sent successfully
+[2025-12-30T14:36:27.123Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T14:36:27.319Z] Push sent successfully
+[2025-12-30T14:36:27.320Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T14:36:27.509Z] Push sent successfully
+[2025-12-30T14:36:33.203Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T14:36:33.529Z] Push sent successfully
+[2025-12-30T14:36:33.530Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T14:36:33.723Z] Push sent successfully
+[2025-12-30T14:36:33.724Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T14:36:33.922Z] Push sent successfully
+[2025-12-30T14:38:01.520Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T14:38:01.846Z] Push sent successfully
+[2025-12-30T14:38:01.847Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T14:38:02.037Z] Push sent successfully
+[2025-12-30T14:38:02.038Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T14:38:02.229Z] Push sent successfully
+[2025-12-30T15:33:31.423Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T15:33:31.826Z] Push sent successfully
+[2025-12-30T15:33:31.827Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T15:33:32.012Z] Push sent successfully
+[2025-12-30T15:33:32.013Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T15:33:32.200Z] Push sent successfully
+[2025-12-30T15:33:32.631Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T15:33:32.820Z] Push sent successfully
+[2025-12-30T15:33:32.821Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T15:33:33.010Z] Push sent successfully
+[2025-12-30T15:33:33.012Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T15:33:33.198Z] Push sent successfully
+[2025-12-30T16:19:55.908Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T16:19:56.303Z] Push sent successfully
+[2025-12-30T16:19:56.304Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T16:19:56.499Z] Push sent successfully
+[2025-12-30T16:19:56.500Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T16:19:56.700Z] Push sent successfully
+[2025-12-30T16:20:18.421Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T16:20:18.760Z] Push sent successfully
+[2025-12-30T16:20:18.761Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T16:20:18.957Z] Push sent successfully
+[2025-12-30T16:20:18.958Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T16:20:19.157Z] Push sent successfully
+[2025-12-30T16:25:44.267Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T16:25:44.633Z] Push sent successfully
+[2025-12-30T16:25:44.634Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T16:25:44.824Z] Push sent successfully
+[2025-12-30T16:25:44.825Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T16:25:45.010Z] Push sent successfully
+[2025-12-30T16:26:58.792Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T16:26:59.117Z] Push sent successfully
+[2025-12-30T16:26:59.118Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T16:26:59.330Z] Push sent successfully
+[2025-12-30T16:26:59.331Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T16:26:59.529Z] Push sent successfully
+[2025-12-30T16:48:55.110Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T16:48:55.488Z] Push sent successfully
+[2025-12-30T16:48:55.490Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T16:48:55.687Z] Push sent successfully
+[2025-12-30T16:48:55.689Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T16:48:55.881Z] Push sent successfully
+[2025-12-30T16:49:44.872Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T16:49:45.272Z] Push sent successfully
+[2025-12-30T16:49:45.273Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T16:49:45.459Z] Push sent successfully
+[2025-12-30T16:49:45.460Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T16:49:45.646Z] Push sent successfully
+[2025-12-30T16:50:42.159Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T16:50:42.489Z] Push sent successfully
+[2025-12-30T16:50:42.491Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T16:50:42.681Z] Push sent successfully
+[2025-12-30T16:50:42.682Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T16:50:42.873Z] Push sent successfully
+[2025-12-30T17:55:42.828Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Pergunta no Mercado Livre
+[2025-12-30T17:55:43.218Z] Push sent successfully
+[2025-12-30T17:55:43.219Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-30T17:55:43.407Z] Push sent successfully
+[2025-12-30T17:55:43.408Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-30T17:55:43.593Z] Push sent successfully
+[2025-12-30T18:14:34.316Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Pergunta no Mercado Livre
+[2025-12-30T18:14:34.686Z] Push sent successfully
+[2025-12-30T18:14:34.687Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Pergunta no Mercado Livre
+[2025-12-30T18:14:34.882Z] Push sent successfully
+[2025-12-30T18:14:34.883Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Pergunta no Mercado Livre
+[2025-12-30T18:14:35.084Z] Push sent successfully
+[2025-12-30T19:15:16.642Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-30T19:15:16.766Z] Token already exists for user 1
+[2025-12-30T20:49:16.180Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T20:49:16.677Z] Push sent successfully
+[2025-12-30T20:49:16.678Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T20:49:16.812Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-30T20:49:16.869Z] Push sent successfully
+[2025-12-30T20:49:16.869Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T20:49:17.063Z] Push sent successfully
+[2025-12-30T20:49:17.143Z] Push sent successfully
+[2025-12-30T20:49:17.144Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-30T20:49:17.341Z] Push sent successfully
+[2025-12-30T20:49:17.343Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-30T20:49:17.535Z] Push sent successfully
+[2025-12-30T23:58:25.912Z] Registering token for user 1: ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]
+[2025-12-30T23:58:26.090Z] Token already exists for user 1
+[2025-12-31T06:20:44.592Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-31T06:20:45.099Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-31T06:20:45.226Z] Push sent successfully
+[2025-12-31T06:20:45.227Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-31T06:20:45.423Z] Push sent successfully
+[2025-12-31T06:20:45.424Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-31T06:20:45.465Z] Push sent successfully
+[2025-12-31T06:20:45.466Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-31T06:20:45.624Z] Push sent successfully
+[2025-12-31T06:20:45.679Z] Push sent successfully
+[2025-12-31T06:20:45.680Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-31T06:20:45.878Z] Push sent successfully
+[2025-12-31T06:20:48.290Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-31T06:20:48.503Z] Push sent successfully
+[2025-12-31T06:20:48.503Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-31T06:20:48.696Z] Push sent successfully
+[2025-12-31T06:20:48.697Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-31T06:20:48.897Z] Push sent successfully
+[2025-12-31T06:22:18.599Z] Sending push to ExponentPushToken[C6e4crLrHGF0nul5qzZbGS]: Nova Venda no Mercado Livre!
+[2025-12-31T06:22:18.943Z] Push sent successfully
+[2025-12-31T06:22:18.944Z] Sending push to ExponentPushToken[m1Kx0dPj0laXZ55XQHjKIR]: Nova Venda no Mercado Livre!
+[2025-12-31T06:22:19.138Z] Push sent successfully
+[2025-12-31T06:22:19.139Z] Sending push to ExponentPushToken[p2zsd8AGKp0tryTiyWfgH_]: Nova Venda no Mercado Livre!
+[2025-12-31T06:22:19.329Z] Push sent successfully

@@ -1,0 +1,31 @@
+import { Controller, Post, Body, BadRequestException } from '@nestjs/common';
+import { OrderService } from '../order.service';
+
+@Controller('orders/sync')
+export class OrderSyncController {
+    constructor(private readonly orderService: OrderService) { }
+
+    /**
+     * Manual trigger endpoint for order sync
+     * Frontend can call this to request sync instead of doing it directly
+     */
+    @Post('request')
+    async requestSync(@Body() body: { externalId: string; marketplaceId: string }) {
+        const { externalId, marketplaceId } = body;
+
+        if (!externalId || !marketplaceId) {
+            throw new BadRequestException('externalId and marketplaceId are required');
+        }
+
+        try {
+            await this.orderService.enqueueSyncOrder(externalId, marketplaceId);
+            return {
+                message: 'Sync requested successfully',
+                externalId,
+                status: 'processing'
+            };
+        } catch (error) {
+            throw new BadRequestException(error.message);
+        }
+    }
+}

@@ -1,0 +1,299 @@
+[
+  {
+    "marketplaceId": "6955b688dfe7143a30376b16",
+    "title": "Lanterna Luz Teto Discovery Sport Evoque 2015-2019 Original",
+    "locale": "pt-BR",
+    "externalId": "MLB6182519086",
+    "_id": "696e91dc23b9e16197eab5f3",
+    "lastSyncAt": "2026-01-19T20:19:50.468Z",
+    "marketplaceData": {
+      "id": "MLB6182519086",
+      "site_id": "MLB",
+      "title": "Lanterna Luz Teto Discovery Sport Evoque 2015-2019 Original",
+      "seller_id": 2417879606,
+      "category_id": "MLB22747",
+      "user_product_id": "MLBU3745905798",
+      "official_store_id": null,
+      "price": 1640,
+      "base_price": 1640,
+      "original_price": null,
+      "inventory_id": null,
+      "currency_id": "BRL",
+      "initial_quantity": 1,
+      "available_quantity": 1,
+      "sold_quantity": 0,
+      "sale_terms": [],
+      "buying_mode": "buy_it_now",
+      "listing_type_id": "gold_pro",
+      "start_time": "2026-01-19T20:19:45.912Z",
+      "stop_time": "2046-01-14T04:00:00.000Z",
+      "end_time": "2046-01-14T04:00:00.000Z",
+      "expiration_time": "2026-04-09T20:19:45.959Z",
+      "condition": "new",
+      "permalink": "http://produto.mercadolivre.com.br/MLB-6182519086-lanterna-luz-teto-discovery-sport-evoque-2015-2019-original-_JM",
+      "pictures": [
+        {
+          "id": "641471-MLB104703369188_012026",
+          "url": "http://http2.mlstatic.com/resources/frontend/statics/processing-image/1.0.0/O-PT.jpg",
+          "secure_url": "https://http2.mlstatic.com/resources/frontend/statics/processing-image/1.0.0/O-PT.jpg",
+          "size": "500x500",
+          "max_size": "500x500",
+          "quality": ""
+        },
+        {
+          "id": "933492-MLB104703369194_012026",
+          "url": "http://http2.mlstatic.com/resources/frontend/statics/processing-image/1.0.0/O-PT.jpg",
+          "secure_url": "https://http2.mlstatic.com/resources/frontend/statics/processing-image/1.0.0/O-PT.jpg",
+          "size": "500x500",
+          "max_size": "500x500",
+          "quality": ""
+        },
+        {
+          "id": "881203-MLB104703369186_012026",
+          "url": "http://http2.mlstatic.com/resources/frontend/statics/processing-image/1.0.0/O-PT.jpg",
+          "secure_url": "https://http2.mlstatic.com/resources/frontend/statics/processing-image/1.0.0/O-PT.jpg",
+          "size": "500x500",
+          "max_size": "500x500",
+          "quality": ""
+        },
+        {
+          "id": "885893-MLB104703369190_012026",
+          "url": "http://http2.mlstatic.com/resources/frontend/statics/processing-image/1.0.0/O-PT.jpg",
+          "secure_url": "https://http2.mlstatic.com/resources/frontend/statics/processing-image/1.0.0/O-PT.jpg",
+          "size": "500x500",
+          "max_size": "500x500",
+          "quality": ""
+        },
+        {
+          "id": "921871-MLB104703369192_012026",
+          "url": "http://http2.mlstatic.com/resources/frontend/statics/processing-image/1.0.0/O-PT.jpg",
+          "secure_url": "https://http2.mlstatic.com/resources/frontend/statics/processing-image/1.0.0/O-PT.jpg",
+          "size": "500x500",
+          "max_size": "500x500",
+          "quality": ""
+        }
+      ],
+      "video_id": null,
+      "descriptions": [],
+      "accepts_mercadopago": true,
+      "non_mercado_pago_payment_methods": [],
+      "shipping": {
+        "mode": "me2",
+        "local_pick_up": false,
+        "free_shipping": true,
+        "methods": [],
+        "dimensions": null,
+        "tags": [
+          "mandatory_free_shipping"
+        ],
+        "logistic_type": "xd_drop_off",
+        "store_pick_up": false
+      },
+      "international_delivery_mode": "none",
+      "seller_address": {
+        "id": 1472111397,
+        "comment": "",
+        "address_line": "Rua Carlos Gomes 395",
+        "zip_code": "50720110",
+        "city": {
+          "id": "TUxCQ1JFQzM2M2M",
+          "name": "Recife"
+        },
+        "state": {
+          "id": "BR-PE",
+          "name": "Pernambuco"
+        },
+        "country": {
+          "id": "BR",
+          "name": "Brasil"
+        },
+        "latitude": -8.059273,
+        "longitude": -34.912077,
+        "search_location": {
+          "neighborhood": {
+            "id": "TUxCQk1BREFFQTg5",
+            "name": "Madalena"
+          },
+          "city": {
+            "id": "TUxCQ1JFQzM2M2M",
+            "name": "Recife"
+          },
+          "state": {
+            "id": "TUxCUFBFUk8xZmZj",
+            "name": "Pernambuco"
+          }
+        }
+      },
+      "seller_contact": null,
+      "geolocation": {
+        "latitude": -8.059273,
+        "longitude": -34.912077
+      },
+      "coverage_areas": [],
+      "attributes": [
+        {
+          "id": "VEHICLE_TYPE",
+          "name": "Tipo de veículo",
+          "value_id": "11377043",
+          "value_name": "Carro/Caminhonete",
+          "values": [
+            {
+              "id": "11377043",
+              "name": "Carro/Caminhonete",
+              "struct": null
+            }
+          ],
+          "value_type": "list"
+        },
+        {
+          "id": "OEM",
+          "name": "Código OEM",
+          "value_id": null,
+          "value_name": "LR086392",
+          "values": [
+            {
+              "id": null,
+              "name": "LR086392",
+              "struct": null
+            }
+          ],
+          "value_type": "string"
+        },
+        {
+          "id": "ORIGIN",
+          "name": "Origem",
+          "value_id": null,
+          "value_name": "97214",
+          "values": [
+            {
+              "id": null,
+              "name": "97214",
+              "struct": null
+            }
+          ],
+          "value_type": "string"
+        },
+        {
+          "id": "BRAND",
+          "name": "Marca",
+          "value_id": null,
+          "value_name": "Land Rover",
+          "values": [
+            {
+              "id": null,
+              "name": "Land Rover",
+              "struct": null
+            }
+          ],
+          "value_type": "string"
+        },
+        {
+          "id": "ITEM_CONDITION",
+          "name": "Condição do item",
+          "value_id": "2230284",
+          "value_name": "Novo",
+          "values": [
+            {
+              "id": "2230284",
+              "name": "Novo",
+              "struct": null
+            }
+          ],
+          "value_type": "list"
+        },
+        {
+          "id": "PART_NUMBER",
+          "name": "Número de peça",
+          "value_id": null,
+          "value_name": "LR086392",
+          "values": [
+            {
+              "id": null,
+              "name": "LR086392",
+              "struct": null
+            }
+          ],
+          "value_type": "string"
+        },
+        {
+          "id": "MODEL",
+          "name": "Modelo",
+          "value_id": null,
+          "value_name": "LR086392",
+          "values": [
+            {
+              "id": null,
+              "name": "LR086392",
+              "struct": null
+            }
+          ],
+          "value_type": "string"
+        }
+      ],
+      "warnings": [],
+      "listing_source": "",
+      "variations": [],
+      "thumbnail_id": "641471-MLB104703369188_012026",
+      "thumbnail": "http://http2.mlstatic.com/resources/frontend/statics/processing-image/1.0.0/I-PT.jpg",
+      "status": "paused",
+      "sub_status": [
+        "picture_download_pending"
+      ],
+      "tags": [
+        "cart_eligible",
+        "good_quality_thumbnail",
+        "immediate_payment"
+      ],
+      "warranty": null,
+      "catalog_product_id": null,
+      "domain_id": "MLB-VEHICLE_INTERIOR_LIGHTS",
+      "seller_custom_field": "696a434bf40b34995533acec",
+      "parent_item_id": null,
+      "differential_pricing": null,
+      "deal_ids": [],
+      "automatic_relist": false,
+      "date_created": "2026-01-19T20:19:46.068Z",
+      "last_updated": "2026-01-19T20:19:46.068Z",
+      "health": null,
+      "catalog_listing": false,
+      "item_relations": [],
+      "channels": [
+        "marketplace"
+      ]
+    },
+    "syncStatus": "synced"
+  },
+  {
+    "marketplaceId": "6955b688dfe7143a30376b73",
+    "title": "Lanterna Luz Teto Discovery Sport Evoque 2015-2019 Original",
+    "locale": "pt-BR",
+    "externalId": null,
+    "_id": "696e91dc23b9e16197eab5f4"
+  },
+  {
+    "marketplaceId": "6955b688dfe7143a30376b7e",
+    "title": "Lanterna Luz Teto Discovery Sport Evoque 2015-2019 Original",
+    "locale": "pt-BR",
+    "externalId": null,
+    "_id": "696e91dc23b9e16197eab5f5"
+  },
+  {
+    "marketplaceId": "6955b688dfe7143a30376d2f",
+    "title": "Lanterna Luz Teto Discovery Sport Evoque 2015-2019 Original",
+    "locale": "pt-BR",
+    "externalId": null,
+    "_id": "696e91dc23b9e16197eab5f6"
+  },
+  {
+    "marketplaceId": "69695217f1870bc65b34d8c2",
+    "title": "Lanterna Luz Teto Discovery Sport Evoque 2015-2019",
+    "locale": "pt-BR",
+    "externalId": "ROCKET-696a434bf40b34995533acec-1768853985973",
+    "_id": "696e91dc23b9e16197eab5f7",
+    "lastSyncAt": "2026-01-19T20:19:48.924Z",
+    "marketplaceData": {
+      "id": "ROCKET-696a434bf40b34995533acec-1768853985973"
+    },
+    "syncStatus": "synced"
+  }
+]

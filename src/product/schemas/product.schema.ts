@@ -1,0 +1,309 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types, HydratedDocument, SchemaTypes } from 'mongoose';
+import { Transform } from 'class-transformer';
+
+export type ProductDocument = HydratedDocument<ProductModel>;
+
+
+@Schema()
+export class ProductImage {
+    @Prop() url: string;
+    @Prop() main: boolean;
+    @Prop() originalName: string;
+    @Prop() order: number;
+    @Prop() status: string;
+}
+
+@Schema()
+export class ProductTitle {
+    @Prop({ type: Types.ObjectId }) marketplaceId: Types.ObjectId;
+    @Prop() title: string;
+    // Extended
+    @Prop() locale: string;
+    @Prop() externalId?: string;
+    @Prop() syncStatus?: string;
+    @Prop() lastSyncAt?: Date;
+    @Prop({ type: Object }) marketplaceData?: any;
+}
+
+@Schema()
+export class ProductAttribute {
+    @Prop() name: string;
+    @Prop() value: string;
+    @Prop() valueName?: string; // Human readable value for lists
+    @Prop() valueType?: string; // list, string, number_unit, etc
+    @Prop() code: string;
+    @Prop({ type: Types.ObjectId }) marketplaceId: Types.ObjectId;
+}
+
+
+
+@Schema()
+class ProductBrandSnapshot {
+    @Prop() _id?: string;
+    @Prop() name: string;
+    @Prop() logoUrl: string;
+    @Prop() isGenuine: boolean;
+    // Extended
+    @Prop() shortName: string;
+    @Prop() amazonName: string;
+    @Prop() fullName: string;
+    @Prop() externalId: string;
+}
+
+@Schema()
+class ProductCategorySnapshot {
+    @Prop() _id?: string;
+    @Prop() name: string;
+    @Prop() parentId?: number;
+    @Prop() externalId: string;
+}
+
+@Schema()
+class ProductUnitSnapshot {
+    @Prop() _id?: string;
+    @Prop() code: string;
+    @Prop() name: string;
+}
+
+@Schema()
+class ProductAllocationSnapshot {
+    @Prop() _id?: string;
+    @Prop() code: string;
+    @Prop() quantity: number;
+    @Prop() type: string;
+    // New fields
+    @Prop({ type: Types.ObjectId }) boxId: Types.ObjectId;
+    @Prop() boxCode: string;
+    // Extended fields
+    @Prop({ type: Types.ObjectId }) warehouseId: Types.ObjectId;
+    @Prop() floor: number;
+    @Prop() room: number;
+    @Prop() row: string;
+    @Prop() level: number;
+    @Prop() rack: string;
+    @Prop() shelf: number;
+    @Prop() bin: number;
+    @Prop() aisle: number;
+}
+
+
+
+@Schema()
+export class ProductTax {
+    @Prop() ncm: string;
+    @Prop() cfop: string;
+    @Prop() csosn: string;
+    @Prop() cest: string;
+    @Prop() origin: string;
+}
+
+@Schema({ collection: 'products', timestamps: true })
+export class ProductModel {
+    _id: string;
+
+    @Prop({ default: 1 })
+    schemaVersion: number;
+
+    @Prop({ required: true, index: true })
+    name: string;
+
+    @Prop({ required: true, index: true, unique: true })
+    partNumber: string;
+
+    @Prop({ unique: true })
+    slug: string;
+
+    @Prop({ unique: true, sparse: true })
+    barcode: string;
+
+    @Prop()
+    isGenuine: boolean;
+
+    @Prop()
+    description: string;
+
+    @Prop()
+    details: string; // Additional technical details/specs
+
+    // Tax Data
+    @Prop({ type: ProductTax })
+    tax: ProductTax;
+
+    @Prop({ type: Types.Decimal128 })
+    @Transform(({ value }) => value?.toString())
+    price: Types.Decimal128;
+
+    @Prop({ type: Types.Decimal128 })
+    @Transform(({ value }) => value?.toString())
+    costPrice: Types.Decimal128;
+
+    @Prop({ type: Types.Decimal128 })
+    @Transform(({ value }) => value?.toString())
+    listPrice: Types.Decimal128; // Original Price / De-Preco
+
+    @Prop({ type: Object })
+    pricing: {
+        markup: number; // e.g., 1.5
+        profitMargin: number; // e.g., 0.33
+        autoUpdate: boolean;
+        strategy: string; // 'FIXED_MARKUP', 'COMPETITIVE', 'MANUAL'
+    };
+
+    @Prop({ type: Object })
+    lastPurchase: {
+        date: Date;
+        supplierCnpj: string;
+        supplierName: string;
+        costPrice: number; // Unit Cost from NF
+        freightCost: number; // Rateio Frete
+        otherExpenses: number; // Rateio Despesas
+        // taxDetails: {
+        //     ipi: number;
+        //     icms: number;
+        //     icmsSt: number;
+        // };
+        taxes: {
+            icms: {
+                cst: string;
+                origin: string;
+                base: number;
+                rate: number;
+                value: number;
+                valueSt: number;
+            };
+            ipi: {
+                cst: string;
+                base: number;
+                rate: number;
+                value: number;
+            };
+            pis: {
+                cst: string;
+                base: number;
+                rate: number;
+                value: number;
+            };
+            cofins: {
+                cst: string;
+                base: number;
+                rate: number;
+                value: number;
+            };
+        };
+        finalCost: number; // (Cost + IPI + ST + Freight + Others - Discounts)
+    };
+
+
+    // Dimensions & Weight
+    @Prop({ type: Types.Decimal128 })
+    @Transform(({ value }) => value?.toString())
+    weight: Types.Decimal128;
+
+    @Prop({
+        type: {
+            length: Types.Decimal128,
+            width: Types.Decimal128,
+            height: Types.Decimal128
+        },
+        _id: false
+    })
+    @Transform(({ value }) => {
+        if (!value) return value;
+        return {
+            length: value.length?.toString(),
+            width: value.width?.toString(),
+            height: value.height?.toString()
+        };
+    })
+    dimensions: {
+        length: Types.Decimal128;
+        width: Types.Decimal128;
+        height: Types.Decimal128;
+    };
+
+    @Prop({ type: ProductBrandSnapshot })
+    brand: ProductBrandSnapshot;
+
+    @Prop({ type: SchemaTypes.ObjectId, ref: 'CategoryModel', index: true })
+    category: Types.ObjectId;
+
+    @Prop({ type: ProductUnitSnapshot })
+    unit: ProductUnitSnapshot;
+
+    @Prop({ type: [SchemaFactory.createForClass(ProductImage)] })
+    images: ProductImage[];
+
+    @Prop({ type: [SchemaFactory.createForClass(ProductAttribute)] })
+    attributes: ProductAttribute[];
+
+    // Warehouse Data
+    @Prop({ type: [SchemaFactory.createForClass(ProductAllocationSnapshot)] })
+    allocations: ProductAllocationSnapshot[];
+
+    @Prop({ default: true, index: true })
+    active: boolean;
+
+    @Prop({ type: {} })
+    sku: string | number; // Legacy ID or String SKU
+
+    @Prop()
+    stockQuantity: number;
+
+    @Prop({ default: 0 })
+    stockReserved: number; // Items reserved in orders not yet shipped
+
+    // Virtual: availableStock
+
+    @Prop({ type: Types.ObjectId, ref: 'CrossReferenceGroupModel' })
+    crossReferenceGroupId: Types.ObjectId;
+
+    @Prop({ default: 0 })
+    totalSold: number;
+
+    // Review Aggregation
+    @Prop({ default: 0, index: true })
+    ratingAverage: number;
+
+    @Prop({ default: 0 })
+    ratingCount: number;
+
+    // --- SEO & Technical Fields ---
+    @Prop({ default: 'new', enum: ['new', 'used', 'remanufactured'] })
+    condition: string;
+
+    @Prop({ type: Object })
+    warranty: {
+        months: number;
+        type: string; // e.g., 'provider', 'manufacturer'
+    };
+
+    @Prop({ type: [String], index: true })
+    oemCodes: string[]; // Denormalized Cache for Search
+
+    @Prop({ type: [String], index: true })
+    applicationSummary: string[]; // SEO Keywords: "Civic 2008", "Corolla 2010"
+
+    @Prop({ type: Object })
+    draftData: any; // Data from AI Drafts or NFe Imports
+}
+
+export const ProductSchema = SchemaFactory.createForClass(ProductModel);
+
+// 1. Virtual for Available Stock (Physical - Reserved)
+ProductSchema.virtual('availableStock').get(function () {
+    return (this.stockQuantity || 0) - (this.stockReserved || 0);
+});
+
+// 2. Ensure Virtuals are included
+ProductSchema.set('toJSON', { virtuals: true });
+ProductSchema.set('toObject', { virtuals: true });
+
+// Text Index
+ProductSchema.index({ name: 'text' });
+
+// Compound Indexes
+ProductSchema.index({ active: 1, 'category': 1 });
+ProductSchema.index({ partNumber: 1, 'brand.name': 1 });
+ProductSchema.index({ active: 1, ratingAverage: -1 }); // Sorting by best rated active products
+

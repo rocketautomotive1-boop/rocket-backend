@@ -1,0 +1,21 @@
+Connected to MongoDB via Mongoose
+--- Checking Orders ---
+Order Found: 260123QMY04FF7
+  _id: 6973c2f46f7ef6156e759305
+  externalId type: string
+  externalId value: "260123QMY04FF7"
+  logisticsStatus: undefined
+Order Found: 260123QHN3PXNH
+  _id: 6973c5b06f7ef6156e759308
+  externalId type: string
+  externalId value: "260123QHN3PXNH"
+  logisticsStatus: undefined
+
+--- Checking Stock Movements ---
+Searching for reference: "260123QMY04FF7"
+  Found: 1
+   -> Match: "260123QMY04FF7" (ID: 6973c2fd413afa93c3d57333)
+Searching for reference: "260123QHN3PXNH"
+  Found: 0
+  Regex Exact Match Count: 0
+  Fuzzy Match Count: 0
