@@ -5,8 +5,11 @@ import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { ProductModel, ProductDocument } from '../product/schemas/product.schema';
 import { MarketplaceModel, MarketplaceDocument } from '../marketplace/schemas/marketplace.schema';
 import { ListingModel, ListingDocument } from '../listing/schemas/listing.schema';
+import { StockMovementModel, StockMovementDocument } from '../product/schemas/stock-movement.schema';
 import { PublicationLogService } from '../marketplace/services/publication-log.service';
+import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 import { MarketplaceSyncPayload } from './dto/marketplace-sync.dto';
+import { ProductRepository } from '../product/product.repository';
 
 import { PublicationContext } from './interfaces/publication-context.interface';
 import { PublicationContextService } from './services/publication-context.service';
@@ -19,9 +22,12 @@ export class MarketplaceOrchestratorService {
         @InjectModel(ProductModel.name) private productModel: Model<ProductDocument>,
         @InjectModel(MarketplaceModel.name) private marketplaceModel: Model<MarketplaceDocument>,
         @InjectModel(ListingModel.name) private listingModel: Model<ListingDocument>,
+        @InjectModel(StockMovementModel.name) private stockMovementModel: Model<StockMovementDocument>,
         private readonly amqpConnection: AmqpConnection,
         private readonly publicationLogService: PublicationLogService,
         private readonly publicationContextService: PublicationContextService,
+        private readonly descriptionService: MarketplaceDescriptionService,
+        private readonly productRepository: ProductRepository,
     ) { }
 
 
@@ -29,10 +35,9 @@ export class MarketplaceOrchestratorService {
      * Sync a product to all marketplaces where it has a listing.
      * Can optionally filter by specific marketplaceId (e.g. for attribute changes)
      */
-    async syncProductToAllMarketplaces(productId: string, targetMarketplaceId?: string): Promise<void> {
-        this.logger.log(`Syncing product ${productId} to all marketplaces${targetMarketplaceId ? ` (Target: ${targetMarketplaceId})` : ''}`);
+    async syncProductToAllMarketplaces(productId: string, targetMarketplaceId?: string, requesterId?: string, force = false): Promise<void> {
+        this.logger.log(`Syncing product ${productId} to all marketplaces${targetMarketplaceId ? ` (Target: ${targetMarketplaceId})` : ''} by ${requesterId || 'system'}${force ? ' [FORCED]' : ''}`);
 
-        // Removed status filter to allow auto-correction of error'd listings
         const query: any = { productId: new Types.ObjectId(productId) };
 
         if (targetMarketplaceId) {
@@ -48,39 +53,93 @@ export class MarketplaceOrchestratorService {
 
         this.logger.log(`Found ${listings.length} listings to sync for product ${productId}`);
 
+        const errors: Error[] = [];
         for (const listing of listings) {
-            await this.syncListing(listing._id.toString());
+            try {
+                await this.syncListing(listing._id.toString(), requesterId, force);
+            } catch (error) {
+                errors.push(error);
+            }
+        }
+
+        if (errors.length > 0) {
+            throw new Error(`${errors.length}/${listings.length} listing(s) failed: ${errors.map(e => e.message).join('; ')}`);
         }
     }
 
-    async syncListing(listingId: string): Promise<void> {
-        this.logger.log(`Syncing Listing ${listingId}`);
+    async syncListing(listingId: string, requesterId?: string, force = false): Promise<void> {
+        this.logger.log(`Syncing Listing ${listingId} by ${requesterId || 'system'}${force ? ' [FORCED]' : ''}`);
 
         try {
-            // Use centralized context builder (matches manual publish flow)
-            // Handles token validation, marketplace enabled check, and relation population
-            const publicationContext = await this.publicationContextService.buildContext(listingId);
-
-            await this.publishListing(publicationContext);
+            const publicationContext = await this.publicationContextService.buildContext(listingId, requesterId);
+            await this.publishListing(publicationContext, requesterId, force);
         } catch (error) {
             this.logger.error(`Failed to sync listing ${listingId}: ${error.message}`);
+            // Surface the error on the listing so the user can see it
+            await this.listingModel.findByIdAndUpdate(listingId, {
+                $set: {
+                    status: 'error',
+                    errorMessage: error.message,
+                    publishingAt: null, // Release lock so future syncs can retry
+                },
+            }).exec().catch(() => { /* ignore update failure */ });
+            throw error; // Re-throw so SyncQueueWorker can apply backoff retry
         }
     }
 
-    async publishListing(context: PublicationContext): Promise<string> {
+    async publishListing(context: PublicationContext, requesterId?: string, force = false): Promise<string | null> {
         const { listing, product, marketplace, jobId } = context;
 
-        this.logger.log(`Starting publish job ${jobId} for listing ${listing._id}`);
-
-        // 1. Dynamic Requirement Validation (Decoupled Logic)
-        try {
-            this.validateRequirements(product, marketplace);
-        } catch (error) {
-            throw error;
+        // Early exit for marketplaces without an active token.
+        // This is a configuration gap, not a product error — do not mark the listing as errored.
+        const hasActiveToken = marketplace.tokens?.some(t => t.isActive);
+        if (!hasActiveToken) {
+            this.logger.warn(
+                `[SkipNoToken] Listing ${listing._id} skipped — no active token for marketplace ${marketplace.name}`
+            );
+            return null;
         }
 
-        // 2. Create Publication Attempt Log
-        this.logger.debug(`Creating attempt log for ${jobId}...`);
+        // Atomic in-flight lock using a dedicated `publishingAt` timestamp field.
+        //
+        // Why not `status: pending_creation`?
+        //   - status is a semantic field reset by ListingStatusListener to 'active' as soon as
+        //     the marketplace API responds — BEFORE the next sync may start. Using it as a lock
+        //     creates a race window.
+        //   - The old guard was wrapped in `if (!force)`, meaning force=true (user_publish) always
+        //     bypassed it entirely, causing duplicate dispatches when operational_change and
+        //     user_publish overlapped.
+        //
+        // How this lock works:
+        //   1. Before ANY dispatch (force or not), atomically set publishingAt = now IF either:
+        //        a. publishingAt is null/unset (listing is idle), OR
+        //        b. publishingAt is older than 2 minutes (stale lock from crash/timeout)
+        //   2. If the atomic update returns no document → another sync is in flight → skip.
+        //   3. ListingStatusListener clears publishingAt = null when the job result arrives.
+        const LOCK_TTL_MS = 2 * 60 * 1000; // 2 minutes
+        const lockExpiry = new Date(Date.now() - LOCK_TTL_MS);
+        const claimed = await this.listingModel.findOneAndUpdate(
+            {
+                _id: listing._id,
+                $or: [
+                    { publishingAt: null },
+                    { publishingAt: { $exists: false } },
+                    { publishingAt: { $lt: lockExpiry } },
+                ],
+            },
+            { $set: { publishingAt: new Date(), status: 'pending_creation', errorMessage: null } }
+        ).exec();
+
+        if (!claimed) {
+            this.logger.warn(
+                `[AtomicGuard] Listing ${listing._id} already has an in-flight publish. Skipping duplicate dispatch.`
+            );
+            return null;
+        }
+
+        this.logger.log(`Starting publish job ${jobId} for listing ${listing._id}${force ? ' [FORCED]' : ''}`);
+
+        // 1. Create Publication Attempt Log
         const attempt = await this.publicationLogService.createAttempt(
             product._id.toString(),
             'MarketplaceOrchestrator',
@@ -88,48 +147,168 @@ export class MarketplaceOrchestratorService {
             { listingId: listing._id.toString(), jobId }
         );
 
-        // 3. Process Template & Payload Construction
-        this.logger.debug(`Constructing payload for ${jobId}...`);
+        // 2. Build payload first — listing.price takes priority over product.price,
+        //    category is resolved from marketplaceMappings, etc.
         const payload = await this.constructPayload(jobId, listing, product, marketplace);
         payload.attemptId = attempt._id.toString(); // Inject Attempt ID
 
+        // 3. Validate RESOLVED values (post-construction).
+        //    validateRequirements() was checking product.price directly, which is 0 when
+        //    the price lives on the listing. Now we validate the actual values that will
+        //    be sent to the marketplace API.
+        this.validateResolvedPayload(payload, marketplace);
+
+        // Inject User ID into metadata
+        if (requesterId) {
+            payload.metadata = payload.metadata || {};
+            payload.metadata.userId = requesterId;
+        }
+
         // 4. Dispatch to RabbitMQ
         const routingKey = `sync.${marketplace.tag.toLowerCase()}`;
-        this.logger.debug(`Publishing to RabbitMQ (${routingKey})...`);
         await this.amqpConnection.publish('rocket.marketplace.sync', routingKey, payload);
-        this.logger.debug(`Published to RabbitMQ.`);
 
-        // 5. Update Listing Status (This is a side effect - technically orchestrator shouldn't probably update DB directly if we are strict, 
-        // but for now listing object is Mongoose Document, so save() works if we keep it decoupled from fetching)
-        // Ideally, context service handles status updates via listener, but here we set initial status.
-        // Since we have the document, we can save it.
-        listing.status = 'pending_creation';
-        listing.errorMessage = null;
-        await listing.save();
+        // Status and publishingAt lock were already atomically set in the guard above.
 
         this.logger.log(`Dispatched job ${jobId} (Attempt ${attempt._id}) to ${routingKey}`);
         return jobId;
     }
 
-    private validateRequirements(product: ProductDocument, marketplace: MarketplaceDocument) {
+    /**
+     * Validates the CONSTRUCTED payload — not the raw product document.
+     *
+     * Root cause of the old bug:
+     *   validateRequirements() was reading product.price directly. In this system prices
+     *   are often stored per-listing (listing.price > 0, product.price = 0). constructPayload()
+     *   correctly uses `listing.price || product.price`, but the old validation ran before
+     *   construction and always read 0 from the product, failing every sync triggered from
+     *   the order/stock flow.
+     *
+     * Same problem applied to other fields (brand, category) that get resolved differently
+     * during payload construction.
+     */
+    /**
+     * Resolves selling price using a priority chain:
+     *   1. listing.price (marketplace-specific override)
+     *   2. product.price (product-level default)
+     *   3. Most recent inbound stock_movement.price (Sales Price snapshot)
+     *
+     * This handles the common case where price is set on stock entries rather
+     * than directly on the product or listing documents.
+     */
+    private async resolvePrice(
+        productId: string,
+        listing: ListingDocument,
+        product: ProductDocument,
+    ): Promise<number> {
+        const listingPrice = Number(listing.price || 0);
+        if (listingPrice > 0) return parseFloat(listingPrice.toFixed(2));
+
+        const productPrice = Number(product.price?.toString() || 0);
+        if (productPrice > 0) return parseFloat(productPrice.toFixed(2));
+
+        // Fallback: latest inbound movement that carries a price
+        const movement = await this.stockMovementModel
+            .findOne({
+                productId: new Types.ObjectId(productId) as any,
+                type: 'inbound',
+                price: { $exists: true, $ne: null },
+            })
+            .sort({ date: -1 })
+            .select('price')
+            .lean()
+            .exec();
+
+        if (movement?.price) {
+            const movementPrice = Number(movement.price.toString());
+            if (movementPrice > 0) {
+                this.logger.log(`[resolvePrice] Using stock movement price ${movementPrice} for product ${productId}`);
+                return parseFloat(movementPrice.toFixed(2));
+            }
+        }
+
+        return 0;
+    }
+
+    private validateResolvedPayload(payload: MarketplaceSyncPayload, marketplace: MarketplaceDocument) {
         if (!marketplace.requirements) return;
 
-        const missingFields: string[] = [];
-        for (const req of marketplace.requirements) {
-            if (req.isRequired) {
-                const value = this.getNestedValue(product, req.schemaField);
+        // For UPDATE actions the product is already live on the marketplace.
+        // We only re-validate on CREATE to avoid blocking operational syncs (stock/price updates)
+        // on listings that may have been created before all required fields were set.
+        if (payload.action === 'UPDATE') return;
 
-                // Generic "Empty" Check
-                if (value === undefined || value === null || value === '') {
-                    missingFields.push(req.displayName || req.fieldName);
-                    continue; // Skip further checks for this field
+        const p = payload.payload;
+        const productSnapshot = payload.product;
+        const missingFields: string[] = [];
+
+        // Resolve value for a given requirement against the CONSTRUCTED payload.
+        const resolve = (schemaField: string, fieldName: string): any => {
+            const field = schemaField || fieldName;
+            switch (field) {
+                // Price lives in payload.payload.price (already resolved as listing.price || product.price)
+                case 'price':
+                    return p.price;
+
+                // Stock is calculated from stock_movements aggregation
+                case 'stock':
+                case 'stockQuantity':
+                    return p.stock;
+
+                // Brand: prefer resolved payload value; 'Generic' means it was never set
+                case 'brand':
+                case 'brand.name':
+                    return (p.brand && p.brand !== 'Generic') ? p.brand : productSnapshot?.brand?.name;
+
+                // Title from the processed template
+                case 'name':
+                case 'title':
+                    return p.title;
+
+                // Images
+                case 'images':
+                    return (p.images && p.images.length > 0) ? p.images : undefined;
+
+                // Category: check if the product snapshot has a category assigned.
+                // constructPayload falls back to a hardcoded ML category when unset, so
+                // we validate the source field on the product rather than the fallback value.
+                case 'category':
+                case 'categoryId': {
+                    const cat = productSnapshot?.category;
+                    // Valid if it's an ObjectId string, a populated object, or any truthy value
+                    return (cat && cat !== null) ? cat : undefined;
                 }
 
-                // Specific Check for Price (must be > 0)
-                if (req.fieldName === 'price' || req.schemaField === 'price') {
-                    if (Number(value) <= 0) {
-                        missingFields.push(`${req.displayName || req.fieldName} (must be greater than 0)`);
-                    }
+                default:
+                    // For any other field, try the payload object first then the product snapshot
+                    return (p as any)[field] ?? this.getNestedValue(productSnapshot, field);
+            }
+        };
+
+        for (const req of marketplace.requirements) {
+            if (!req.isRequired) continue;
+
+            const value = resolve(req.schemaField, req.fieldName);
+
+            // Empty check (undefined, null, empty string, or empty array)
+            if (value === undefined || value === null || value === '' ||
+                (Array.isArray(value) && value.length === 0)) {
+                missingFields.push(req.displayName || req.fieldName);
+                continue;
+            }
+
+            // Price must be > 0
+            if (req.schemaField === 'price' || req.fieldName === 'price') {
+                if (Number(value) <= 0) {
+                    missingFields.push(`${req.displayName || req.fieldName} (must be greater than 0)`);
+                }
+            }
+
+            // Stock must be > 0 — zero-stock listings must not be pushed to any marketplace
+            if (req.schemaField === 'stock' || req.fieldName === 'stock' ||
+                req.schemaField === 'stockQuantity' || req.fieldName === 'stockQuantity') {
+                if (Number(value) <= 0) {
+                    missingFields.push(`${req.displayName || req.fieldName} (estoque deve ser maior que 0)`);
                 }
             }
         }
@@ -157,11 +336,12 @@ export class MarketplaceOrchestratorService {
             throw new BadRequestException(`No active token found for marketplace ${marketplace.name}`);
         }
 
-        // Process Title & Description
-        const { title: templateTitle, description } = this.processTemplate(product, marketplace, listing);
-
-        // Use Listing Title if available (User Override), otherwise use Template/Product Name
+        // Process Title (template title field) and Description (via TemplateEngine)
+        const templateTitle = this.resolveTitle(product, marketplace, listing);
         const title = listing.title || templateTitle;
+
+        // Generate description using the centralized TemplateEngine (sections processed BEFORE placeholders)
+        const description = await this.generateDescription(product, marketplace, listing);
 
         // Map Attributes (Preserve Metadata)
         const attributes: any[] = [];
@@ -173,6 +353,7 @@ export class MarketplaceOrchestratorService {
                     attributes.push({
                         id: attr.code || attr.name,
                         value: attr.value,
+                        valueName: attr.valueName,
                         valueType: attr.valueType
                     });
                 }
@@ -201,6 +382,9 @@ export class MarketplaceOrchestratorService {
         // Action Determination
         const action = listing.externalId ? 'UPDATE' : 'CREATE';
 
+        // Price resolution: listing override → product price → latest inbound stock movement price
+        const resolvedPrice = await this.resolvePrice(product._id.toString(), listing, product);
+
         return {
             jobId,
             listingId: listing._id.toString(),
@@ -222,8 +406,8 @@ export class MarketplaceOrchestratorService {
             payload: {
                 title: title,
                 description: description,
-                price: Number(listing.price || product.price?.toString() || 0),
-                stock: this.calculateStock(product),
+                price: resolvedPrice,
+                stock: await this.calculateStock(product),
                 sku: product._id.toString(),
                 brand: product.brand?.name || 'Generic', // Fallback if missing
                 images: product.images?.map(i => i.url) || [],
@@ -241,63 +425,14 @@ export class MarketplaceOrchestratorService {
         };
     }
 
-    private processTemplate(product: ProductDocument, marketplace: MarketplaceDocument, listing: ListingDocument): { title: string, description: string } {
-        // Simple Template Engine
-        // TODO: Select specific template based on rules if needed. Using default for now.
-        const template = marketplace.templates?.find(t => t.isDefault && t.isActive) || marketplace.templates?.[0];
-        let title = product.name;
-        let description = product.description;
+    /**
+     * Resolves title from the marketplace's default template, falling back to product.name.
+     * Returns a plain string — no async, no DB calls.
+     */
+    private resolveTitle(product: ProductDocument, marketplace: MarketplaceDocument, listing: ListingDocument): string {
+        const template = marketplace.templates?.find(t => t.isDefault && t.isActive) ?? marketplace.templates?.[0];
+        if (!template?.title) return product.name || '';
 
-        if (template) {
-            // Resolve Title if template has one
-            if (template.title) {
-                title = this.resolveTemplate(template.title, product, listing.title);
-            }
-
-            // Resolve Description
-            description = this.resolveTemplate(template.template, product, listing.title);
-
-            // Process Sections (Ported from MarketplaceDescriptionService)
-            const sections = template.sections || ((template as any)._doc && (template as any)._doc.sections);
-
-            if (sections) {
-                for (const section of sections) {
-                    if (section.condition && section.content) {
-                        try {
-                            const conditionMet = this.evaluateCondition(section.condition, product);
-
-                            if (conditionMet) {
-                                // Remove tags but keep content
-                                const sectionContent = section.content
-                                    .replace(/\[[A-Z_]+_SECTION\]\s*/g, '')
-                                    .replace(/\[\/[A-Z_]+_SECTION\]\s*/g, '');
-
-                                if (description.includes(section.content)) {
-                                    description = description.replace(section.content, sectionContent);
-                                }
-                            } else {
-                                // Remove the entire section content including tags from the template
-                                description = description.replace(section.content, '');
-                            }
-                        } catch (error) {
-                            this.logger.warn(`Error evaluating section condition: ${error.message}`);
-                        }
-                    }
-                }
-            }
-
-            // Cleanup leftover tags
-            description = description.replace(/\[[A-Z_]+_SECTION\]/g, '').replace(/\[\/[A-Z_]+_SECTION\]/g, '');
-        }
-
-        return { title, description };
-    }
-
-    private resolveTemplate(templateStr: string, product: ProductDocument, overrideTitle?: string): string {
-        // this.logger.debug(`[ResolveTemplate] OverrideTitle: "${overrideTitle}"`); // Commented to reduce noise, enable if needed
-        let processed = templateStr;
-
-        // Helpers
         const capitalizeText = (text: string): string => {
             if (!text) return '';
             return text.split(' ').map(word => {
@@ -309,93 +444,36 @@ export class MarketplaceOrchestratorService {
 
         const formatProductName = (name: string, partNumber: string): string => {
             const capitalizedName = capitalizeText(name);
-            if (!partNumber || capitalizedName.includes(partNumber)) {
-                return capitalizedName;
-            }
+            if (!partNumber || capitalizedName.includes(partNumber)) return capitalizedName;
             const nameWithPartNumber = `${capitalizedName} ${partNumber}`.trim();
             return nameWithPartNumber.length <= 60 ? nameWithPartNumber : capitalizedName;
         };
 
-        // Variable Replacement
-        processed = processed
-            .replace(/\{produto\}/g, overrideTitle || formatProductName(product.name || '', product.partNumber || ''))
+        return template.title
+            .replace(/\{produto\}/g, formatProductName(product.name || '', product.partNumber || ''))
             .replace(/\{marca\}/g, product.brand?.amazonName || product.brand?.name || '')
             .replace(/\{modelo\}/g, product.partNumber || '')
-            .replace(/\{descricao_curta\}/g, product.description || '')
-            .replace(/\{preco\}/g, product.price ? Number(product.price).toFixed(2) : '0.00')
-            .replace(/\{codigo\}/g, product.barcode || product.partNumber || '')
-            .replace(/\{peso\}/g, product.weight ? product.weight.toString() : '0')
-            .replace(/\{comprimento\}/g, product.dimensions?.length ? product.dimensions.length.toString() : '0')
-            .replace(/\{largura\}/g, product.dimensions?.width ? product.dimensions.width.toString() : '0')
-            .replace(/\{altura\}/g, product.dimensions?.height ? product.dimensions.height.toString() : '0')
-            .replace(/\{categoria\}/g, (product.category as any)?.name || '');
-
-        // Generic fallback for any other keys matching {key}
-        processed = processed.replace(/{(\w+)}/g, (_, key) => {
-            return (product as any)[key] || '';
-        });
-
-        return processed;
+            .replace(/\{(\w+)\}/g, (_, key) => (product as any)[key] ?? '');
     }
 
-    private calculateStock(product: ProductDocument): number {
-        const qty = product.stockQuantity || 0;
-        const reserved = product.stockReserved || 0;
-        return Math.max(0, qty - reserved);
+    /**
+     * Generates description via the centralized TemplateEngine.
+     * Sections are processed BEFORE placeholders — this prevents blank lines
+     * from empty placeholders inside inactive conditional sections.
+     * listing.title is passed so {produto} in the description body matches the actual ML title.
+     */
+    private async generateDescription(product: ProductDocument, marketplace: MarketplaceDocument, listing: ListingDocument): Promise<string> {
+        try {
+            return await this.descriptionService.generateDescription(product, marketplace.name, undefined, listing.title || undefined);
+        } catch (err) {
+            this.logger.warn(`[generateDescription] Falling back to product.description: ${err.message}`);
+            return product.description || '';
+        }
     }
 
-    private evaluateCondition(condition: string, product: ProductDocument): boolean {
-        if (condition.includes('>')) {
-            const [field, value] = condition.split('>').map(s => s.trim());
-            const productValue = this.getProductValue(field, product);
-            return productValue > parseFloat(value);
-        }
-
-        if (condition.includes('<')) {
-            const [field, value] = condition.split('<').map(s => s.trim());
-            const productValue = this.getProductValue(field, product);
-            return productValue < parseFloat(value);
-        }
-
-        if (condition.includes('==')) {
-            const [field, value] = condition.split('==').map(s => s.trim());
-            const productValue = this.getProductValue(field, product);
-
-            const numValue = Number(value);
-            const numProductValue = Number(productValue);
-
-            if (!isNaN(numValue) && !isNaN(numProductValue)) {
-                return numProductValue === numValue;
-            }
-
-            const cleanValue = value.replace(/^['"](.*)['"]$/, '$1');
-            return String(productValue) === cleanValue;
-        }
-
-        if (condition.includes('!=')) {
-            const [field, value] = condition.split('!=').map(s => s.trim());
-            const productValue = this.getProductValue(field, product);
-            if (value === 'null') {
-                return productValue !== null && productValue !== undefined;
-            }
-            const cleanValue = value.replace(/^['"](.*)['"]$/, '$1');
-            return productValue !== cleanValue;
-        }
-
-        return false;
+    private async calculateStock(product: ProductDocument): Promise<number> {
+        const productId = (product._id || product.id)?.toString();
+        return this.productRepository.calculateStock(productId);
     }
 
-    private getProductValue(field: string, product: ProductDocument): any {
-        const parts = field.split('.');
-        let value: any = product;
-
-        for (const part of parts) {
-            if (value === null || value === undefined) {
-                return null;
-            }
-            value = value[part];
-        }
-
-        return value;
-    }
 }
