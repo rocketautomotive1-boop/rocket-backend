@@ -5,7 +5,7 @@ import { MarketplaceService } from '../../services/marketplace.service';
 import { ConfigService } from '@nestjs/config';
 
 @ApiTags('auth')
-@Controller('auth')
+@Controller()
 export class MarketplaceCallbackController {
     constructor(
         private readonly marketplaceAuthService: MarketplaceAuthService,
@@ -13,7 +13,8 @@ export class MarketplaceCallbackController {
         private readonly configService: ConfigService,
     ) { }
 
-    @Get(':tag/callback')
+    /** Generic OAuth callback: GET /auth/:tag/callback */
+    @Get('auth/:tag/callback')
     @ApiOperation({ summary: 'Callback de autenticação do marketplace' })
     @ApiResponse({ status: 200, description: 'Autenticação realizada com sucesso' })
     @ApiResponse({ status: 400, description: 'Código de autorização não fornecido' })
@@ -98,5 +99,21 @@ export class MarketplaceCallbackController {
                 </html>
             `);
         }
+    }
+
+    /**
+     * OLX-specific callback alias: GET /olx/callback
+     * OLX redirect_uri is registered as https://www.rocketautomotive.com.br/olx/callback
+     * and cannot be changed without updating the OLX app registration.
+     */
+    @Get('olx/callback')
+    @ApiOperation({ summary: 'Callback OAuth da OLX (alias para /auth/olx/callback)' })
+    async handleOLXCallback(
+        @Query('code') code: string,
+        @Query('state') _state: string,
+        @Res() res,
+        @Req() req,
+    ) {
+        return this.handleCallback('olx', code, undefined, res, req);
     }
 }
