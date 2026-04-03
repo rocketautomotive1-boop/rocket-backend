@@ -2,6 +2,7 @@ import { Controller, Get, Query, Logger, BadRequestException } from '@nestjs/com
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { OLXAuthService } from './olx-auth.service';
 import { MarketplaceService } from '../../services/marketplace.service';
+import { SkipJwtAuth } from '../../../auth/decorators/skip-jwt-auth.decorator';
 
 @ApiTags('OLX Auth Callback')
 @Controller('olx')
@@ -18,6 +19,7 @@ export class OLXCallbackController {
      * OLX redirects to: https://www.rocketautomotive.com.br/olx/callback?code=xxx&state=/profile
      */
     @Get('callback')
+    @SkipJwtAuth()
     @ApiOperation({ summary: 'OLX OAuth2 callback — troca authorization code por access token' })
     @ApiQuery({ name: 'code', description: 'Authorization code retornado pela OLX' })
     @ApiQuery({ name: 'state', required: false, description: 'State parameter (ignorado)' })

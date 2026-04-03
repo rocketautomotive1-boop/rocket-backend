@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 import { OLXProductAdapter } from './olx-product.adapter';
-import { OLXAuthService } from './olx-auth.service';
 import { OLXImportService } from './olx-import.service';
 import { OLXCatalogService } from './olx-catalog.service';
 import { OLXHighlightsService } from './olx-highlights.service';
