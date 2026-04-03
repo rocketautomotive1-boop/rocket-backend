@@ -624,7 +624,9 @@ export class PayloadBuilderService {
     buildOLXImportBody(msg: MarketplaceSyncPayload, accessToken: string): any {
         const { payload } = msg;
         const categoryId = this.extractOLXCategoryId(payload.attributes);
-        const adId = msg.externalId || `SKU_${payload.sku}`;
+        // OLX rejects IDs with underscores or non-alphanumeric chars (ERROR_ID_INVALID).
+        // Use the raw sku (MongoDB ObjectId hex string, 24 alphanum chars) as the unique seller reference.
+        const adId = msg.externalId || payload.sku;
         const operation = msg.externalId ? 'update' : 'insert';
 
         return {
