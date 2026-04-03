@@ -80,16 +80,24 @@ export class OLXSyncWorker {
                     }
 
                     // Extract external ad ID from response
+                    if (!response.data?.ad_list?.length) {
+                        this.logger.warn(`[OLX] Response missing ad_list for listing ${msg.listingId}: ${JSON.stringify(response.data)}`);
+                    }
                     const adEntry = response.data?.ad_list?.[0];
-                    const adId = adEntry?.id || adEntry?.ad_id || msg.externalId;
-                    result.externalId = adId ? String(adId) : undefined;
+                    const adId = adEntry?.id || adEntry?.ad_id;
+                    if (adId) {
+                        result.externalId = String(adId);
+                    } else if (msg.externalId) {
+                        result.externalId = msg.externalId;
+                        this.logger.debug(`[OLX] API did not return ad ID — using existing externalId=${msg.externalId}`);
+                    }
 
                     this.logger.log(`[OLX] ${msg.action} OK for listing ${msg.listingId} → adId=${result.externalId}`);
 
                 } else if (msg.action === 'DELETE') {
                     if (!msg.externalId) throw new Error('DELETE action requires externalId');
 
-                    const deleteBody = this.payloadBuilder.buildOLXDeleteBody(msg.externalId, accessToken);
+                    const deleteBody = this.payloadBuilder.buildOLXDeleteBody(accessToken);
                     const response = await axios.delete(`${this.baseUrl}/api/ads/${msg.externalId}`, {
                         data: deleteBody,
                         headers: { 'Content-Type': 'application/json' },
@@ -104,7 +112,9 @@ export class OLXSyncWorker {
             result.success = true;
 
         } catch (error) {
-            const errorMsg = error.response?.data ? JSON.stringify(error.response.data) : error.message;
+            const statusCode = error.response?.status || 'N/A';
+            const errorData = error.response?.data ? JSON.stringify(error.response.data) : error.message;
+            const errorMsg = `[Status ${statusCode}] ${errorData}`;
             this.logger.error(`[OLX] Failed job ${msg.jobId}: ${errorMsg}`);
             result.success = false;
             result.errorMessage = errorMsg;

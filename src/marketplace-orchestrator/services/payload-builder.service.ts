@@ -650,7 +650,7 @@ export class PayloadBuilderService {
         };
     }
 
-    buildOLXDeleteBody(_externalId: string, accessToken: string): any {
+    buildOLXDeleteBody(accessToken: string): any {
         return { access_token: accessToken };
     }
 
