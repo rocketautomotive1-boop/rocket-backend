@@ -624,10 +624,10 @@ export class PayloadBuilderService {
     buildOLXImportBody(msg: MarketplaceSyncPayload, accessToken: string): any {
         const { payload } = msg;
         const categoryId = this.extractOLXCategoryId(payload.attributes);
-        // OLX requires a purely numeric seller reference ID (digits only — hex chars rejected).
-        // Convert MongoDB ObjectId hex (24 chars) → BigInt decimal, take last 15 digits.
-        // Last 15 digits of the full decimal gives sufficient uniqueness for a product catalog.
-        const adId = msg.externalId || BigInt('0x' + payload.sku).toString().slice(-15);
+        // OLX id field: regex [A-Za-z0-9_{}-]{1,19} — max 19 chars.
+        // MongoDB ObjectId is 24 hex chars, too long on its own.
+        // Use last 15 hex chars of the ObjectId — unique enough within a single seller catalog.
+        const adId = msg.externalId || payload.sku.slice(-15);
         const operation = msg.externalId ? 'update' : 'insert';
 
         return {
