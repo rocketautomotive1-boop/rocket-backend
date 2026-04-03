@@ -105,7 +105,7 @@ export class PayloadBuilderService {
                 errors.push({
                     listingId: listing._id.toString(),
                     marketplaceId: listing.marketplaceId?.toString(),
-                    error: error.message,
+                    error: (error as any).message,
                 });
             }
         }
@@ -624,9 +624,10 @@ export class PayloadBuilderService {
     buildOLXImportBody(msg: MarketplaceSyncPayload, accessToken: string): any {
         const { payload } = msg;
         const categoryId = this.extractOLXCategoryId(payload.attributes);
-        // OLX rejects IDs with underscores or non-alphanumeric chars (ERROR_ID_INVALID).
-        // Use the raw sku (MongoDB ObjectId hex string, 24 alphanum chars) as the unique seller reference.
-        const adId = msg.externalId || payload.sku;
+        // OLX requires a purely numeric seller reference ID (digits only — hex chars rejected).
+        // Convert MongoDB ObjectId hex (24 chars) → BigInt decimal, take last 15 digits.
+        // Last 15 digits of the full decimal gives sufficient uniqueness for a product catalog.
+        const adId = msg.externalId || BigInt('0x' + payload.sku).toString().slice(-15);
         const operation = msg.externalId ? 'update' : 'insert';
 
         return {
