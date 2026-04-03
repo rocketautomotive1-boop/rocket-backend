@@ -636,7 +636,11 @@ export class PayloadBuilderService {
                 subject: (payload.title || '').slice(0, 90),
                 body: payload.description || '',
                 params: { condition: '1' },
-                phone: Number(process.env.OLX_PHONE || '0'),
+                phone: (() => {
+                    const phone = Number(process.env.OLX_PHONE || '0');
+                    if (!phone) this.logger.warn('[OLX] OLX_PHONE env var not set — ad will have phone=0 and may be rejected by OLX API');
+                    return phone;
+                })(),
                 type: 's',
                 price: payload.price,
                 zipcode: process.env.OLX_ZIPCODE || '01310100',
@@ -646,11 +650,15 @@ export class PayloadBuilderService {
         };
     }
 
+    buildOLXDeleteBody(_externalId: string, accessToken: string): any {
+        return { access_token: accessToken };
+    }
+
     extractOLXCategoryId(attrs: any[]): number {
         const cat = attrs?.find(a => a.id === 'category_id' || a.id === 'olx_category_id');
         const val = cat ? Number(cat.value) : 0;
         if (val > 0) return val;
-        this.logger.warn(`[OLX] Invalid or missing category_id (${val}). Using default 2020 (Autopecas).`);
-        return 2020; // Default: Peças e Acessórios para Veículos
+        this.logger.warn(`[OLX] Invalid or missing category_id (${val}). Using default 2101 (Peças Automotivas).`);
+        return 2101; // Default: Peças Automotivas (OLX category)
     }
 }
