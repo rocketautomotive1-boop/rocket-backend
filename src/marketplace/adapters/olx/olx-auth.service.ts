@@ -61,7 +61,9 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
 
       const clientId = this.configService.get('OLX_CLIENT_ID');
       const clientSecret = this.configService.get(`OLX_CLIENT_SECRET_${clientId}`);
-      const redirectUri = additionalData?.redirectUri || this.configService.get('OLX_REDIRECT_URI');
+      // Always use OLX_REDIRECT_URI — must match exactly what's registered in the OLX app.
+      // Never use additionalData.redirectUri (which may carry a dynamic ngrok/dev host).
+      const redirectUri = this.configService.get('OLX_REDIRECT_URI');
 
       if (!clientId || !clientSecret || !redirectUri) {
         throw new InternalServerErrorException('Credenciais da OLX não configuradas');
