@@ -11,47 +11,47 @@ export class BoxItemService {
     throw new NotImplementedException('Method not implemented.');
   }
 
-  async addItemToBoxByCode(code: string, addBoxItemDto: AddBoxItemDto, warehouseId?: number) {
+  async addItemToBoxByCode(code: string, addBoxItemDto: AddBoxItemDto, warehouseId?: string | number) {
     throw new NotImplementedException('Method not implemented.');
   }
 
-  async addMultipleItemsToBoxByCode(code: string, items: AddBoxItemDto[], warehouseId?: number) {
+  async addMultipleItemsToBoxByCode(code: string, items: AddBoxItemDto[], warehouseId?: string | number) {
     throw new NotImplementedException('Method not implemented.');
   }
 
-  async getBoxItemsSummaryByCode(code: string, warehouseId?: number) {
+  async getBoxItemsSummaryByCode(code: string, warehouseId?: string | number) {
     throw new NotImplementedException('Method not implemented.');
   }
 
-  findAll(boxId?: number) {
+  findAll(boxId?: string | number) {
     throw new NotImplementedException('Method not implemented.');
   }
 
-  findOne(id: number) {
+  findOne(id: string | number) {
     throw new NotImplementedException('Method not implemented.');
   }
 
-  async update(id: number, updateBoxItemDto: UpdateBoxItemDto) {
+  async update(id: string | number, updateBoxItemDto: UpdateBoxItemDto) {
     throw new NotImplementedException('Method not implemented.');
   }
 
-  async remove(id: number) {
+  async remove(id: string | number) {
     throw new NotImplementedException('Method not implemented.');
   }
 
-  async addMultipleItems(boxId: number, items: CreateBoxItemDto[]) {
+  async addMultipleItems(boxId: string | number, items: CreateBoxItemDto[]) {
     throw new NotImplementedException('Method not implemented.');
   }
 
-  async getBoxItemsByProduct(productId: number) {
+  async getBoxItemsByProduct(productId: string | number) {
     throw new NotImplementedException('Method not implemented.');
   }
 
-  async getBoxItemsByCondition(conditionId: number) {
+  async getBoxItemsByCondition(conditionId: string | number) {
     throw new NotImplementedException('Method not implemented.');
   }
 
-  async getBoxItemsSummary(boxId: number) {
+  async getBoxItemsSummary(boxId: string | number) {
     throw new NotImplementedException('Method not implemented.');
   }
 }

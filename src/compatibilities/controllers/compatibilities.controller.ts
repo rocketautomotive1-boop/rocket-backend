@@ -23,7 +23,7 @@ export class CompatibilitiesController {
   }
 
   @Get('product/:productId')
-  async getByProductId(@Param('productId') productId: number) {
+  async getByProductId(@Param('productId') productId: string) {
     return this.compatibilitiesService.findByProductId(productId);
   }
 

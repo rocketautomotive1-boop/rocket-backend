@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Put, Delete, BadRequestException, UseInterceptors, UploadedFiles, Logger, Query, ClassSerializerInterceptor, HttpStatus, HttpException, Req, Inject, forwardRef } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Put, Delete, BadRequestException, UseInterceptors, UploadedFiles, Logger, Query, ClassSerializerInterceptor, HttpStatus, HttpException, Req, Inject, forwardRef } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBody, ApiBearerAuth, ApiExtraModels, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { ProductService } from './product.service';
@@ -19,6 +19,7 @@ import { SearchService } from '../search/search.service';
 // import { PublishService } from '../publish/publish.service';
 // import { calculatePublishPriority } from '../queue/publish-priority';
 import { BoxItemService } from './services/box-item.service';
+import { BoxService } from './services/box.service';
 
 @ApiTags('Products')
 @UseInterceptors(ClassSerializerInterceptor)
@@ -36,6 +37,7 @@ export class ProductController {
     private readonly productCategoryService: ProductCategoryService,
     private readonly productTitleService: ProductTitleService,
     private readonly boxItemService: BoxItemService,
+    private readonly boxService: BoxService,
     private readonly searchService: SearchService,
     private readonly discoveryService: ProductDiscoveryService,
   ) { }
@@ -43,14 +45,23 @@ export class ProductController {
   @Post('discovery')
   @ApiOperation({ summary: 'Iniciar processo de descoberta de mercado' })
   async startDiscovery(
-    @Body() body: { partNumber: string; brand?: string; isGenuine?: boolean; productId?: string },
+    @Body() body: {
+      partNumber: string;
+      brand?: string;
+      isGenuine?: boolean;
+      productId?: string;
+      brandId?: string;
+      force?: boolean;
+    },
   ) {
     const jobId = await this.discoveryService.startDiscovery({
       partNumber: body.partNumber,
       brand: body.brand,
       isGenuine: body.isGenuine,
       productId: body.productId,
+      brandId: body.brandId,
       userId: 'SYSTEM',
+      force: body.force,
     });
 
     return { jobId };
@@ -72,6 +83,26 @@ export class ProductController {
   @ApiOperation({ summary: 'Obter descobertas recentes (global)' })
   async getRecentDiscoveries() {
     return this.discoveryService.findRecent(20);
+  }
+
+  @Get('lookup')
+  @ApiOperation({ summary: 'Lookup read-only por partNumber + brandId — sem criação' })
+  @ApiQuery({ name: 'partNumber', required: true })
+  @ApiQuery({ name: 'brandId', required: true })
+  @ApiQuery({ name: 'brandName', required: false })
+  async lookupProduct(
+    @Query('partNumber') partNumber: string,
+    @Query('brandId') brandId: string,
+    @Query('brandName') brandName?: string,
+  ) {
+    if (!partNumber || !brandId) {
+      throw new BadRequestException('partNumber e brandId são obrigatórios');
+    }
+    const product = await this.productService.lookup(partNumber, brandId, brandName);
+    if (!product) {
+      return { found: false, product: null };
+    }
+    return { found: true, product };
   }
 
   @Get('elastic')
@@ -120,6 +151,25 @@ export class ProductController {
     return this.discoveryService.search(term);
   }
 
+  @Get('discovery/images')
+  @ApiOperation({ summary: 'Buscar imagens do produto via Serper Image Search' })
+  @ApiQuery({ name: 'q', required: true, description: 'Termo de busca (ex: "Amortecedor Monroe 12345 Fiat Uno")' })
+  async searchProductImages(@Query('q') query: string) {
+    if (!query) return [];
+    return this.discoveryService.searchImages(query);
+  }
+
+  @Patch('discovery/:id/associate')
+  @ApiOperation({ summary: 'Associar productId a um discovery existente' })
+  async associateDiscovery(
+    @Param('id') id: string,
+    @Body() body: { productId: string },
+  ) {
+    if (!body.productId) throw new BadRequestException('productId is required');
+    await this.discoveryService.associateProduct(id, body.productId);
+    return { ok: true };
+  }
+
   @Get('autocomplete')
   @ApiOperation({ summary: 'Autocomplete de produtos' })
   @ApiQuery({ name: 'q', required: true })
@@ -164,20 +214,6 @@ export class ProductController {
 
 
 
-  @Get('sku/:sku')
-  @ApiOperation({ summary: 'Obter um produto pelo SKU' })
-  @ApiResponse({ status: 200, description: 'Produto encontrado com sucesso', type: ProductModel })
-  @ApiResponse({ status: 404, description: 'Produto não encontrado' })
-  async findBySku(
-    @Param('sku') sku: string,
-  ): Promise<ProductModel> {
-    const product = await this.productService.findBySku(sku);
-    if (!product) {
-      throw new BadRequestException(`Produto com SKU ${sku} não encontrado`);
-    }
-    return product;
-  }
-
   @Get('debug-elastic/:id')
   @ApiOperation({ summary: 'Debug: Ver documento no Elastic' })
   async debugElastic(@Param('id') id: string) {
@@ -196,8 +232,7 @@ export class ProductController {
   async create(@Body() createProductDto: CreateProductDto, @Req() req: any): Promise<ProductModel> {
     const userId = req.user?.userId || req.user?.id || 'system';
     const product = await this.productService.create(createProductDto, userId);
-    // this.triggerAutoPublish(product.sku, 'create');
-    return product;
+        return product;
   }
   async update(@Param('id') id: string, @Body() updateProductDto: any): Promise<ProductModel> {
     const product = await this.productService.update(id, updateProductDto);
@@ -918,6 +953,14 @@ export class ProductController {
     @Body() updateProductDto: any,
   ): Promise<ProductModel> {
     try {
+      if (updateProductDto.brand && typeof updateProductDto.brand === 'string') {
+        const brand = await this.productBrandService.findOne(updateProductDto.brand);
+        if (!brand) {
+          throw new BadRequestException('Marca não encontrada');
+        }
+        updateProductDto.brand = brand;
+      }
+
       const updatedProduct = await this.productService.update(id, updateProductDto);
 
       // Auto-publish removed: handled by ProductService sync queue
@@ -1377,24 +1420,30 @@ export class ProductController {
   @Get(':id/box-items')
   @ApiOperation({ summary: 'Obter itens de caixa (localização) do produto' })
   async getBoxItems(@Param('id') id: string) {
-    // Resolve Product to get SKU (Legacy ID for SQL relations)
-    const product = await this.productService.findOne(id);
-    if (!product) throw new BadRequestException('Produto não encontrado');
-
-    // If product has no SKU (legacy ID) or allocations, handle gracefully
-    // Instead of relying on legacy BoxItemService which throws 501, return embedded allocations
-    return product.allocations || [];
-
-    // return this.boxItemService.getBoxItemsByProduct(Number(product.sku));
+    return this.boxService.getBoxItemsByProductId(id);
   }
+  @Get(':id/completion')
+  @ApiOperation({ summary: 'Obter status de preenchimento do produto para as abas' })
+  @ApiResponse({ status: 200, description: 'Status retornado com sucesso' })
+  async getCompletionStatus(@Param('id') id: string) {
+    return this.productService.getProductCompletion(id);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obter um produto pelo _id' })
+  @ApiQuery({
+    name: 'view',
+    required: false,
+    enum: ['lean', 'full'],
+    description: 'lean: documento menor (sem imagens/draft, category sem ancestors). Omitir = full.',
+  })
   @ApiResponse({ status: 200, description: 'Produto encontrado com sucesso', type: ProductModel })
   @ApiResponse({ status: 404, description: 'Produto não encontrado' })
   async findOne(
     @Param('id') id: string,
+    @Query('view') view?: string,
   ): Promise<ProductModel> {
-    const product = await this.productService.findOne(id);
+    const product = await this.productService.findOne(id, { lean: view === 'lean' });
     if (!product) {
       throw new BadRequestException(`Produto com ID ${id} não encontrado`);
     }

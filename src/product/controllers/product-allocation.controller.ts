@@ -19,12 +19,12 @@ import {
 import { ProductAllocationService } from '../services/product-allocation.service';
 import { CreateProductAllocationDto } from '../dto/create-product-allocation.dto';
 import { UpdateProductAllocationDto } from '../dto/update-product-allocation.dto';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { ProductAllocation } from '../product-types';
+// import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { AllocationDocument } from '../schemas/allocation.schema';
 
 @ApiTags('Product Allocation')
 @Controller('allocations')
-@UseGuards(JwtAuthGuard)
+//@UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class ProductAllocationController {
   constructor(private readonly allocationService: ProductAllocationService) { }
@@ -32,29 +32,46 @@ export class ProductAllocationController {
   @Get()
   @ApiOperation({ summary: 'Listar todas as alocações' })
   @ApiResponse({ status: 200, description: 'Lista de alocações retornada com sucesso' })
-  async findAll(): Promise<ProductAllocation[]> {
+  async findAll(): Promise<AllocationDocument[]> {
     return this.allocationService.findAll();
   }
 
   @Get('available')
   @ApiOperation({ summary: 'Listar alocações disponíveis' })
   @ApiResponse({ status: 200, description: 'Lista de alocações disponíveis retornada com sucesso' })
-  async findAvailable(): Promise<ProductAllocation[]> {
+  async findAvailable(): Promise<AllocationDocument[]> {
     return this.allocationService.findAvailable();
   }
 
-  @Get('area/:area')
-  @ApiOperation({ summary: 'Buscar alocações por área' })
-  @ApiResponse({ status: 200, description: 'Alocações da área retornadas com sucesso' })
-  async findByArea(@Param('area') area: string): Promise<ProductAllocation[]> {
-    return this.allocationService.findByArea(area);
+  @Get('path/search')
+  @ApiOperation({ summary: 'Buscar alocações por prefixo de caminho (ex: "F1/R2")' })
+  @ApiResponse({ status: 200, description: 'Alocações encontradas com sucesso' })
+  @ApiQuery({ name: 'prefix', description: 'O prefixo do Materialized Path' })
+  async findByPath(@Query('prefix') prefix: string): Promise<AllocationDocument[]> {
+    return this.allocationService.findByPath(prefix);
+  }
+
+  @Get('path/exact')
+  @ApiOperation({ summary: 'Buscar alocação exata pelo caminho (ex: "F1/R2/A/S1/L1")' })
+  @ApiResponse({ status: 200, description: 'Alocação encontrada com sucesso' })
+  @ApiQuery({ name: 'path', description: 'O caminho materializado exato' })
+  async findExactPath(@Query('path') path: string): Promise<AllocationDocument | null> {
+    return this.allocationService.findExactPath(path);
+  }
+
+  @Get(':id/products')
+  @ApiOperation({ summary: 'Buscar todos os produtos de todos os boxes da alocação' })
+  @ApiResponse({ status: 200, description: 'Produtos retornados com sucesso agrupados por box' })
+  @ApiResponse({ status: 404, description: 'Alocação não encontrada' })
+  async getAllocationProducts(@Param('id') id: string): Promise<any> {
+    return this.allocationService.getAllocationProducts(id);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Buscar alocação por ID' })
   @ApiResponse({ status: 200, description: 'Alocação encontrada com sucesso' })
   @ApiResponse({ status: 404, description: 'Alocação não encontrada' })
-  async findOne(@Param('id') id: number): Promise<ProductAllocation> {
+  async findOne(@Param('id') id: string): Promise<AllocationDocument> {
     return this.allocationService.findOne(id);
   }
 
@@ -62,7 +79,7 @@ export class ProductAllocationController {
   @ApiOperation({ summary: 'Criar nova alocação' })
   @ApiResponse({ status: 201, description: 'Alocação criada com sucesso' })
   @ApiResponse({ status: 400, description: 'Dados inválidos ou alocação já existe' })
-  async create(@Body() createAllocationDto: CreateProductAllocationDto): Promise<ProductAllocation> {
+  async create(@Body() createAllocationDto: CreateProductAllocationDto): Promise<AllocationDocument> {
     return this.allocationService.create(createAllocationDto);
   }
 
@@ -72,9 +89,9 @@ export class ProductAllocationController {
   @ApiResponse({ status: 404, description: 'Alocação não encontrada' })
   @ApiResponse({ status: 400, description: 'Dados inválidos ou conflito de coordenadas' })
   async update(
-    @Param('id') id: number,
+    @Param('id') id: string,
     @Body() updateAllocationDto: UpdateProductAllocationDto,
-  ): Promise<ProductAllocation> {
+  ): Promise<AllocationDocument> {
     return this.allocationService.update(id, updateAllocationDto);
   }
 
@@ -83,7 +100,7 @@ export class ProductAllocationController {
   @ApiResponse({ status: 200, description: 'Alocação excluída com sucesso' })
   @ApiResponse({ status: 404, description: 'Alocação não encontrada' })
   @ApiResponse({ status: 400, description: 'Não é possível excluir alocação com inventários associados' })
-  async remove(@Param('id') id: number): Promise<{ message: string }> {
+  async remove(@Param('id') id: string): Promise<{ message: string }> {
     await this.allocationService.remove(id);
     return { message: 'Alocação excluída com sucesso' };
   }
@@ -92,7 +109,7 @@ export class ProductAllocationController {
   @ApiOperation({ summary: 'Alternar disponibilidade da alocação' })
   @ApiResponse({ status: 200, description: 'Disponibilidade alterada com sucesso' })
   @ApiResponse({ status: 404, description: 'Alocação não encontrada' })
-  async toggleAvailability(@Param('id') id: number): Promise<ProductAllocation> {
+  async toggleAvailability(@Param('id') id: string): Promise<AllocationDocument> {
     return this.allocationService.toggleAvailability(id);
   }
 
@@ -100,62 +117,20 @@ export class ProductAllocationController {
   @ApiOperation({ summary: 'Alternar status ativo da alocação' })
   @ApiResponse({ status: 200, description: 'Status ativo alterado com sucesso' })
   @ApiResponse({ status: 404, description: 'Alocação não encontrada' })
-  async toggleActive(@Param('id') id: number): Promise<ProductAllocation> {
+  async toggleActive(@Param('id') id: string): Promise<AllocationDocument> {
     return this.allocationService.toggleActive(id);
   }
 
-  @Get('coordinates/search')
-  @ApiOperation({ summary: 'Buscar alocação por coordenadas específicas' })
-  @ApiResponse({ status: 200, description: 'Alocação encontrada ou null' })
-  @ApiQuery({ name: 'area', description: 'Área da alocação' })
-  @ApiQuery({ name: 'column', description: 'Coluna da alocação' })
-  @ApiQuery({ name: 'aisle', description: 'Corredor da alocação' })
-  @ApiQuery({ name: 'rack', description: 'Prateleira da alocação' })
-  @ApiQuery({ name: 'shelf', description: 'Prateleira da alocação' })
-  @ApiQuery({ name: 'bin', description: 'Caixa da alocação' })
-  @ApiQuery({ name: 'position', description: 'Posição da alocação' })
-  async findByCoordinates(
-    @Query('area') area: string,
-    @Query('column') column: string,
-    @Query('aisle') aisle: number,
-    @Query('rack') rack: string,
-    @Query('shelf') shelf: number,
-    @Query('bin') bin: number,
-    @Query('position') position: number,
-  ): Promise<ProductAllocation | null> {
-    return this.allocationService.findByCoordinates(area, column, aisle, rack, shelf, bin, position);
-  }
 
-  @Get('coordinates/search-new')
-  @ApiOperation({ summary: 'Buscar alocação por novas coordenadas (floor/room/row/shelf/level/bin)' })
-  @ApiResponse({ status: 200, description: 'Alocação encontrada ou null' })
-  @ApiQuery({ name: 'floor', description: 'Andar (floor)' })
-  @ApiQuery({ name: 'room', description: 'Sala (room)' })
-  @ApiQuery({ name: 'row', description: 'Fileira (row)' })
-  @ApiQuery({ name: 'shelf', description: 'Prateleira (shelf)' })
-  @ApiQuery({ name: 'level', description: 'Nível da prateleira (level)' })
-  @ApiQuery({ name: 'bin', description: 'Caixa/BIN' })
-  async findByNewCoordinates(
-    @Query('floor') floor: number,
-    @Query('room') room: number,
-    @Query('row') row: string,
-    @Query('shelf') shelf: number,
-    @Query('level') level: number,
-    @Query('bin') bin: number,
-  ): Promise<ProductAllocation | null> {
-    return this.allocationService.findByNewCoordinates(floor, room, row, shelf, level, bin);
-  }
-
-  // NOVO: endpoint para leitura de QR de allocation
   @Post('scan')
-  @ApiOperation({ summary: 'Escanear QR Code de allocation e criar/buscar alocação com próximo BIN automático' })
+  @ApiOperation({ summary: 'Escanear QR Code de allocation e criar/buscar alocação' })
   @ApiResponse({ status: 200, description: 'Alocação criada/encontrada com sucesso' })
   @ApiQuery({ name: 'dryRun', description: 'Quando true, apenas pré-visualiza sem criar', required: false })
   async scanAllocation(
-    @Body() body: { qr: string; conditionId: number },
+    @Body() body: { qr: string; warehouseId?: string },
     @Query('dryRun') dryRun?: string,
-  ): Promise<ProductAllocation> {
+  ): Promise<any> {
     const isDryRun = typeof dryRun === 'string' ? dryRun === 'true' : false;
-    return this.allocationService.scanAllocation(body.qr, body.conditionId, isDryRun);
+    return this.allocationService.scanAllocation(body.qr, body.warehouseId, isDryRun);
   }
 }

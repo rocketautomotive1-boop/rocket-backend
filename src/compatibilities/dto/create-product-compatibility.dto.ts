@@ -1,9 +1,9 @@
-import { IsString, IsInt, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsInt } from 'class-validator';
 
 export class CreateProductCompatibilityDto {
   @IsOptional()
-  @IsInt()
-  productId?: number;
+  @IsString()
+  productId?: string;
 
   @IsOptional()
   @IsInt()

@@ -100,10 +100,10 @@ export class StockWatcherService implements OnModuleInit, OnModuleDestroy {
     private async executeSync(productId: string) {
         try {
             this.logger.debug(`[StockWatcher] Recalculating stock for Product ${productId}`);
-            const newStock = await this.productRepository.syncStockFromMovements(productId);
-            this.logger.debug(`[StockWatcher] Stock updated for ${productId}: ${newStock}`);
+            const newStock = await this.productRepository.calculateStock(productId);
+            this.logger.debug(`[StockWatcher] Stock calculated for ${productId}: ${newStock}`);
         } catch (error) {
-            this.logger.error(`[StockWatcher] Failed to sync stock for ${productId}: ${error.message}`);
+            this.logger.error(`[StockWatcher] Failed to calculate stock for ${productId}: ${error.message}`);
         }
     }
 }

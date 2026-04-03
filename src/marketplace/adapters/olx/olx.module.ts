@@ -6,7 +6,6 @@ import { OLXCatalogService } from './olx-catalog.service';
 import { OLXHighlightsService } from './olx-highlights.service';
 import { OLXWebhookService } from './olx-webhook.service';
 import { OLXController } from './olx.controller';
-import { OLXCallbackController } from './olx-callback.controller';
 import { MarketplaceDescriptionService } from '../../services/marketplace-description.service';
 import { ProductModule } from '../../../product/product.module';
 import { MarketplaceModule } from '../../../marketplace/marketplace.module';
@@ -17,7 +16,7 @@ import { MarketplaceModule } from '../../../marketplace/marketplace.module';
     ProductModule,
     MarketplaceModule,
   ],
-  controllers: [OLXController, OLXCallbackController],
+  controllers: [OLXController],
   providers: [],
   exports: []
 })

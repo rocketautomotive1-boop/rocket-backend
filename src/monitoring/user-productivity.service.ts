@@ -26,11 +26,11 @@ export class UserProductivityService {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
 
-            let realUserId = userId;
-            if (!realUserId || realUserId === 'system' || realUserId === 'SYSTEM') {
-                // If we don't have a user, we might want to log it as 'SYSTEM' or skip
-                // For now, logging as SYSTEM to debug
-                realUserId = 'SYSTEM';
+            let realUserId: Types.ObjectId | undefined;
+            if (userId && userId !== 'system' && userId !== 'SYSTEM') {
+                try {
+                    realUserId = new Types.ObjectId(userId);
+                } catch (e) { }
             }
 
             const entry = new this.userProductivityModel({
@@ -42,6 +42,8 @@ export class UserProductivityService {
                 isError: !!data.isError,
                 data: {
                     ...data,
+                    marketplaceId: data.marketplaceId ? new Types.ObjectId(data.marketplaceId) : undefined,
+                    productId: data.productId ? new Types.ObjectId(data.productId) : undefined,
                     timestamp: new Date()
                 }
             });
@@ -52,36 +54,70 @@ export class UserProductivityService {
         }
     }
 
-    async getStats(userId: string) {
-        // Default to last 30 days or just today/all time? 
-        // Request said "daily progress", let's show today's stats primarily but maybe return a structure that supports historical if needed using aggregation.
-        // The requirements say "aggregated by userId and day".
-        // The endpoint is "my-stats" so implies current snapshot or recent history.
+    async getStats(userId: string, period: string = 'today') {
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        let dateMatch: any = today;
+
+        if (period === 'yesterday') {
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+            dateMatch = yesterday;
+        } else if (period === 'last7days') {
+            const past = new Date(today);
+            past.setDate(past.getDate() - 7);
+            dateMatch = { $gte: past, $lte: today };
+        } else if (period === 'last30days') {
+            const past = new Date(today);
+            past.setDate(past.getDate() - 30);
+            dateMatch = { $gte: past, $lte: today };
+        } else if (period === 'all') {
+            dateMatch = undefined;
+        }
+
+        let userObjId: Types.ObjectId;
+        try {
+            userObjId = new Types.ObjectId(userId);
+        } catch (e) {
+            return {
+                period,
+                summary: { created: 0, publishedValue: 0, publishedQuantity: 0, syncSuccess: 0, syncErrors: 0, syncTotal: 0 },
+                byMarketplace: []
+            };
+        }
+
+        const matchStage: any = { userId: userObjId };
+        if (dateMatch !== undefined) {
+            matchStage.date = dateMatch;
+        }
 
         const stats = await this.userProductivityModel.aggregate([
             {
-                $match: {
-                    userId: userId,
-                    date: today
-                }
+                $match: matchStage
             },
             {
                 $group: {
-                    _id: null,
-                    createdCount: {
-                        $sum: { $cond: [{ $eq: ["$type", ProductivityType.CREATE] }, 1, 0] }
+                    _id: {
+                        productId: "$productId",
+                        docId: { $cond: [{ $ifNull: ["$productId", false] }, null, "$_id"] }
                     },
-                    syncSuccessCount: {
-                        $sum: { $cond: [{ $eq: ["$type", ProductivityType.SYNC_SUCCESS] }, 1, 0] }
+                    createdCount: {
+                        $max: { $cond: [{ $eq: ["$type", ProductivityType.CREATE] }, 1, 0] }
+                    },
+                    syncSuccess: {
+                        $max: { $cond: [{ $eq: ["$type", ProductivityType.SYNC_SUCCESS] }, 1, 0] }
                     },
                     publishedValue: {
-                        $sum: {
+                        $max: {
                             $cond: [
                                 { $eq: ["$type", ProductivityType.SYNC_SUCCESS] },
-                                { $ifNull: ["$data.price", 0] },
+                                {
+                                    $multiply: [
+                                        { $ifNull: ["$data.price", 0] },
+                                        { $ifNull: ["$data.quantity", 1] }
+                                    ]
+                                },
                                 0
                             ]
                         }
@@ -97,19 +133,43 @@ export class UserProductivityService {
                                 0
                             ]
                         }
+                    },
+                    publishedQuantity: {
+                        $max: {
+                            $cond: [
+                                { $eq: ["$type", ProductivityType.SYNC_SUCCESS] },
+                                { $ifNull: ["$data.quantity", 0] },
+                                0
+                            ]
+                        }
                     }
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    createdCount: { $sum: "$createdCount" },
+                    syncSuccessCount: { $sum: "$syncSuccess" },
+                    publishedValue: { $sum: "$publishedValue" },
+                    errorsCount: { $sum: "$errorsCount" },
+                    totalSyncAttempts: { $sum: "$totalSyncAttempts" },
+                    publishedQuantity: { $sum: "$publishedQuantity" }
                 }
             }
         ]);
 
+        const marketStatsMatchStage: any = {
+            userId: userObjId,
+            type: { $in: [ProductivityType.SYNC_SUCCESS, ProductivityType.SYNC_ERROR] }
+        };
+        if (dateMatch !== undefined) {
+            marketStatsMatchStage.date = dateMatch;
+        }
+
         // Error rate by marketplace
         const marketStats = await this.userProductivityModel.aggregate([
             {
-                $match: {
-                    userId: userId,
-                    date: today,
-                    type: { $in: [ProductivityType.SYNC_SUCCESS, ProductivityType.SYNC_ERROR] }
-                }
+                $match: marketStatsMatchStage
             },
             {
                 $group: {
@@ -136,18 +196,92 @@ export class UserProductivityService {
             }
         ]);
 
-        const result = stats[0] || { createdCount: 0, syncSuccessCount: 0, publishedValue: 0, errorsCount: 0, totalSyncAttempts: 0 };
+        const result = stats[0] || { createdCount: 0, syncSuccessCount: 0, publishedValue: 0, publishedQuantity: 0, errorsCount: 0, totalSyncAttempts: 0 };
 
         return {
-            date: today,
+            period,
             summary: {
                 created: result.createdCount,
                 publishedValue: result.publishedValue,
+                publishedQuantity: result.publishedQuantity,
                 syncSuccess: result.syncSuccessCount,
                 syncErrors: result.errorsCount,
                 syncTotal: result.totalSyncAttempts
             },
             byMarketplace: marketStats
         };
+    }
+
+    async getWeeklyStats(userId: string) {
+        const endDate = new Date();
+        endDate.setHours(23, 59, 59, 999);
+
+        const startDate = new Date(endDate);
+        startDate.setHours(0, 0, 0, 0);
+        startDate.setDate(startDate.getDate() - 6);
+
+        let userObjId: Types.ObjectId;
+        try {
+            userObjId = new Types.ObjectId(userId);
+        } catch (e) {
+            return [];
+        }
+
+        const stats = await this.userProductivityModel.aggregate([
+            {
+                $match: {
+                    userId: userObjId,
+                    date: { $gte: startDate, $lte: endDate },
+                    type: ProductivityType.SYNC_SUCCESS
+                }
+            },
+            {
+                $group: {
+                    _id: {
+                        date: "$date",
+                        productId: "$productId"
+                    }
+                }
+            },
+            {
+                $group: {
+                    _id: "$_id.date",
+                    count: { $sum: 1 }
+                }
+            }
+        ]);
+
+        const resultByDate: Record<string, number> = {};
+        const toDateKey = (d: Date) => {
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
+        for (const row of stats) {
+            if (!row._id) continue;
+            const dateObj = new Date(row._id);
+            const key = toDateKey(dateObj);
+            resultByDate[key] = (resultByDate[key] || 0) + row.count;
+        }
+
+        const days: Array<{ date: string; day: string; count: number; today: boolean }> = [];
+        const weekDaysSunFirst = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayKey = toDateKey(today);
+        const cursor = new Date(startDate);
+        cursor.setHours(0, 0, 0, 0);
+
+        while (cursor <= endDate) {
+            const key = toDateKey(cursor);
+            const dayName = weekDaysSunFirst[cursor.getDay()];
+            const isToday = key === todayKey;
+            days.push({ date: key, day: dayName, count: resultByDate[key] ?? 0, today: isToday });
+            cursor.setDate(cursor.getDate() + 1);
+        }
+
+        return days;
     }
 }

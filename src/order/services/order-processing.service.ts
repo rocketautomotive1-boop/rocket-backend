@@ -50,12 +50,11 @@ export class OrderProcessingService {
                 condition: bi.condition?.name || 'Novo'
             })) || [];
 
-            // Fetch product to get internal SKU
+            // Fetch product to get partNumber as display identifier
             let internalSku = 'N/A';
             if (item.productId) {
                 const product = await this.productService.findOne(String(item.productId));
-                internalSku = String(product?.partNumber || product?.sku || 'N/A');
-                console.log(`[getSeparationList] Product ID: ${item.productId}, Product partNumber: ${product?.partNumber}, Product sku: ${product?.sku}, Internal SKU chosen: ${internalSku}`);
+                internalSku = String(product?.partNumber || 'N/A');
             }
 
             separationItems.push({
@@ -87,12 +86,9 @@ export class OrderProcessingService {
             });
         }
 
-        // 2. Main Check: Check via Product Service by External Code (SKU/EAN)
-        // This is now the primary way since DB items don't store SKU
+        // 2. Main Check: find by barcode or partNumber
         try {
-            const product = await this.productService.findBySku(scannedCode);
-            // Or findByBarcode if available
-            // const product = await this.productService.findByBarcode(scannedCode); 
+            const product = await this.productService.findByBarcode(scannedCode);
 
             if (product) {
                 const match = order.items.find(i => String(i.productId) === String(product._id));
@@ -100,7 +96,7 @@ export class OrderProcessingService {
                     return Result.ok({
                         valid: true,
                         item: {
-                            sku: String(product.sku || product.partNumber),
+                            sku: String(product.partNumber),
                             title: match.title,
                             quantity: match.quantity
                         }

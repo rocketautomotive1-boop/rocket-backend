@@ -349,6 +349,10 @@ RETORNE APENAS UM ÚNICO VALOR EM UMA LINHA:
       3. vehicles: [{ model: string, startYear: number, endYear: number }] (Quebre aplicações como "Fiat Strada 2020 a 2024").
       4. fiscal: { ncm: string, origin: string } (Extraia se mencionado).
       5. dimensions: { weight: number, length: number, width: number, height: number } (Capture "X kg", "X mm", etc).
+      6. attributes: [{ key: string, value: string }] (Atributos técnicos do produto: material, posição de montagem, tipo, diâmetro, lado, cor, acabamento, etc. Extraia do contexto dos snippets. Máximo 15 atributos relevantes. NÃO inclua atributos que já são campos dedicados do produto: marca/brand, condição/condition, número da peça/part number, garantia/warranty, peso/weight, dimensões/dimensions, NCM, origem/origin, preço/price, título/title, descrição/description.).
+      7. description: string (Descrição completa do produto em português brasileiro, adequada para anúncios em marketplaces. Mínimo 3 frases, máximo 8 frases. Destaque compatibilidade, material e benefícios.).
+      8. details: string (Detalhes técnicos adicionais em português, como especificações de instalação, observações de uso, informações de garantia, se disponíveis nos snippets. Máximo 3 frases.).
+      9. oemCodes: [string] (Códigos OEM, cross-reference e part numbers alternativos encontrados nos snippets. Extraia números de peça de outros fabricantes, códigos equivalentes, referências originais. NÃO inclua o part number principal da query. Máximo 10 códigos.).
 
       FORMATO JSON:
       {
@@ -356,7 +360,11 @@ RETORNE APENAS UM ÚNICO VALOR EM UMA LINHA:
         "titles": [],
         "vehicles": [],
         "fiscal": { "ncm": "", "origin": "" },
-        "dimensions": { "weight": 0, "length": 0, "width": 0, "height": 0 }
+        "dimensions": { "weight": 0, "length": 0, "width": 0, "height": 0 },
+        "attributes": [],
+        "description": "",
+        "details": "",
+        "oemCodes": []
       }
     `;
 
@@ -375,7 +383,21 @@ RETORNE APENAS UM ÚNICO VALOR EM UMA LINHA:
       const jsonMatch = rawText.match(/\{[\s\S]*\}/);
       const jsonString = jsonMatch ? jsonMatch[0] : rawText;
 
-      return JSON.parse(jsonString);
+      const parsed = JSON.parse(jsonString);
+
+      // Inject detected side as attribute if not already present
+      if (targetSide !== 'neutral') {
+        const sideValue = targetSide === 'left' ? 'Esquerdo' : 'Direito';
+        const hasPosition = parsed.attributes?.some((a: any) =>
+          a.key?.toLowerCase().includes('posição') || a.key?.toLowerCase().includes('lado')
+        );
+        if (!hasPosition) {
+          parsed.attributes = parsed.attributes || [];
+          parsed.attributes.push({ key: 'Posição', value: sideValue });
+        }
+      }
+
+      return parsed;
     } catch (error) {
       console.error('Error sanitizing discovery data:', error);
       return {
@@ -383,7 +405,11 @@ RETORNE APENAS UM ÚNICO VALOR EM UMA LINHA:
         titles: rawItems.slice(0, 5).map(it => it.title),
         vehicles: [],
         fiscal: { ncm: "", origin: "" },
-        dimensions: { weight: 0, length: 0, width: 0, height: 0 }
+        dimensions: { weight: 0, length: 0, width: 0, height: 0 },
+        attributes: [],
+        description: "",
+        details: "",
+        oemCodes: []
       };
     }
   }

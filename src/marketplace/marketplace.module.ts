@@ -12,6 +12,7 @@ import { ProductModule } from '../product/product.module';
 import { AuthModule } from '../auth/auth.module';
 import { OrderModule } from '../order/order.module';
 import { ListingModule } from '../listing/listing.module'; // [NEW]
+import { AiModule } from '../ai/ai.module';
 import { MercadoLivreProductAdapter } from './adapters/mercado-livre/mercado-livre-product.adapter';
 import { MercadoLivreController } from './controllers/mercado-livre.controller';
 // import { PublicationPipelineService } from './services/publication-pipeline.service'; // REMOVED
@@ -30,6 +31,10 @@ import { MarketplaceIntegrationService } from './services/marketplace-integratio
 import { MarketplaceIntegrationHelperService } from './services/marketplace-integration-helper.service';
 import { MarketplaceIntegrationResultService } from './services/marketplace-integration-result.service';
 import { MarketplaceDescriptionService } from './services/marketplace-description.service';
+import { MarketplaceTemplateRepository } from './services/marketplace-template.repository';
+import { ProductFieldMapper } from './services/product-field-mapper.service';
+import { TemplateEngine } from './services/template-engine.service';
+import { TemplateConditionEvaluator } from './services/template-condition.evaluator';
 import { MarketplaceAdapterRegistry } from './registries/marketplace-adapter.registry';
 import { MarketplaceCategoryService } from './services/marketplace-category.service';
 
@@ -58,7 +63,6 @@ import { ViaVarejoModule } from './adapters/viavarejo/viavarejo.module';
 import { YampiModule } from './adapters/yampi/yampi.module';
 import { MagaluModule } from './adapters/magalu/magalu.module';
 
-import { ShopeeExportController } from './controllers/shopee-export.controller';
 import { ShopeeController } from './controllers/shopee.controller';
 import { AmazonAdapter } from './adapters/amazon/amazon.adapter';
 import { AmazonService } from './services/amazon.service';
@@ -80,6 +84,14 @@ import { SearchModule } from '../search/search.module';
 import { RocketProductAdapter } from './adapters/rocket/rocket-product.adapter';
 import { MarketplaceOrchestratorModule } from '../marketplace-orchestrator/marketplace-orchestrator.module';
 
+import { TikTokShopAdapter } from './adapters/tiktok-shop/tiktok-shop.adapter';
+import { TikTokShopAuthAdapter } from './adapters/tiktok-shop/tiktok-shop-auth.adapter';
+import { TikTokShopProductAdapter } from './adapters/tiktok-shop/tiktok-shop-product.adapter';
+import { TikTokShopOrderAdapter } from './adapters/tiktok-shop/tiktok-shop-order.adapter';
+import { TikTokShopCategoryAdapter } from './adapters/tiktok-shop/tiktok-shop-category.adapter';
+import { TikTokShopService } from './services/tiktok-shop.service';
+import { TikTokShopController } from './controllers/tiktok-shop.controller';
+
 @Module({
   imports: [
     HttpModule,
@@ -100,6 +112,7 @@ import { MarketplaceOrchestratorModule } from '../marketplace-orchestrator/marke
     ]),
     forwardRef(() => ProductModule),
     forwardRef(() => AuthModule),
+    forwardRef(() => AiModule),
     ViaVarejoModule,
     YampiModule,
     MagaluModule,
@@ -125,7 +138,7 @@ import { MarketplaceOrchestratorModule } from '../marketplace-orchestrator/marke
     forwardRef(() => SearchModule),
     forwardRef(() => MarketplaceOrchestratorModule), // [NEW] Forward Ref for Orchestrator
   ],
-  controllers: [MarketplaceController, MercadoLivreController, CategoryController, ShopeeExportController, ShopeeController],
+  controllers: [MarketplaceController, MercadoLivreController, CategoryController, ShopeeController, TikTokShopController],
 
   providers: [
     MarketplaceService,
@@ -150,6 +163,10 @@ import { MarketplaceOrchestratorModule } from '../marketplace-orchestrator/marke
     MarketplaceIntegrationService,
     MarketplaceIntegrationHelperService,
     MarketplaceIntegrationResultService,
+    TemplateConditionEvaluator,
+    ProductFieldMapper,
+    TemplateEngine,
+    MarketplaceTemplateRepository,
     MarketplaceDescriptionService,
     MarketplaceOrderService,
     // MarketplacePublicationService, // REMOVED
@@ -174,6 +191,12 @@ import { MarketplaceOrchestratorModule } from '../marketplace-orchestrator/marke
     OLXWebhookService,
     MarketplaceAdapterRegistry,
     RocketProductAdapter,
+    TikTokShopAdapter,
+    TikTokShopAuthAdapter,
+    TikTokShopProductAdapter,
+    TikTokShopOrderAdapter,
+    TikTokShopCategoryAdapter,
+    TikTokShopService,
   ],
   exports: [
     MarketplaceService,
@@ -195,6 +218,10 @@ import { MarketplaceOrchestratorModule } from '../marketplace-orchestrator/marke
 
     MarketplaceIntegrationService,
     MarketplaceIntegrationHelperService,
+    MarketplaceTemplateRepository,
+    ProductFieldMapper,
+    TemplateEngine,
+    TemplateConditionEvaluator,
     MarketplaceDescriptionService,
     MarketplaceCategoryService,
     MarketplaceOrderService,
@@ -217,6 +244,12 @@ import { MarketplaceOrchestratorModule } from '../marketplace-orchestrator/marke
     MarketplaceAuthModule,
     RocketProductAdapter,
     PublicationLogService,
+    TikTokShopAdapter,
+    TikTokShopAuthAdapter,
+    TikTokShopProductAdapter,
+    TikTokShopOrderAdapter,
+    TikTokShopCategoryAdapter,
+    TikTokShopService,
   ],
 })
 export class MarketplaceModule { }

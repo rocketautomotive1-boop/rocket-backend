@@ -15,6 +15,10 @@ export class MarketplaceAdapterRegistry {
         this.orderAdapters.set(marketplaceName, adapter);
     }
 
+    hasOrderAdapter(marketplaceName: string): boolean {
+        return this.orderAdapters.has(marketplaceName);
+    }
+
     getOrderAdapter(marketplaceName: string): IMarketplaceOrderAdapter {
         const adapter = this.orderAdapters.get(marketplaceName);
         if (!adapter) {

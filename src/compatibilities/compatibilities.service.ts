@@ -33,15 +33,15 @@ export class CompatibilitiesService {
     }
 
     // Buscar o produto para obter o _id
-    const product = await this.productModel.findOne({ sku: createProductCompatibilityDto.productId }).exec();
+    const product = await this.productModel.findById(createProductCompatibilityDto.productId).exec();
     if (!product) {
-      throw new NotFoundException(`Produto com SKU ${createProductCompatibilityDto.productId} não encontrado`);
+      throw new NotFoundException(`Produto ${createProductCompatibilityDto.productId} não encontrado`);
     }
 
     const compatibility = new this.productCompatibilityModel({
       ...createProductCompatibilityDto,
       product: product._id,
-      productId: product.sku
+      productId: String(product._id),
     });
     const savedCompatibility = await compatibility.save();
 
@@ -78,16 +78,16 @@ export class CompatibilitiesService {
       }
 
       // 3. Buscar o produto para obter o _id
-      const product = await this.productModel.findOne({ sku: productId }).exec();
+      const product = await this.productModel.findById(productId).exec();
       if (!product) {
-        throw new NotFoundException(`Produto com SKU ${productId} não encontrado`);
+        throw new NotFoundException(`Produto ${productId} não encontrado`);
       }
 
       // 4. Salvar todas as novas compatibilidades em batch
       const compatibilitiesToSave = newCompatibilities.map(dto => ({
         ...dto,
         product: product._id,
-        productId: product.sku
+        productId: String(product._id),
       }));
 
       const savedBatch = await this.productCompatibilityModel.insertMany(compatibilitiesToSave);
@@ -138,7 +138,7 @@ export class CompatibilitiesService {
     return this.productCompatibilityModel.find(filter).exec();
   }
 
-  async findByProductId(productId: number) {
+  async findByProductId(productId: string) {
     return this.productCompatibilityModel.find({ productId })
       .sort({ createdAt: -1 })
       .exec();
@@ -216,7 +216,7 @@ export class CompatibilitiesService {
     }
   }
 
-  private async syncCompatibilityToMercadoLivre(productId: number, vehicleIds: string[]) {
+  private async syncCompatibilityToMercadoLivre(productId: string, vehicleIds: string[]) {
     try {
       // Buscar títulos do produto que tenham marketplace Mercado Livre
       const productTitles = await this.productTitleService.findByProductIdAndMarketplace(productId, 'Mercado Livre');

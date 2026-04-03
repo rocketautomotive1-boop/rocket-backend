@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { ClientSession } from 'mongoose';
 import { ProductMovementService } from '../../product/services/product-movement.service';
 import { ProductRepository } from '../../product/product.repository';
 import { OrderRepository } from '../order.repository';
@@ -20,7 +21,7 @@ export class StockOrchestratorService {
     /**
      * Reserves stock for an order. 
      * Creates a 'reservation' stock movement.
-     * This INCREASES 'stockReserved' but DOES NOT decrement 'stockQuantity'.
+     * This INCREASES 'stockReserved'. Stock is derived from stock_movements aggregation.
      */
     async reserveStock(items: { productId: string; quantity: number }[], reference: string, session?: any): Promise<boolean> {
         try {
@@ -35,7 +36,7 @@ export class StockOrchestratorService {
                     reason: 'Reserva de Pedido (Sync)',
                     reference: reference, // metadata.externalReference
                     origin: { type: 'system', location: 'Orchestrator' },
-                    conditionId: 1
+                    condition: 'new',
                 }, session);
 
                 this.logger.debug(`[Stock] Reserved ${item.quantity} for Product ${item.productId} (Ref: ${reference})`);
@@ -49,7 +50,7 @@ export class StockOrchestratorService {
 
     /**
      * Confirms a reservation by converting 'Reserved' to 'Deducted'.
-     * Creates an 'outbound' movement which decrements 'stockQuantity'.
+     * Creates an 'outbound' movement (stock is derived from movements aggregation).
      * Passing isFulfillment: true ensures we also RELEASE the reservation (decrement stockReserved).
      */
     async confirmReservation(items: { productId: string; quantity: number }[], reference: string, session?: any) {
@@ -63,7 +64,7 @@ export class StockOrchestratorService {
                     quantity: item.quantity,
                     reason: 'Venda Confirmada (Reserva Baixada)',
                     reference: reference,
-                    conditionId: 1,
+                    condition: 'new',
                     metadata: {
                         isFulfillment: true
                     }
@@ -92,8 +93,50 @@ export class StockOrchestratorService {
         }
     }
     /**
+     * Deducts stock within an EXTERNAL session provided by OrderSyncPipeline.
+     * Returns movement IDs so the pipeline can link them to the order document atomically.
+     * Idempotency: skips silently if reference already processed.
+     */
+    async deductAndLink(
+        orderId: string,
+        items: { productId: string; quantity: number }[],
+        reference: string,
+        marketplaceName: string,
+        session: ClientSession,
+    ): Promise<{ movementIds: string[] }> {
+        const alreadyExists = await this.productMovementService.existsReference(reference);
+        if (alreadyExists) {
+            this.logger.warn(`[Stock] deductAndLink: ref ${reference} already processed. Skipping.`);
+            return { movementIds: [] };
+        }
+
+        const movementIds: string[] = [];
+
+        for (const item of items) {
+            if (!item.productId || item.quantity <= 0) continue;
+
+            const movement = await this.productMovementService.create({
+                productId: item.productId,
+                orderId,
+                type: 'outbound',
+                quantity: item.quantity,
+                reason: `Venda ${marketplaceName}`,
+                reference,
+                condition: 'new',
+                origin: { type: 'marketplace', location: marketplaceName },
+                status: 'completed',
+            }, session);
+
+            movementIds.push(movement._id?.toString() ?? movement.id);
+            this.logger.debug(`[Stock] deductAndLink: -${item.quantity} product=${item.productId} ref=${reference}`);
+        }
+
+        return { movementIds };
+    }
+
+    /**
      * Deducts stock directly (Atomic Transaction).
-     * Used used when proceeding directly from 'Pending' to 'Deducted' without reservation step.
+     * Used when proceeding directly from 'Pending' to 'Deducted' without reservation step.
      */
     async deductStock(orderId: string, items: { productId: string; quantity: number }[], reference: string, marketplaceName: string) {
         const session = await this.productRepository.getConnection().startSession();
@@ -115,7 +158,7 @@ export class StockOrchestratorService {
             for (const item of items) {
                 if (!item.productId || item.quantity <= 0) continue;
 
-                // Create Movement (decrements stockQuantity)
+                // Create outbound movement (stock derived from movements aggregation)
                 const movement = await this.productMovementService.create({
                     productId: item.productId,
                     orderId: orderId, // Link to order (ObjectId)
@@ -123,7 +166,7 @@ export class StockOrchestratorService {
                     quantity: item.quantity,
                     reason: `Venda ${marketplaceName}`,
                     reference: reference,
-                    conditionId: 1,
+                    condition: 'new',
                     origin: {
                         type: 'marketplace',
                         location: marketplaceName

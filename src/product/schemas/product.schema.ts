@@ -244,16 +244,8 @@ export class ProductModel {
     @Prop({ default: true, index: true })
     active: boolean;
 
-    @Prop({ type: {} })
-    sku: string | number; // Legacy ID or String SKU
-
-    @Prop()
-    stockQuantity: number;
-
     @Prop({ default: 0 })
     stockReserved: number; // Items reserved in orders not yet shipped
-
-    // Virtual: availableStock
 
     @Prop({ type: Types.ObjectId, ref: 'CrossReferenceGroupModel' })
     crossReferenceGroupId: Types.ObjectId;
@@ -290,12 +282,7 @@ export class ProductModel {
 
 export const ProductSchema = SchemaFactory.createForClass(ProductModel);
 
-// 1. Virtual for Available Stock (Physical - Reserved)
-ProductSchema.virtual('availableStock').get(function () {
-    return (this.stockQuantity || 0) - (this.stockReserved || 0);
-});
-
-// 2. Ensure Virtuals are included
+// Ensure Virtuals are included
 ProductSchema.set('toJSON', { virtuals: true });
 ProductSchema.set('toObject', { virtuals: true });
 

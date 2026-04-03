@@ -30,24 +30,42 @@ export class MercadoLivreListingAdapter {
     private baseUrl = 'https://api.mercadolibre.com';
     private name = 'Mercado Livre';
 
-    async getListing(): Promise<any> {
+    async getSellerId(): Promise<string | undefined> {
+        try {
+            const mlUser = await this.authAdapter.me(this.name);
+            return mlUser?.id != null ? String(mlUser.id) : undefined;
+        } catch {
+            return undefined;
+        }
+    }
+
+    /**
+     * GET /users/{user_id}/items/search — paginação ML (máx. 50 por página).
+     */
+    async searchUserItems(params?: { offset?: number; limit?: number; order?: string; tags?: string }): Promise<any> {
         const mlUser = await this.authAdapter.me(this.name);
         const token = await this.authAdapter.getValidToken(this.name);
+        const offset = params?.offset ?? 0;
+        const limit = Math.min(50, Math.max(1, params?.limit ?? 50));
+        const query: Record<string, string | number> = { offset, limit };
+        if (params?.order) query.order = params.order;
+        if (params?.tags?.trim()) query.tags = params.tags.trim();
 
         try {
-            this.logger.log(`Buscando lista de produtos para o usuário ${mlUser.id}`);
-
+            this.logger.log(`Buscando items/search user=${mlUser.id} offset=${offset} limit=${limit}`);
             const response = await axios.get(`${this.baseUrl}/users/${mlUser.id}/items/search`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                },
+                headers: { Authorization: `Bearer ${token}` },
+                params: query,
             });
-            this.logger.log(`Lista de produtos encontrada para o usuário ${mlUser.id}`);
             return response.data;
-        } catch (error) {
-            this.logger.error(`Erro ao buscar lista de produtos: ${JSON.stringify(error.response?.data)}`);
+        } catch (error: any) {
+            this.logger.error(`Erro ao buscar items/search: ${JSON.stringify(error.response?.data)}`);
             throw error;
         }
+    }
+
+    async getListing(): Promise<any> {
+        return this.searchUserItems({ offset: 0, limit: 50 });
     }
 
     async getListingMultiget(): Promise<any> {

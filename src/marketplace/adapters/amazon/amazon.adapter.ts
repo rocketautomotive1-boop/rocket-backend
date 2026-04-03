@@ -4,6 +4,7 @@ import { MarketplaceToken } from '../../schemas/marketplace-token.schema';
 import { AmazonAuthAdapter } from './amazon-auth.adapter';
 import { AmazonProductAdapter } from './amazon-product.adapter';
 import * as aws4 from 'aws4'
+import * as crypto from 'crypto'
 import axios from 'axios'
 import { IMarketplaceProductAdapter } from '../../interfaces/marketplace-product-adapter.interface';
 import { IMarketplaceOrderAdapter } from '../../interfaces/marketplace-order-adapter.interface';
@@ -32,21 +33,41 @@ export class AmazonAdapter extends MarketplaceAdapter implements IMarketplacePro
 
   private async executeWithRetry<T>(
     operation: (token: MarketplaceToken) => Promise<T>,
-    context: string
+    context: string,
+    requiresLwa = true,
   ): Promise<T> {
     const marketplace = await this.authAdapter.getMarketplaceByName(this.name);
     if (!marketplace) throw new Error(`Marketplace ${this.name} not found`);
 
-    // Fallback if ensureValidToken not available on authAdapter, we might need a generic one
-    // But AmazonAuthAdapter usually handles this.
-    // Actually AmazonAdapter was receiving token in params.
-    // Standardizing to fetch it like ML and Shopee.
-    const token = await this.authAdapter.getValidToken(this.name);
+    // getValidToken retorna ResolvedToken (pode ter accessToken=null se LWA não configurado)
+    const resolved = await this.authAdapter.getValidToken(this.name);
+
+    if (requiresLwa && !resolved.accessToken) {
+      throw new Error(
+        `Amazon SP-API: token LWA (Login with Amazon) não configurado. ` +
+        `Complete o fluxo OAuth em GET /marketplace-auth/amazon/url e depois POST /marketplace-auth/amazon/callback. ` +
+        `Operação bloqueada: ${context}`
+      );
+    }
+
+    // Adaptar ResolvedToken para o shape esperado pelas operações legadas
+    const token: MarketplaceToken = {
+      accessToken: resolved.accessToken,
+      refreshToken: resolved.refreshToken,
+      expiresAt: resolved.expiresAt,
+      isActive: true,
+      additionalData: resolved.additionalData ?? {},
+    } as MarketplaceToken;
 
     try {
       return await operation(token);
     } catch (error: any) {
-      if (error.response?.status === 403 || error.response?.data?.errors?.[0]?.code === 'Unauthorized' || error.response?.data?.errors?.[0]?.message?.includes('Access to requested resource is denied')) {
+      const isAuthError =
+        error.response?.status === 403 ||
+        error.response?.data?.errors?.[0]?.code === 'Unauthorized' ||
+        error.response?.data?.errors?.[0]?.message?.includes('Access to requested resource is denied');
+
+      if (isAuthError && token.refreshToken) {
         this.logger.warn(`Auth error in Amazon (${context}), refreshing token...`);
         try {
           const newToken = await this.authAdapter.refreshToken(token);
@@ -167,7 +188,7 @@ export class AmazonAdapter extends MarketplaceAdapter implements IMarketplacePro
           marketplaceId: String(marketplace._id),
           status: o.OrderStatus,
           date_created: o.PurchaseDate,
-          total_amount: o.OrderTotal?.Amount || 0,
+          total_amount: o.OrderTotal?.Amount ? Number(o.OrderTotal.Amount) : 0,
           currency_id: o.OrderTotal?.CurrencyCode || 'BRL',
           buyer: {
             id: o.BuyerInfo?.BuyerEmail || 'anonymous',
@@ -223,18 +244,79 @@ export class AmazonAdapter extends MarketplaceAdapter implements IMarketplacePro
       const response = await axios.get(`${endpoint}${path}`, { headers: request.headers });
       const o = response.data.payload;
 
-      let shippingAddress = o.ShippingAddress;
-      let buyerInfo = o.BuyerInfo;
+      const shippingAddress = o.ShippingAddress;
+      const buyerInfo = o.BuyerInfo;
 
-      // Normalize buyer data
-      const buyer = {
+      this.logger.log(`[ShippingAddress] raw payload: ${JSON.stringify(shippingAddress)}`);
+
+      // Try fetching full PII address from /address endpoint (Tax Invoicing role required)
+      let fullAddress: any = null;
+      try {
+        fullAddress = await this.getOrderShippingAddress(orderId, token.accessToken);
+        this.logger.log(`[ShippingAddress] /address endpoint: ${JSON.stringify(fullAddress)}`);
+      } catch (err: any) {
+        const requestId = err?.response?.headers?.['x-amzn-requestid'] || 'N/A';
+        this.logger.warn(`[ShippingAddress] /address FALHOU — x-amzn-RequestId: ${requestId} | ${err.message}`);
+      }
+
+      const addr = fullAddress ?? shippingAddress;
+      const cep = (addr?.PostalCode || '').replace(/\D/g, '');
+
+      // When Amazon doesn't return street/neighborhood (common even with Tax Invoicing role),
+      // look them up via ViaCEP using the postal code.
+      let viacep: any = null;
+      if (cep && cep.length === 8 && (!addr?.AddressLine1)) {
+        try {
+          const vcRes = await axios.get(`https://viacep.com.br/ws/${cep}/json/`, { timeout: 5000 });
+          if (vcRes.data && !vcRes.data.erro) {
+            viacep = vcRes.data;
+            this.logger.log(`[ViaCEP] ${cep} → ${viacep.logradouro}, ${viacep.bairro}, ${viacep.localidade}/${viacep.uf}`);
+          }
+        } catch (err: any) {
+          this.logger.warn(`[ViaCEP] falhou para CEP ${cep}: ${err.message}`);
+        }
+      }
+
+      const recipientName = addr?.Name || fullAddress?.Name || buyerInfo?.BuyerName || 'Comprador Amazon';
+
+      // Normalize buyer data — document is empty here, enriched below via RDT
+      const buyer: any = {
         id: buyerInfo?.BuyerEmail || 'anonymous',
         nickname: buyerInfo?.BuyerName || 'Comprador Amazon',
-        name: buyerInfo?.BuyerName || 'Comprador Amazon',
-        first_name: buyerInfo?.BuyerName?.split(' ')[0] || 'Comprador',
-        last_name: buyerInfo?.BuyerName?.split(' ').slice(1).join(' ') || '',
-        document: buyerInfo?.BuyerTaxInfo?.CompanyLegalName || '',
+        name: recipientName,
+        first_name: recipientName.split(' ')[0] || 'Comprador',
+        last_name: recipientName.split(' ').slice(1).join(' ') || '',
+        document: '',
+        address: addr ? {
+          street:       addr.AddressLine1 || viacep?.logradouro || '',
+          number:       addr.AddressLine2 || 'S/N',
+          neighborhood: addr.AddressLine3 || viacep?.bairro || '',
+          city:         addr.City || viacep?.localidade || '',
+          state:        addr.StateOrRegion || viacep?.uf || '',
+          zipCode:      cep,
+          country:      addr.CountryCode || 'BR',
+        } : undefined,
       };
+
+      // ── Enrich buyer document (CPF/CNPJ) ─────────────────────────────────────
+      // Strategy 1: TaxClassifications may already be in the main order response
+      // (available without RDT when the buyer provided their CPF at checkout on Amazon BR)
+      buyer.document = this.extractBuyerDocument(buyerInfo);
+      this.logger.log(`Amazon BuyerTaxInfo (main response): ${JSON.stringify(buyerInfo?.BuyerTaxInfo)}`);
+
+      // If CPF not in main response, call /buyerInfo directly (no RDT needed per SP-API v2026-01-01)
+      if (!buyer.document) {
+        try {
+          const extendedBuyerInfo = await this.getOrderBuyerInfo(orderId, token.accessToken);
+          this.logger.log(`[buyerInfo] TaxClassifications: ${JSON.stringify(extendedBuyerInfo?.BuyerTaxInfo?.TaxClassifications ?? extendedBuyerInfo?.TaxClassifications ?? 'não encontrado')}`);
+          buyer.document = this.extractBuyerDocument(extendedBuyerInfo);
+          if (extendedBuyerInfo?.BuyerName) buyer.name = extendedBuyerInfo.BuyerName;
+          this.logger.log(`[buyerInfo] Documento extraído: "${buyer.document || '(vazio)'}"`);
+        } catch (err: any) {
+          const requestId = (err as any).response?.headers?.['x-amzn-requestid'] || 'N/A';
+          this.logger.warn(`[buyerInfo] FALHOU (${orderId}) — x-amzn-RequestId: ${requestId} | ${err.message}`);
+        }
+      }
 
       let items = [];
       try {
@@ -251,13 +333,90 @@ export class AmazonAdapter extends MarketplaceAdapter implements IMarketplacePro
         marketplaceName: this.name,
         status: o.OrderStatus,
         date_created: o.PurchaseDate,
-        total_amount: o.OrderTotal?.Amount || 0,
+        total_amount: o.OrderTotal?.Amount ? Number(o.OrderTotal.Amount) : 0,
         currency_id: o.OrderTotal?.CurrencyCode || 'BRL',
         buyer,
         items,
         original_data: o
       };
     }, 'getOrderDetails');
+  }
+
+  /**
+   * Fetches buyer PII (CPF/CNPJ) from GET /orders/v0/orders/{orderId}/buyerInfo.
+   *
+   * Tries three token strategies in order:
+   *   1. RDT without dataElements (path-only restriction — works if app has Orders role)
+   *   2. RDT with dataElements ['buyerInfo'] (requires PII approval in SP-API Console)
+   *   3. Regular LWA token (last resort — may work for some seller configurations)
+   */
+  /**
+   * Fetches buyer PII (name, CPF/CNPJ) from GET /orders/v0/orders/{orderId}/buyerInfo.
+   *
+   * Per Amazon SP-API docs (v2026-01-01), RDT is NOT required for PII access —
+   * the regular LWA access token is sufficient when the app has the appropriate
+   * restricted roles (Tax Invoicing / Direct-to-Consumer Shipping).
+   */
+  private async getOrderBuyerInfo(orderId: string, accessToken: string): Promise<any> {
+    const { accessKeyId, secretAccessKey, region, endpoint } = this.getCredentials();
+    const path = `/orders/v0/orders/${orderId}/buyerInfo`;
+    const url = new URL(endpoint);
+
+    const request = {
+      host: url.host,
+      path,
+      service: 'execute-api',
+      region,
+      method: 'GET',
+      headers: { 'x-amz-access-token': accessToken } as Record<string, string>,
+    };
+    aws4.sign(request as any, { accessKeyId, secretAccessKey });
+
+    const res = await axios.get(`${endpoint}${path}`, { headers: request.headers });
+    const requestId = res.headers?.['x-amzn-requestid'] || 'N/A';
+    this.logger.log(`[buyerInfo] OK — x-amzn-RequestId: ${requestId}`);
+    return res.data?.payload?.BuyerInfo ?? res.data?.payload ?? null;
+  }
+
+  /**
+   * Fetches the full shipping address (PII) from GET /orders/v0/orders/{orderId}/address.
+   * Requires the Tax Invoicing or Direct-to-Consumer Shipping restricted role.
+   * Falls back silently — caller logs the error.
+   */
+  private async getOrderShippingAddress(orderId: string, accessToken: string): Promise<any> {
+    const { accessKeyId, secretAccessKey, region, endpoint } = this.getCredentials();
+    const path = `/orders/v0/orders/${orderId}/address`;
+    const url = new URL(endpoint);
+
+    const request = {
+      host: url.host,
+      path,
+      service: 'execute-api',
+      region,
+      method: 'GET',
+      headers: { 'x-amz-access-token': accessToken } as Record<string, string>,
+    };
+    aws4.sign(request as any, { accessKeyId, secretAccessKey });
+
+    const res = await axios.get(`${endpoint}${path}`, { headers: request.headers });
+    const requestId = res.headers?.['x-amzn-requestid'] || 'N/A';
+    this.logger.log(`[ShippingAddress] /address OK — x-amzn-RequestId: ${requestId}`);
+    return res.data?.payload?.ShippingAddress ?? res.data?.payload ?? null;
+  }
+
+  /**
+   * Extracts the CPF or CNPJ from Amazon's BuyerTaxInfo.TaxClassifications array.
+   * Returns an empty string when no tax classification is found.
+   */
+  private extractBuyerDocument(buyerInfo: any): string {
+    const classifications: Array<{ Name: string; Value: string }> =
+      buyerInfo?.BuyerTaxInfo?.TaxClassifications ?? [];
+
+    const cpf  = classifications.find(t => t.Name === 'CPF');
+    const cnpj = classifications.find(t => t.Name === 'CNPJ');
+    const found = cpf ?? cnpj;
+
+    return found?.Value ?? '';
   }
 
   async getOrderItems(orderId: string, token: MarketplaceToken): Promise<any[]> {
@@ -290,9 +449,10 @@ export class AmazonAdapter extends MarketplaceAdapter implements IMarketplacePro
     return items.map((item: any) => ({
       id: item.OrderItemId,
       quantity: item.QuantityOrdered,
-      unit_price: item.ItemPrice && item.ItemPrice.Amount ? (Number(item.ItemPrice.Amount) / item.QuantityOrdered) : 0,
+      unit_price: item.ItemPrice?.Amount ? (Number(item.ItemPrice.Amount) / item.QuantityOrdered) : 0,
       currency_id: item.ItemPrice ? item.ItemPrice.CurrencyCode : 'BRL',
       sku: item.SellerSKU,
+      asin: item.ASIN ?? null,
       title: item.Title,
     }));
   }
@@ -372,6 +532,74 @@ export class AmazonAdapter extends MarketplaceAdapter implements IMarketplacePro
     }
 
     return { accessKeyId, secretAccessKey, region, endpoint };
+  }
+
+  /**
+   * Returns the first FBA ShipmentId associated with an AmazonOrderId.
+   * Required by the Shipment Invoicing API v0 which uses ShipmentId (not OrderId) as path param.
+   */
+  private async getShipmentId(orderId: string, accessToken: string): Promise<string> {
+    const { accessKeyId, secretAccessKey, region, endpoint } = this.getCredentials();
+    const path = `/fba/outbound/brazil/v0/shipments?amazonOrderId=${encodeURIComponent(orderId)}`;
+    const request = {
+      host: new URL(endpoint).host,
+      path,
+      service: 'execute-api',
+      region,
+      method: 'GET',
+      headers: { 'x-amz-access-token': accessToken } as Record<string, string>,
+    };
+    aws4.sign(request as any, { accessKeyId, secretAccessKey });
+    const response = await axios.get(`${endpoint}${path}`, { headers: request.headers });
+    const shipments = response.data?.payload?.Shipments || [];
+    if (!shipments.length) {
+      throw new Error(`Nenhum shipment FBA encontrado para o pedido Amazon ${orderId}. Verifique se o pedido é FBA.`);
+    }
+    return shipments[0].ShipmentId;
+  }
+
+  /**
+   * Submits the NF-e XML to Amazon via the Shipment Invoicing API v0.
+   * Endpoint: POST /fba/outbound/brazil/v0/shipments/{shipmentId}/invoice
+   * Body: { InvoiceContent: base64(xml), ContentMD5Value: base64(md5(xml)) }
+   */
+  async uploadInvoice(orderId: string, xmlContent: string, options?: { packId?: string; pdfBase64?: string }): Promise<any> {
+    return this.executeWithRetry(async (token) => {
+      const { accessKeyId, secretAccessKey, region, endpoint } = this.getCredentials();
+
+      const shipmentId = await this.getShipmentId(orderId, token.accessToken);
+      this.logger.log(`[uploadInvoice] shipmentId=${shipmentId} para pedido=${orderId}`);
+
+      const xmlBuffer = Buffer.from(xmlContent, 'utf-8');
+      const md5Base64 = crypto.createHash('md5').update(xmlBuffer).digest('base64');
+      const invoiceContent = xmlBuffer.toString('base64');
+
+      const path = `/fba/outbound/brazil/v0/shipments/${encodeURIComponent(shipmentId)}/invoice`;
+      const body = { InvoiceContent: invoiceContent, ContentMD5Value: md5Base64 };
+
+      const request = {
+        host: new URL(endpoint).host,
+        path,
+        service: 'execute-api',
+        region,
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-amz-access-token': token.accessToken,
+        } as Record<string, string>,
+        body: JSON.stringify(body),
+      };
+      aws4.sign(request as any, { accessKeyId, secretAccessKey });
+
+      const response = await axios.post(`${endpoint}${path}`, body, { headers: request.headers });
+      const errors = response.data?.errors || [];
+      if (errors.length > 0) {
+        throw new Error(`Amazon NF-e upload falhou: ${errors.map((e: any) => e.message).join('; ')}`);
+      }
+
+      this.logger.log(`[uploadInvoice] NF-e enviada com sucesso — shipmentId=${shipmentId}`);
+      return { success: true, shipmentId, response: response.data };
+    }, 'uploadInvoice');
   }
 
   async updateProductImages(externalId: string, images: any[]): Promise<any> { throw new Error('Method not implemented.'); }

@@ -57,6 +57,6 @@ import { ProductModule } from '../product/product.module';
   ],
   controllers: [QueueController, OrderProcessor, CompatibilityProcessor],
   providers: [QueueService],
-  exports: [QueueService],
+  exports: [QueueService, MongooseModule],
 })
 export class QueueModule { }

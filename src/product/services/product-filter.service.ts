@@ -2,11 +2,12 @@
 
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { ProductModel, ProductDocument } from '../schemas/product.schema';
 import { ListingModel, ListingDocument } from '../../listing/schemas/listing.schema'; // [NEW]
 import { CategoryModel, CategoryDocument } from '../schemas/category.schema';
 import { ProductService } from '../product.service';
+import { ProductRepository } from '../product.repository';
 import {
   ProductFilterDto,
   PaginatedResponseDto,
@@ -37,7 +38,8 @@ export class ProductFilterService {
     private readonly productService: ProductService,
     @Inject(forwardRef(() => SearchService))
     private readonly searchService: SearchService,
-    @InjectModel(ListingModel.name) private listingModel: Model<ListingDocument>, // [NEW]
+    @InjectModel(ListingModel.name) private listingModel: Model<ListingDocument>,
+    private readonly productRepository: ProductRepository,
   ) { }
 
   async findProducts(filters: ProductFilterDto): Promise<PaginatedResponseDto<ProductModel>> {
@@ -46,7 +48,7 @@ export class ProductFilterService {
     this.applyBasicFilters(query, filters);
     this.applyBrandFilters(query, filters.brand);
     await this.applyCategoryFilters(query, filters.category);
-    this.applyInventoryFilters(query, filters.inventory);
+    await this.applyInventoryFilters(query, filters.inventory);
     await this.applyMarketplaceFilters(query, filters.marketplace);
     this.applyImageFilters(query, filters.images);
     this.applyAttributeFilters(query, filters.attributes);
@@ -94,7 +96,7 @@ export class ProductFilterService {
 
   private applyBasicFilters(query: any, filters: ProductFilterDto): void {
     if (filters.ids && filters.ids.length > 0) {
-      query.sku = { $in: filters.ids };
+      query._id = { $in: filters.ids.filter(id => Types.ObjectId.isValid(id)).map(id => new Types.ObjectId(id)) };
     }
     if (filters.mongoIds && filters.mongoIds.length > 0) {
       query._id = { $in: filters.mongoIds };
@@ -154,13 +156,14 @@ export class ProductFilterService {
     }
   }
 
-  private applyInventoryFilters(query: any, inventoryFilter?: InventoryFilterDto): void {
+  private async applyInventoryFilters(query: any, inventoryFilter?: InventoryFilterDto): Promise<void> {
     if (!inventoryFilter) return;
     if (inventoryFilter.hasStock) {
-      query.stockQuantity = { $gt: 0 };
-    }
-    if (inventoryFilter.minStock !== undefined) {
-      query.stockQuantity = { $gte: inventoryFilter.minStock };
+      const ids = await this.productRepository.getProductIdsWithMinStock(1);
+      query._id = { ...(query._id || {}), $in: ids };
+    } else if (inventoryFilter.minStock !== undefined) {
+      const ids = await this.productRepository.getProductIdsWithMinStock(inventoryFilter.minStock);
+      query._id = { ...(query._id || {}), $in: ids };
     }
   }
 
@@ -346,7 +349,8 @@ export class ProductFilterService {
   }
 
   async findLowStockProducts(threshold: number): Promise<ProductModel[]> {
-    return this.productModel.find({ stockQuantity: { $lte: threshold } }).lean().exec();
+    const lowStockIds = await this.productRepository.getProductIdsWithMaxStock(threshold);
+    return this.productModel.find({ _id: { $in: lowStockIds.map(id => id.toString()) } as any }).lean().exec();
   }
 
   async findProductsWithoutImages(): Promise<ProductModel[]> {
@@ -356,7 +360,8 @@ export class ProductFilterService {
   async getProductStats(): Promise<any> {
     const total = await this.productModel.countDocuments();
     const active = await this.productModel.countDocuments({ active: true });
-    const lowStock = await this.productModel.countDocuments({ stockQuantity: { $lte: 5 } });
+    const lowStockIds = await this.productRepository.getProductIdsWithMaxStock(5);
+    const lowStock = lowStockIds.length;
     const noImages = await this.productModel.countDocuments({ images: { $size: 0 } });
     return { total, active, lowStock, noImages };
   }

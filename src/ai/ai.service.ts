@@ -3,6 +3,7 @@ import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SearchService } from '../search/search.service';
+import { ProductRepository } from '../product/product.repository';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { UserDocument, UserModel } from '../auth/schemas/user.schema';
@@ -19,6 +20,7 @@ export class AiService {
         @Inject(forwardRef(() => SearchService)) private readonly searchService: SearchService,
         @InjectModel(UserModel.name) private userModel: Model<UserDocument>,
         @InjectModel(VehicleModel.name) private vehicleModel: Model<VehicleDocument>,
+        private readonly productRepository: ProductRepository,
     ) {
         const apiKey = this.configService.get<string>('GEMINI_API_KEY');
         if (apiKey) {
@@ -216,6 +218,69 @@ export class AiService {
             };
         }
     }
+    async suggestQuestionAnswer(
+        question: string,
+        product: any,
+        compatibilities?: any[],
+    ): Promise<string> {
+        if (!this.model) {
+            throw new Error('Gemini AI not initialized (check API Key)');
+        }
+
+        const attrs = (product.attributes || [])
+            .map((a: any) => `- ${a.name}: ${a.value}`)
+            .join('\n');
+
+        const compList = (compatibilities || [])
+            .slice(0, 20)
+            .map((c: any) => `${c.brand} ${c.model} ${c.year || ''} ${c.engine || ''}`.trim())
+            .join(', ');
+
+        const listingPrice = product.productTitles
+            ?.find((pt: any) => pt.marketplaceData?.price)
+            ?.marketplaceData?.price;
+
+        const prompt = `
+Você é um vendedor profissional de autopeças respondendo uma pergunta de comprador no Mercado Livre.
+
+PERGUNTA DO COMPRADOR:
+"${question}"
+
+DADOS DO PRODUTO:
+- Nome: ${product.name || 'N/A'}
+- Código (Part Number): ${product.partNumber || 'N/A'}
+- Código de Barras: ${product.barcode || 'N/A'}
+- Descrição: ${product.description || 'N/A'}
+- Detalhes Técnicos: ${product.details || 'N/A'}
+- Condição: ${product.condition || 'N/A'}
+- Garantia: ${product.warranty?.months ? product.warranty.months + ' meses' : 'N/A'}
+- Estoque: ${product._id ? await this.productRepository.calculateStock(String(product._id)) : 'N/A'} unidades
+${listingPrice ? `- Preço: R$ ${listingPrice}` : ''}
+${attrs ? `\nATRIBUTOS:\n${attrs}` : ''}
+${compList ? `\nVEÍCULOS COMPATÍVEIS: ${compList}` : ''}
+
+REGRAS:
+1. Responda em português brasileiro, tom profissional e cordial.
+2. MÁXIMO 350 caracteres (limite do Mercado Livre). Seja conciso.
+3. Seja FACTUAL — use APENAS informações presentes nos dados do produto acima.
+4. Se os dados não forem suficientes para responder com certeza, diga honestamente.
+5. Nunca invente especificações, compatibilidades ou garantias que não estejam nos dados.
+6. Não use saudações longas. Vá direto ao ponto.
+7. Retorne APENAS o texto da resposta, sem aspas ou formatação extra.
+        `;
+
+        try {
+            const result = await this.model.generateContent(prompt);
+            const response = await result.response;
+            const text = response.text().trim();
+            // Enforce 350 char limit
+            return text.length > 350 ? text.substring(0, 347) + '...' : text;
+        } catch (error) {
+            this.logger.error(`Error suggesting question answer: ${error.message}`, error.stack);
+            throw new Error('Failed to generate answer suggestion via AI');
+        }
+    }
+
     async suggestCategoryMetadata(tree: string[]): Promise<any> {
         if (!this.model) {
             throw new Error("Gemini AI not initialized (check API Key)");
@@ -450,6 +515,29 @@ REGRAS:
         } catch (error) {
             this.logger.error(`Error mapping marketplace category: ${error.message}`, error.stack);
             throw new Error("Failed to map marketplace category via AI");
+        }
+    }
+
+    async translateAndAdaptSnippet(technicalText: string): Promise<string> {
+        if (!this.model) {
+            this.logger.warn("Gemini AI not initialized. Returning original snippet.");
+            return technicalText;
+        }
+
+        const prompt = `
+Traduza e adapte a seguinte descrição de uma peça ou produto automotivo, focando no jargão correto do mercado brasileiro:
+"${technicalText}"
+
+Retorne APENAS o texto traduzido e adaptado ao mercado nacional e sem incluir comentários extras.
+        `;
+
+        try {
+            const result = await this.model.generateContent(prompt);
+            const response = await result.response;
+            return response.text().trim();
+        } catch (error) {
+            this.logger.error(`Error translating snippet: ${error.message}`, error.stack);
+            return technicalText; // Fallback
         }
     }
 }

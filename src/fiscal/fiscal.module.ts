@@ -17,6 +17,7 @@ import { AiModule } from '../ai/ai.module';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
 import { FiscalIssuerModel, FiscalIssuerSchema, FiscalDocumentModel, FiscalDocumentSchema } from './schemas/fiscal.schema';
+import { OrderModel, OrderSchema } from '../order/schemas/order.schema';
 import { FiscalEntryModel, FiscalEntrySchema } from './schemas/fiscal-entry.schema';
 import { SupplierMappingModel, SupplierMappingSchema } from './schemas/supplier-mapping.schema';
 import { FinancialModule } from '../financial/financial.module';
@@ -28,6 +29,7 @@ import { BrandModel, BrandSchema } from '../product/schemas/brand.schema';
         MongooseModule.forFeature([
             { name: FiscalIssuerModel.name, schema: FiscalIssuerSchema },
             { name: FiscalDocumentModel.name, schema: FiscalDocumentSchema },
+            { name: OrderModel.name, schema: OrderSchema },
             { name: FiscalEntryModel.name, schema: FiscalEntrySchema },
             { name: SupplierMappingModel.name, schema: SupplierMappingSchema },
             { name: ProductModel.name, schema: ProductSchema },

@@ -3,6 +3,7 @@ import axios from 'axios';
 import * as aws4 from 'aws4';
 import { MarketplaceToken } from '../../schemas/marketplace-token.schema';
 import { MarketplaceAuthService } from '../../auth/services/marketplace-auth.service';
+import { ResolvedToken } from '../../auth/services/token-manager.service';
 import { MarketplaceDocument } from '../../schemas/marketplace.schema';
 import { IMarketplaceAuthAdapter } from '../../interfaces/marketplace-auth-adapter.interface';
 
@@ -25,10 +26,10 @@ export class AmazonAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
     return this.authService.findByName(name);
   }
 
-  async getValidToken(marketplaceName: string): Promise<MarketplaceToken> {
+  async getValidToken(marketplaceName: string): Promise<ResolvedToken> {
     const marketplace = await this.authService.findByName(marketplaceName);
     if (!marketplace) throw new Error(`Marketplace ${marketplaceName} não encontrado`);
-    return await this.authService.ensureValidToken(marketplace._id as any);
+    return this.authService.ensureValidToken(marketplace._id as any);
   }
 
   async authenticate(code: string, additionalData?: any): Promise<MarketplaceToken> {
@@ -41,11 +42,18 @@ export class AmazonAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
 
     try {
       this.logger.log(`Trocando authorization code por token LWA... ClientID: ${clientId.substring(0, 5)}...`);
+      // Amazon LWA exige que o redirect_uri seja idêntico ao usado na autorização
+      const redirectUri = additionalData?.redirectUri;
+      if (!redirectUri) {
+        throw new Error('redirect_uri é obrigatório para troca de código Amazon LWA. Passe via authData.redirectUri.');
+      }
+
       const response = await axios.post('https://api.amazon.com/auth/o2/token', {
         grant_type: 'authorization_code',
         code: code,
         client_id: clientId,
         client_secret: clientSecret,
+        redirect_uri: redirectUri,
       });
 
       this.logger.log(`Token LWA obtido com sucesso. Expires in: ${response.data.expires_in}`);
@@ -80,14 +88,12 @@ export class AmazonAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
     const url = new URL(endpoint);
     const path = '/tokens/2021-03-01/restrictedDataToken';
 
-    // Use the specific Application ID requested by the user, fallback to env if needed
-    // The user provided: amzn1.application-oa2-client.16de6493c9194ea1ae18463f5c1acfbf
-    const targetAppId = 'amzn1.application-oa2-client.16de6493c9194ea1ae18463f5c1acfbf';
+    // targetApplication is this app's own application_id registered in SP-API Developer Console.
+    // Falls back to AMAZON_APP_ID env (the LWA client ID, which doubles as the app ID).
+    const targetAppId = process.env.AMAZON_SP_APP_ID || process.env.AMAZON_APP_ID;
 
-    const body = {
-      targetApplication: targetAppId,
-      restrictedResources
-    };
+    const body: Record<string, any> = { restrictedResources };
+    if (targetAppId) body.targetApplication = targetAppId;
 
     const request = {
       host: url.host,
@@ -105,14 +111,14 @@ export class AmazonAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
     aws4.sign(request as any, { accessKeyId, secretAccessKey });
 
     try {
-
       this.logger.log(`Solicitando RDT para ${restrictedResources.length} recursos...`);
       const response = await axios.post(`${endpoint}${path}`, body, { headers: request.headers });
+      const requestId = response.headers?.['x-amzn-requestid'] || 'N/A';
+      this.logger.log(`RDT criado com sucesso — x-amzn-RequestId: ${requestId}`);
       return response.data.restrictedDataToken;
     } catch (error) {
-      this.logger.error(`Erro ao criar RDT: ${error.message}`, error.response?.data);
-      // Fallback: return original token if RDT fails? No, simpler to fail loud or return null.
-      // Better to throw so caller decides.
+      const requestId = error.response?.headers?.['x-amzn-requestid'] || 'N/A';
+      this.logger.error(`Erro ao criar RDT — x-amzn-RequestId: ${requestId}`, error.response?.data);
       throw error;
     }
   }
@@ -159,9 +165,21 @@ export class AmazonAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
 
   async generateAuthUrl(redirectUri?: string): Promise<{ authUrl: string }> {
     const appId = process.env.AMAZON_APP_ID;
-    const finalRedirectUri = redirectUri || 'https://rocket-integration.com/auth/amazon/callback';
-    // Example URL structure, needs verification for Amazon SP-API OAuth
-    const url = `https://sellercentral.amazon.com/apps/authorize/consent?application_id=${appId}&redirect_uri=${finalRedirectUri}&version=beta`;
+    if (!appId) throw new Error('AMAZON_APP_ID não configurado');
+
+    // Garante que o path /auth/amazon/callback está presente — o caller pode passar só a base URL
+    let callbackUri = redirectUri || 'https://rocket-integration.com';
+    if (!callbackUri.endsWith('/auth/amazon/callback')) {
+      callbackUri = callbackUri.replace(/\/$/, '') + '/auth/amazon/callback';
+    }
+
+    const url =
+      `https://sellercentral.amazon.com/apps/authorize/consent` +
+      `?application_id=${appId}` +
+      `&redirect_uri=${encodeURIComponent(callbackUri)}` +
+      `&version=beta`;
+
+    this.logger.log(`Amazon OAuth URL gerada. Callback: ${callbackUri}`);
     return { authUrl: url };
   }
 }

@@ -12,6 +12,7 @@ import { MarketplaceToken as MarketplaceTokenModel, MarketplaceTokenSchema } fro
 import { MarketplaceRegistryModule } from '../marketplace/marketplace-registry.module';
 import { MarketplaceAuthModule } from '../marketplace/auth/marketplace-auth.module';
 import { QuestionRepository } from './question.repository';
+import { AiModule } from '../ai/ai.module';
 
 @Module({
     imports: [
@@ -25,6 +26,7 @@ import { QuestionRepository } from './question.repository';
         MarketplaceRegistryModule,
         MarketplaceAuthModule,
         forwardRef(() => AuthModule),
+        AiModule,
     ],
     controllers: [QuestionsController],
     providers: [QuestionsService, QuestionRepository],

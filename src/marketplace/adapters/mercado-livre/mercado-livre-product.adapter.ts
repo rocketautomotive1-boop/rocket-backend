@@ -1,4 +1,4 @@
-import { forwardRef, Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import axios from 'axios';
 import { MercadoLivreAuthAdapter } from './mercado-livre-auth.adapter';
 import { ProductService } from '../../../product/product.service';
@@ -21,6 +21,8 @@ interface InventoryData {
 
 @Injectable()
 export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, OnModuleInit {
+  private readonly logger = new Logger(MercadoLivreProductAdapter.name);
+
   constructor(
     @Inject(forwardRef(() => MercadoLivreAuthAdapter))
     private readonly authAdapter: MercadoLivreAuthAdapter,
@@ -39,6 +41,21 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
 
   private baseUrl = 'https://api.mercadolibre.com';
   private name = 'Mercado Livre';
+
+  /** Log de resposta da API ML (envio); trunca payloads muito grandes. */
+  private logMlSendResponse(
+    operation: string,
+    context: { externalId?: string; url?: string },
+    status: number | undefined,
+    data: unknown,
+  ): void {
+    const raw =
+      typeof data === 'object' && data !== null ? JSON.stringify(data) : String(data ?? '');
+    const body = raw.length > 14000 ? `${raw.slice(0, 14000)}…[truncated ${raw.length} chars]` : raw;
+    this.logger.log(
+      `[ML API resposta] ${operation} status=${status ?? 'n/a'} ${JSON.stringify(context)} body=${body}`,
+    );
+  }
 
   onModuleInit() {
     this.registry.registerProductAdapter(this.name, this);
@@ -213,6 +230,13 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
         },
       });
 
+      this.logMlSendResponse(
+        'PUT /items/:id (updateProductConditional)',
+        { externalId, url: `${this.baseUrl}/items/${externalId}` },
+        updateResponse.status,
+        updateResponse.data,
+      );
+
       return {
         success: true,
         status,
@@ -223,6 +247,11 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
         responsePayload: updateResponse.data
       };
     } catch (error) {
+      if (error.response) {
+        this.logger.warn(
+          `[ML API erro] PUT /items/:id updateProductConditional externalId=${externalId} status=${error.response.status} data=${JSON.stringify(error.response.data)}`,
+        );
+      }
       if (error.response?.status === 401) {
         const mlMarketplace = await this.marketplaceService.findByName(this.name);
         if (mlMarketplace) {
@@ -269,18 +298,19 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
 
           // New logic: Trust the valueType and DB value
           if (attr.valueType === 'list') {
-            // List: Send ID
             attributeData.value_id = attr.value;
           } else if (attr.valueType === 'boolean') {
             // Boolean: Send Name/Value (User Request: "value:value do producte não value_id")
-            attributeData.value_name = String(attr.value);
+            // Fix: Send "Sim" / "Não" instead of "true" / "false"
+            attributeData.value_name = (String(attr.value) === 'true' || attr.value === true) ? 'Sim' : 'Não';
+          } else if (attr.valueType === 'string') {
+            attributeData.value_name = attr.valueName ? String(attr.valueName) : String(attr.value);
           } else if (attr.value_type === 'list') {
             // Fallback for legacy data without valueType property
-            if (isNumeric) attributeData.value_id = String(attr.value);
-            else attributeData.value_name = String(attr.value);
+            attributeData.value_id = String(attr.value);
           } else {
             // Default behavior
-            attributeData.value_name = String(attr.value);
+            attributeData.value_name = attr.valueName ? String(attr.valueName) : String(attr.value);
           }
 
           attributes.push(attributeData);
@@ -304,6 +334,25 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
         attributes.push({ id: 'BRAND', value_name: brandName });
       }
     }
+
+    // Inject Package Dimensions from product if missing
+    const injectDimension = (attrId: string, value: any, unit: string) => {
+      if (!attributes.some(a => a.id === attrId)) {
+        if (value) {
+          let numStr = String(value).replace(',', '.');
+          const num = parseFloat(numStr);
+          if (!isNaN(num) && num > 0) {
+            attributes.push({ id: attrId, value_name: `${num} ${unit}` });
+          }
+        }
+      }
+    };
+
+    injectDimension('SELLER_PACKAGE_WIDTH', product.dimensions?.width, 'cm');
+    injectDimension('SELLER_PACKAGE_HEIGHT', product.dimensions?.height, 'cm');
+    injectDimension('SELLER_PACKAGE_LENGTH', product.dimensions?.length, 'cm');
+    injectDimension('SELLER_PACKAGE_WEIGHT', product.weight, 'g');
+
     return attributes;
   }
 
@@ -400,6 +449,13 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
         },
       });
 
+      this.logMlSendResponse(
+        'PUT /items/:id (updateExistingProduct)',
+        { externalId: title.externalId, url: `${this.baseUrl}/items/${title.externalId}` },
+        updateResponse.status,
+        updateResponse.data,
+      );
+
       await this.updateProductDescription(title.externalId, product, title, token);
 
       return {
@@ -410,6 +466,11 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
         responsePayload: updateResponse.data
       };
     } catch (error) {
+      if (error.response) {
+        this.logger.warn(
+          `[ML API erro] PUT /items/:id updateExistingProduct externalId=${title.externalId} status=${error.response.status} data=${JSON.stringify(error.response.data)}`,
+        );
+      }
       if (error.response?.status === 401) {
         const mlMarketplace = await this.marketplaceService.findByName('Mercado Livre');
         if (mlMarketplace) {
@@ -438,6 +499,13 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
         },
       });
 
+      this.logMlSendResponse(
+        'POST /items (createNewProduct)',
+        { url: `${this.baseUrl}/items` },
+        createResponse.status,
+        createResponse.data,
+      );
+
       await this.updateProductDescription(createResponse.data.id, product, title, token);
 
       return {
@@ -448,6 +516,11 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
         responsePayload: createResponse.data
       };
     } catch (error) {
+      if (error.response) {
+        this.logger.warn(
+          `[ML API erro] POST /items createNewProduct status=${error.response.status} data=${JSON.stringify(error.response.data)}`,
+        );
+      }
       if (error.response?.status === 401) {
         try {
           const mlMarketplace = await this.marketplaceService.findByName('Mercado Livre');
@@ -546,7 +619,7 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
       product.name = title.title;
       const description = await this.descriptionService.generateDescription(product, this.name);
 
-      await axios.put(`${this.baseUrl}/items/${externalId}/description`, {
+      const descRes = await axios.put(`${this.baseUrl}/items/${externalId}/description`, {
         plain_text: description
       }, {
         headers: {
@@ -554,8 +627,20 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
           'Content-Type': 'application/json',
         },
       });
-    } catch (error) {
-      // Silent fail
+      this.logMlSendResponse(
+        'PUT /items/:id/description',
+        { externalId, url: `${this.baseUrl}/items/${externalId}/description` },
+        descRes.status,
+        descRes.data,
+      );
+    } catch (error: any) {
+      if (error.response) {
+        this.logger.warn(
+          `[ML API erro] PUT /items/:id/description externalId=${externalId} status=${error.response.status} data=${JSON.stringify(error.response.data)}`,
+        );
+      } else {
+        this.logger.warn(`[ML API erro] PUT description externalId=${externalId} ${error?.message}`);
+      }
     }
   }
 

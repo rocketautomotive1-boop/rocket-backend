@@ -4,6 +4,23 @@ import { ProductRepository } from '../product.repository';
 import { CreateProductMovementDto } from '../dto/create-product-movement.dto';
 import { UpdateProductMovementDto } from '../dto/update-product-movement.dto';
 import { QueueService } from '../../queue/queue.service';
+import { BoxService } from './box.service';
+
+export function resolveMovementCondition(
+  condition?: 'new' | 'used' | 'refurbished',
+  legacyId?: number,
+): 'new' | 'used' | 'refurbished' {
+  if (condition === 'used' || condition === 'refurbished' || condition === 'new') return condition;
+  if (legacyId === 2) return 'used';
+  if (legacyId === 3) return 'refurbished';
+  return 'new';
+}
+
+function legacyNumericForBox(condition: string): number {
+  if (condition === 'used') return 2;
+  if (condition === 'refurbished') return 3;
+  return 1;
+}
 
 @Injectable()
 export class ProductMovementService {
@@ -13,6 +30,8 @@ export class ProductMovementService {
     private readonly productRepository: ProductRepository,
     @Inject(forwardRef(() => QueueService))
     private readonly queueService: QueueService,
+    @Inject(forwardRef(() => BoxService))
+    private readonly boxService: BoxService,
   ) { }
 
   async findAll(
@@ -24,8 +43,8 @@ export class ProductMovementService {
     const query: any = {};
 
     if (productId) {
-      if (!Types.ObjectId.isValid(productId) && isNaN(Number(productId))) return [];
-      const product = await this.productRepository.findBySku(productId);
+      if (!Types.ObjectId.isValid(productId)) return [];
+      const product = await this.productRepository.findById(productId);
       if (product) {
         query.product = product._id;
       } else {
@@ -57,11 +76,28 @@ export class ProductMovementService {
   async findByProduct(productId: string): Promise<any[]> {
     if (!productId) return [];
 
-    const product = await this.productRepository.findBySku(productId);
+    if (!Types.ObjectId.isValid(productId)) return [];
+    const product = await this.productRepository.findById(productId);
     if (!product) return [];
 
     const movements = await this.productRepository.findMovements({ product: product._id });
     return this.mapMovements(movements);
+  }
+
+  /**
+   * Última entrada de estoque: condição e situação para templates de descrição / regras de anúncio.
+   * Não usa o campo `condition` do cadastro do produto.
+   */
+  async getListingStockSnapshot(productId: string): Promise<{ condition: string; situation: string } | null> {
+    if (!Types.ObjectId.isValid(productId)) return null;
+    const latest = await this.productRepository.findLatestInboundMovement(new Types.ObjectId(productId));
+    if (!latest) return null;
+    const raw: any = latest;
+    const condition = resolveMovementCondition(raw.condition, raw.conditionId);
+    return {
+      condition,
+      situation: raw.situation || 'normal',
+    };
   }
 
   async create(createMovementDto: CreateProductMovementDto, externalSession?: any): Promise<any> {
@@ -71,18 +107,12 @@ export class ProductMovementService {
 
     let product;
 
-    // Check if it's a valid ObjectId (string 24 hex)
     if (typeof createMovementDto.productId === 'string' && Types.ObjectId.isValid(createMovementDto.productId)) {
       product = await this.productRepository.findById(createMovementDto.productId);
     }
 
-    // Fallback to SKU/PartNumber if not found or not ID
     if (!product) {
-      product = await this.productRepository.findBySku(createMovementDto.productId);
-    }
-
-    if (!product) {
-      throw new NotFoundException(`Produto com ID/SKU ${createMovementDto.productId} não encontrado`);
+      throw new NotFoundException(`Produto com ID ${createMovementDto.productId} não encontrado`);
     }
 
     // Use external session if provided, otherwise create local
@@ -92,6 +122,10 @@ export class ProductMovementService {
     try {
       const type = createMovementDto.type || 'inbound';
       const quantity = createMovementDto.quantity || 0;
+      const resolvedCondition = resolveMovementCondition(
+        createMovementDto.condition,
+        createMovementDto.conditionId,
+      );
 
       const savedMovement = await this.productRepository.createMovement({
         productId: product._id,
@@ -99,11 +133,17 @@ export class ProductMovementService {
         type,
         quantity,
         date: new Date(),
-        // Derived legacy fields for debug if needed, but not in main schema
-        from: createMovementDto.fromAllocationId ? `Alloc-${createMovementDto.fromAllocationId}` : (createMovementDto.origin?.location || 'External'),
-        to: createMovementDto.toAllocationId ? `Alloc-${createMovementDto.toAllocationId}` : 'External',
         price: Types.Decimal128.fromString((createMovementDto.price || 0).toString()),
         reason: createMovementDto.reason || 'Manual Movement',
+        fromAllocationId: (createMovementDto.fromAllocationId && Types.ObjectId.isValid(createMovementDto.fromAllocationId.toString()))
+          ? new Types.ObjectId(createMovementDto.fromAllocationId.toString()) : undefined,
+        toAllocationId: (createMovementDto.toAllocationId && Types.ObjectId.isValid(createMovementDto.toAllocationId.toString()))
+          ? new Types.ObjectId(createMovementDto.toAllocationId.toString()) : undefined,
+
+        condition: resolvedCondition,
+        situation: createMovementDto.situation || 'normal',
+        observation: createMovementDto.observation,
+
         origin: createMovementDto.origin,
         metadata: {
           externalReference: createMovementDto.reference,
@@ -111,43 +151,44 @@ export class ProductMovementService {
         }
       }, session);
 
-      // Atomic update based on Type
+      // Atomic updates based on Type (stock is derived from movements, no denormalized field to update)
       // 1. Reservation: Increases StockReserved (Active Reservation)
       if (type === 'reservation') {
         await this.productRepository.updateStockReserved(product._id as any, quantity, session);
       }
-      // 2. Outbound: Decreases StockQuantity (Physical)
+      // 2. Outbound: Release reservation if fulfillment
       else if (type === 'outbound') {
-        await this.productRepository.updateStock(product._id as any, -quantity, session);
-
-        // If fulfilling a reservation (e.g. Order Processing), release the reservation
-        // We assume "Order Outbound" implies release of previous reservation if explicit flag or orderId present?
-        // For safety, let's look at `createMovementDto.metadata.fulfillment`.
-        // Or just standard: If it is an Order Outbound, we decrease reserved too?
-        // Let's rely on explicit instruction or default behavior for Orders.
-        // User said: "apenas efetiva essa reserva para OUTBOUND".
-        // Let's assume if orderId is set, it might be fulfillment.
-        // Better: Check if `createMovementDto.metadata?.isFulfillment` is true.
         if (createMovementDto.metadata?.isFulfillment) {
           await this.productRepository.updateStockReserved(product._id as any, -quantity, session);
         }
-      }
-      // 3. Inbound: Increases StockQuantity
-      else if (type === 'inbound') {
-        await this.productRepository.updateStock(product._id as any, quantity, session);
         // If price is provided and valid, update product price
         if (createMovementDto.price && createMovementDto.price > 0) {
           await this.productRepository.updatePrice(product._id as any, createMovementDto.price, session);
         }
       }
-      // 4. Adjustment: Signed quantity
-      else if (type === 'adjustment') {
-        await this.productRepository.updateStock(product._id as any, quantity, session);
+      // 3. Inbound: Update product price if provided
+      else if (type === 'inbound') {
+        if (createMovementDto.price && createMovementDto.price > 0) {
+          await this.productRepository.updatePrice(product._id as any, createMovementDto.price, session);
+        }
       }
 
       // Auto-update Total Sold for sales/outbounds
       if (type === 'outbound') {
         await this.productRepository.updateTotalSold(product._id as any, quantity, session);
+      }
+
+      // NOVO: Garantir que o produto esteja na lista de produtos do box
+      if (createMovementDto.boxId) {
+        try {
+          await this.boxService.addProductToBox(
+            createMovementDto.boxId,
+            product._id as any,
+            legacyNumericForBox(resolvedCondition),
+          );
+        } catch (e) {
+          this.logger.warn(`Falha ao associar produto ${product._id} ao box ${createMovementDto.boxId}: ${e.message}`);
+        }
       }
 
       if (!externalSession) await session.commitTransaction();
@@ -180,17 +221,21 @@ export class ProductMovementService {
       if (updateMovementDto.type) movement.type = updateMovementDto.type;
       if (updateMovementDto.reason) movement.reason = updateMovementDto.reason;
       if (updateMovementDto.price !== undefined) movement.price = Types.Decimal128.fromString(updateMovementDto.price.toString());
+      if (updateMovementDto.condition !== undefined) {
+        (movement as any).condition = resolveMovementCondition(
+          updateMovementDto.condition,
+          updateMovementDto.conditionId,
+        );
+      }
+      if (updateMovementDto.situation !== undefined) movement.situation = updateMovementDto.situation;
+      if (updateMovementDto.observation !== undefined) movement.observation = updateMovementDto.observation;
 
       const saved = await this.productRepository.save(movement, session);
 
       const newType = saved.type;
       const newQty = saved.quantity || 0;
 
-      // Event Sourcing Sync
-      // We accept that re-calculating whole history is safer than trying to compute delta
-      await this.productRepository.syncStockFromMovements(movement.productId as any, session);
-
-      // We still might need to adjust totalSold if outbound changed
+      // Adjust totalSold if outbound changed
       if (oldType === 'outbound' && newType !== 'outbound') {
         // logic to reduce... 
         await this.productRepository.updateTotalSold(movement.productId as any, -oldQty, session);
@@ -228,9 +273,6 @@ export class ProductMovementService {
 
       await this.productRepository.deleteMovement(id, session);
 
-      // Sync Stock
-      await this.productRepository.syncStockFromMovements(productId as any, session);
-
       // Revert Total Sold if it was outbound
       if (type === 'outbound') {
         await this.productRepository.updateTotalSold(productId as any, -quantity, session);
@@ -262,7 +304,8 @@ export class ProductMovementService {
     const matchStage: any = {};
 
     if (productId) {
-      const product = await this.productRepository.findBySku(productId);
+      if (!Types.ObjectId.isValid(productId)) return [];
+      const product = await this.productRepository.findById(productId);
       if (product) {
         matchStage.productId = product._id;
       } else {
@@ -301,6 +344,8 @@ export class ProductMovementService {
 
   private mapMovement(doc: any) {
     if (!doc) return null;
+    const raw = doc.toObject ? doc.toObject() : doc;
+    const condition = resolveMovementCondition(raw.condition, raw.conditionId);
     return {
       id: doc._id.toString(),
       productId: doc.productId?.sku || doc.productId || doc.product, // handle legacy 'product' if mixed data
@@ -313,7 +358,9 @@ export class ProductMovementService {
       toAllocation: null,
       box: null,
       reason: doc.reason,
-      situation: 'normal',
+      situation: doc.situation || 'normal',
+      condition,
+      observation: doc.observation,
       orderId: doc.orderId,
       origin: doc.origin,
       metadata: doc.metadata

@@ -9,25 +9,32 @@ export class CreateProductMovementDto {
 
   @ApiPropertyOptional({ description: 'ID da alocação de origem' })
   @IsOptional()
-  @IsNumber()
-  fromAllocationId?: number;
+  fromAllocationId?: number | string;
 
   @ApiPropertyOptional({ description: 'ID da alocação de destino' })
   @IsOptional()
-  @IsNumber()
-  toAllocationId?: number;
+  toAllocationId?: number | string;
 
-  @ApiProperty({ description: 'ID da condição do produto' })
-  @IsNotEmpty()
+  @ApiPropertyOptional({
+    description: 'Condição do lote (estoque): new | used | refurbished',
+    enum: ['new', 'used', 'refurbished'],
+    default: 'new',
+  })
+  @IsOptional()
+  @IsEnum(['new', 'used', 'refurbished'])
+  condition?: 'new' | 'used' | 'refurbished';
+
+  /** @deprecated Preferir `condition`. Aceito para clientes legados. */
+  @ApiPropertyOptional({ description: 'Legado: 1=novo, 2=usado, 3=recondicionado' })
+  @IsOptional()
   @IsNumber()
-  conditionId: number;
+  conditionId?: number;
 
   // Removido: warehouseId
 
   @ApiPropertyOptional({ description: 'ID da caixa' })
   @IsOptional()
-  @IsNumber()
-  boxId?: number;
+  boxId?: number | string;
 
   @ApiProperty({
     description: 'Tipo de movimento',

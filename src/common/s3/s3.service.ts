@@ -24,6 +24,19 @@ export class S3Service {
   }
 
   /**
+   * Verifica se a conexão com o S3 está ativa
+   */
+  async ping(): Promise<boolean> {
+    try {
+      await this.s3Client.config.credentials();
+      return true;
+    } catch (error) {
+      this.logger.error(`S3 Ping failed: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
    * Faz upload de um arquivo para o Amazon S3
    * @param file Buffer do arquivo
    * @param key Nome do arquivo no S3 (incluindo caminho)

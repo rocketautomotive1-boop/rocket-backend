@@ -188,14 +188,14 @@ export class MercadoLivreService {
    */
   async updateProduct(product: ProductDocument, marketplace: MarketplaceDocument, productTitle: any): Promise<any> {
     const listingId = productTitle._id || productTitle.id;
-    this.logger.log(`Atualizando produto ${product.sku} no Mercado Livre (External ID: ${productTitle.externalId})`);
+    this.logger.log(`Atualizando produto ${product._id} no Mercado Livre (External ID: ${productTitle.externalId})`);
 
     try {
       // Buscar o produto completo
-      const completeProduct = await this.productService.findDocument(String(product.sku));
+      const completeProduct = await this.productService.findDocument(String(product._id));
 
       if (!completeProduct) {
-        throw new Error(`Produto ID ${product.sku} não encontrado`);
+        throw new Error(`Produto ID ${product._id} não encontrado`);
       }
 
       // Obter token válido
@@ -538,7 +538,7 @@ export class MercadoLivreService {
    * Obtém a quantidade disponível do produto baseada nos movimentos
    */
   private async getAvailableQuantity(product: ProductDocument): Promise<number> {
-    return this.productService.getProductStock(String(product.sku));
+    return this.productService.getProductStock(String(product._id));
   }
 
   async discoverCategory(title: string, product: ProductDocument): Promise<any> {

@@ -186,7 +186,8 @@ export class ProductTitleService {
         const updated = await this.listingService.update(t.id.toString(), {
           title: t.title,
           locale: t.locale,
-          marketplaceId: mId
+          marketplaceId: mId,
+          marketplaceData: { userId }
           // order field not in listing schema yet, might need ignoring or adding if important
         });
         resultTitles.push(updated);
@@ -197,7 +198,8 @@ export class ProductTitleService {
           marketplaceId: mId,
           title: t.title,
           locale: t.locale || 'pt-BR',
-          status: 'pending_creation'
+          status: 'active',
+          marketplaceData: { userId }
         });
         resultTitles.push(created);
       }
@@ -336,12 +338,6 @@ export class ProductTitleService {
     if (typeof id === 'string' && Types.ObjectId.isValid(id)) {
       return { _id: id };
     }
-    if (typeof id === 'number') {
-      return { sku: id };
-    }
-    if (!isNaN(Number(id))) {
-      return { sku: Number(id) };
-    }
-    return { partNumber: id }; // Fallback
+    return { partNumber: String(id) }; // Fallback: treat as partNumber
   }
 }

@@ -80,15 +80,42 @@ export class NotificationsService {
     }
 
     async notifyAllAdmins(title: string, body: string, data?: any) {
-        // Ideally we have roles. For now, notify all users with tokens? Or just the first one?
-        // Let's notify all users for now as it's a small app.
         const users = await this.userModel.find().exec();
 
+        // Collect all unique tokens across all users
+        const tokenSet = new Set<string>();
         for (const user of users) {
             if (user.pushTokens && user.pushTokens.length > 0) {
                 for (const token of user.pushTokens) {
-                    await this.sendPush(token, title, body, data);
+                    tokenSet.add(token);
                 }
+            }
+        }
+
+        const tokens = Array.from(tokenSet);
+        if (tokens.length === 0) return;
+
+        // Batch send via Expo API (supports array of messages in single request)
+        const messages = tokens.map(token => ({
+            to: token,
+            title,
+            body,
+            channelId: 'rocket_updates',
+            priority: 'high' as const,
+            sound: 'default' as const,
+            data: data || {},
+        }));
+
+        // Expo allows up to 100 messages per batch
+        for (let i = 0; i < messages.length; i += 100) {
+            const batch = messages.slice(i, i + 100);
+            try {
+                const response = await axios.post('https://exp.host/--/api/v2/push/send', batch, {
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                this.logger.log(`[Push] Batch sent ${batch.length} notifications. Expo Status: ${response.status}`);
+            } catch (error) {
+                this.logger.error(`[Push] Batch send failed: ${error.message}`);
             }
         }
     }

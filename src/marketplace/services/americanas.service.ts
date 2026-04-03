@@ -92,7 +92,7 @@ export class AmericanasService {
 
       // Criar registro de integração no banco de dados
       const productMarketplace = await this.productTitleService.upsertProductTitle(
-        product.sku as any,
+        String(product._id) as any,
         String(marketplace._id),
         {
           externalId: externalId,

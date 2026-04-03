@@ -1,6 +1,7 @@
 export interface StandardOrderItem {
     id: string; // Marketplace Item ID
-    sku: string; // Seller SKU
+    sku: string; // Seller SKU (marketplace-side)
+    productId?: string; // Internal product ObjectId (resolved after order processing)
     title: string;
     quantity: number;
     unit_price: number;
@@ -42,8 +43,29 @@ export interface StandardBuyer {
     billing_info?: any; // To allow access to billing.id if nested
 }
 
+export interface StandardPayment {
+    id?: string | number;
+    status?: string;
+    payment_method_id?: string;
+    payment_type?: string;
+    operation_type?: string;
+
+    // Cost breakdown (critical for P&L)
+    transaction_amount?: number;  // item value
+    total_paid_amount?: number;   // buyer's total outlay (gross)
+    coupon_amount?: number;       // marketplace coupon discount
+    taxes_amount?: number;        // taxes withheld at source
+    marketplace_fee?: number;     // commission charged by marketplace
+    net_received_amount?: number; // seller's net receipt
+
+    installments?: number;
+    authorization_code?: string;
+    date_approved?: string;
+}
+
 export interface StandardOrder {
     id: string; // Marketplace Order ID
+    pack_id?: string; // ML pack_id (required for /packs/{id}/fiscal_documents)
     marketplaceId: number | string;
     marketplaceName: string;
     marketplace?: {
@@ -57,12 +79,11 @@ export interface StandardOrder {
     date_created: Date | string;
 
     total_amount: number;
+    couponAmount?: number; // Total order-level coupon/discount
     currency_id: string;
 
     buyer: StandardBuyer;
-
     items: StandardOrderItem[];
-
 
     // Logistics
     shipping?: {
@@ -70,13 +91,11 @@ export interface StandardOrder {
         cost: number;
         tracking_number?: string;
         service_name?: string; // SEDEX, PAC, etc.
+        status?: string;
     };
 
+    payments?: StandardPayment[];
     syncStatus?: string; // synced, pending, error
-
-    original_data?: any; // Raw order data from marketplace
-
-    billing_info?: any; // Billing info from marketplace (e.g. Mercado Livre)
-
-    payments?: any[]; // Payment details
+    original_data?: any;
+    billing_info?: any;
 }

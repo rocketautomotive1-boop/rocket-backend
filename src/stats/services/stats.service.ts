@@ -1,11 +1,8 @@
-
 import { Injectable, BadRequestException } from '@nestjs/common';
-
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { ProductModel, ProductDocument } from '../../product/schemas/product.schema';
 import { StockMovementModel, StockMovementDocument } from '../../product/schemas/stock-movement.schema';
-
 import { ListingModel, ListingDocument } from '../../listing/schemas/listing.schema';
 
 @Injectable()
@@ -13,13 +10,98 @@ export class StatsService {
     constructor(
         @InjectModel(ProductModel.name) private productModel: Model<ProductDocument>,
         @InjectModel(StockMovementModel.name) private stockMovementModel: Model<StockMovementDocument>,
-        @InjectModel(ListingModel.name) private listingModel: Model<ListingDocument>, // [NEW] Injected ListingModel
+        @InjectModel(ListingModel.name) private listingModel: Model<ListingDocument>,
+        @InjectModel('AllocationModel') private allocationModel: Model<any>,
     ) { }
 
     /**
-     * Obtém o userId a partir do token (req.user) e garante que esteja presente.
-     * Caso não exista, lança BadRequest para evitar consultas sem filtro de usuário.
+     * Calcula o valor do inventário filtrado por metadados de alocação (andar, sala, etc.).
+     *
+     * Fluxo:
+     *  1. Busca alocações que correspondem aos filtros de metadata
+     *  2. Extrai todos os productIds das caixas (boxes) dessas alocações
+     *  3. Agrega movimentações de estoque desses produtos: totalValue = sum(price * quantity)
      */
+    async getInventoryValueByAllocation(filters: Record<string, any>) {
+        try {
+            // --- 1. Montar filtro de alocação por metadata ---
+            const allocationMatch: any = {};
+            for (const [key, value] of Object.entries(filters)) {
+                if (value != null && value !== '') {
+                    allocationMatch[`metadata.${key}`] = String(value);
+                }
+            }
+
+            // --- 2. Buscar alocações e extrair productIds das boxes ---
+            const allocations = await this.allocationModel.find(allocationMatch).exec();
+
+            if (allocations.length === 0) {
+                return { totalValue: 0, totalQuantity: 0, productCount: 0 };
+            }
+
+            // Coletar todos os productIds únicos das boxes de todas as alocações
+            const productIdSet = new Set<string>();
+            for (const alloc of allocations) {
+                if (alloc.boxes && Array.isArray(alloc.boxes)) {
+                    for (const box of alloc.boxes) {
+                        if (box.products && Array.isArray(box.products)) {
+                            for (const pid of box.products) {
+                                productIdSet.add(pid.toString());
+                            }
+                        }
+                    }
+                }
+            }
+
+            const productIds = Array.from(productIdSet).map(id => new Types.ObjectId(id));
+            console.log(productIds)
+
+            if (productIds.length === 0) {
+                return { totalValue: 0, totalQuantity: 0, productCount: 0 };
+            }
+
+            // --- 3. Agregar movimentações para esses produtos ---
+            // Nota: no banco, o campo é "product" (ObjectId), não "productId"
+            const result = await this.stockMovementModel.aggregate([
+                {
+                    $match: {
+                        productId: { $in: productIds },
+                        price: { $exists: true },
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        totalValue: {
+                            $sum: {
+                                $multiply: ['$quantity', { $toDouble: { $ifNull: ['$price', 0] } }]
+                            }
+                        },
+                        totalQuantity: { $sum: '$quantity' },
+                        products: { $addToSet: '$productId' }
+                    }
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        totalValue: 1,
+                        totalQuantity: 1,
+                        productCount: { $size: '$products' }
+                    }
+                }
+            ]);
+
+            return result[0] || { totalValue: 0, totalQuantity: 0, productCount: 0 };
+        } catch (error) {
+            console.error('Erro ao buscar valor de estoque por alocação:', error);
+            throw error;
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // Métodos auxiliares e existentes
+    // ----------------------------------------------------------------
+
     resolveUserIdFromRequest(req: any): number {
         const userId = req?.user?.id || req?.user?.sub;
         if (!userId) {
@@ -30,29 +112,23 @@ export class StatsService {
 
     async getWeeklyPublishedProducts(userId?: number) {
         try {
-            // Calcular intervalo de datas (últimos 7 dias) desconsiderando a hora
             const endDate = new Date();
             endDate.setHours(23, 59, 59, 999);
 
             const startDate = new Date(endDate);
             startDate.setHours(0, 0, 0, 0);
-            startDate.setDate(startDate.getDate() - 6); // inclui hoje + 6 dias anteriores
-
-            // Aggregation pipeline on LISTING model
-            // 1. Match active/synced listings with externalId
-            // 2. Filter by date range
+            startDate.setDate(startDate.getDate() - 6);
 
             const matchStage: any = {
                 externalId: { $exists: true, $ne: '' },
-                // status: 'active' // Optional: if we only want active ones
             };
 
             const pipeline: any[] = [
                 { $match: matchStage },
                 {
                     $group: {
-                        _id: '$productId', // Group by product (count product once even if multiple listings)
-                        firstPublishedAt: { $min: '$lastSyncAt' } // Use lastSyncAt from listing
+                        _id: '$productId',
+                        firstPublishedAt: { $min: '$lastSyncAt' }
                     }
                 },
                 {
@@ -64,7 +140,6 @@ export class StatsService {
 
             const publishedProducts = await this.listingModel.aggregate(pipeline);
 
-            // Agrupar as contagens pela data da primeira publicação
             const resultByDate: Record<string, number> = {};
 
             const toDateKey = (d: Date) => {
@@ -77,17 +152,10 @@ export class StatsService {
             for (const row of publishedProducts) {
                 if (!row.firstPublishedAt) continue;
                 const dateObj = new Date(row.firstPublishedAt);
-                // Ajustar para o timezone local se necessário
-                // dateObj.setHours(dateObj.getHours() - 3); 
-
                 const key = toDateKey(dateObj);
-                if (!resultByDate[key]) {
-                    resultByDate[key] = 0;
-                }
-                resultByDate[key]++;
+                resultByDate[key] = (resultByDate[key] || 0) + 1;
             }
 
-            // Construir série contínua de 7 dias usando apenas a data
             const days: Array<{ date: string; day: string; count: number; today: boolean }> = [];
             const weekDaysSunFirst = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
             const today = new Date();
@@ -115,7 +183,6 @@ export class StatsService {
         try {
             let dateFilter: { start: Date; end: Date } | null = null;
 
-            // Calcular filtro de data baseado no período
             if (period) {
                 const now = new Date();
                 const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -166,12 +233,6 @@ export class StatsService {
                 }
             }
 
-            // Aggregation on StockMovementModel
-            // 1. Match published products? Logic says "Buscar IDs de produtos publicados".
-            // ProductTitle check is needed to filter valid products first.
-            // But we can just aggregation distinct match?
-
-            // Step 1: Get published product Ids using aggregation on ListingModel
             const publishedProducts = await this.listingModel.aggregate([
                 { $match: { externalId: { $exists: true, $ne: '' } } },
                 { $group: { _id: '$productId' } }
@@ -189,17 +250,13 @@ export class StatsService {
                 };
             }
 
-            // Step 2: Aggregate StockMovements
             const matchStage: any = {
-                product: { $in: productIds },
-                price: { $exists: true }, // price > 0 check handled below or in match?
+                productId: { $in: productIds },
+                price: { $exists: true },
             };
 
-            // Handling price check: Mongo Decimal128 > 0
-            // Can be done in $expr or simpler check if we assume price is positive if exists.
-
             if (dateFilter) {
-                matchStage.date = { $gte: dateFilter.start, $lte: dateFilter.end }; // Using 'date' field from StockMovementModel
+                matchStage.date = { $gte: dateFilter.start, $lte: dateFilter.end };
             }
 
             const result = await this.stockMovementModel.aggregate([
@@ -225,7 +282,7 @@ export class StatsService {
                                 ]
                             }
                         },
-                        products: { $addToSet: '$product' }
+                        products: { $addToSet: '$productId' }
                     }
                 },
                 {

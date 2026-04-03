@@ -108,33 +108,7 @@ export class CategorySyncService {
 
         processedExternalIds.add(category.id);
 
-        const existingCategory = await this.categoryQueryService.findCategoryByExternalId(marketplace.id, category.id);
-
-        const categoryData = {
-          externalId: category.id,
-          name: category.name,
-          parentId: category.parent_id || null,
-          path: category.path_from_root?.map(c => c.name).join(' > ') || null,
-          level: category.level || 0,
-          isLeaf: !category.children_categories?.length,
-          attributes: category.settings || category.attributes || null,
-          marketplace,
-        };
-
-        let savedCategory;
-
-        if (existingCategory) {
-          // Atualizar categoria existente
-          this.logger.log(`Atualizando categoria existente: ${category.id} - ${category.name}`);
-          await this.marketplaceCategoryModel.updateOne({ _id: existingCategory._id }, categoryData).exec();
-          savedCategory = await this.categoryQueryService.findCategoryById(existingCategory.id);
-        } else {
-          // Criar nova categoria
-          this.logger.log(`Criando nova categoria: ${category.id} - ${category.name}`);
-          const newCategory = new this.marketplaceCategoryModel(categoryData);
-          savedCategory = await newCategory.save();
-        }
-
+        const savedCategory = await this.upsertMercadoLivreCategory(marketplace, category);
         savedCategories.push(savedCategory);
 
         // Log para depuração da hierarquia
@@ -147,6 +121,95 @@ export class CategorySyncService {
       this.logger.error(`Erro na sincronização de categorias do Mercado Livre: ${error.message}`, error.stack);
       throw error;
     }
+  }
+
+  /**
+   * Persiste uma categoria do Mercado Livre (detalhes completos da API) na coleção interna.
+   */
+  private async upsertMercadoLivreCategory(
+    marketplace: MarketplaceDocument,
+    category: any,
+  ): Promise<MarketplaceCategoryDocument> {
+    const existingCategory = await this.categoryQueryService.findCategoryByExternalId(marketplace.id, category.id);
+
+    const categoryData = {
+      externalId: category.id,
+      name: category.name,
+      parentId: category.parent_id || null,
+      path: category.path_from_root?.map((c: { name: string }) => c.name).join(' > ') || null,
+      path_from_root: category.path_from_root || undefined,
+      level: category.level ?? 0,
+      isLeaf: !category.children_categories?.length,
+      attributes: category.settings || category.attributes || null,
+      marketplace,
+    };
+
+    if (existingCategory) {
+      this.logger.log(`Atualizando categoria existente: ${category.id} - ${category.name}`);
+      await this.marketplaceCategoryModel.updateOne({ _id: existingCategory._id }, categoryData).exec();
+      return this.categoryQueryService.findCategoryById(existingCategory.id);
+    }
+
+    this.logger.log(`Criando nova categoria: ${category.id} - ${category.name}`);
+    const newCategory = new this.marketplaceCategoryModel(categoryData);
+    return newCategory.save();
+  }
+
+  /**
+   * Monta a cadeia do ID informado até a raiz (via parent_id) e persiste em ordem (raiz → folha).
+   * Útil quando você já conhece o externalId ML (ex.: MLB270084), sem passar pelo domain_discovery por texto.
+   */
+  async importCategoryByExternalId(
+    marketplaceId: string | number,
+    externalCategoryId: string,
+  ): Promise<{ chain: MarketplaceCategoryDocument[]; category: MarketplaceCategoryDocument }> {
+    this.logger.log(`Importando categoria externa ${externalCategoryId} para marketplace ${marketplaceId}`);
+
+    const marketplace = await this.marketplaceModel.findById(marketplaceId).exec();
+    if (!marketplace) {
+      throw new Error(`Marketplace ID ${marketplaceId} não encontrado`);
+    }
+
+    if (marketplace.name !== 'Mercado Livre') {
+      throw new Error(`Importação por ID externo ainda não implementada para ${marketplace.name}`);
+    }
+
+    const token = await this.marketplaceAuthService.ensureValidToken(marketplaceId);
+    if (!token?.accessToken) {
+      throw new Error('Token de acesso não encontrado para o marketplace');
+    }
+
+    const chainRaw: any[] = [];
+    let currentId: string | null = externalCategoryId;
+    const seen = new Set<string>();
+
+    while (currentId) {
+      if (seen.has(currentId)) {
+        this.logger.warn(`Ciclo detectado na cadeia de categorias em ${currentId}`);
+        break;
+      }
+      seen.add(currentId);
+      const details = await this.mercadoLivreAdapter.categoryAdapter.getCategoryDetails(
+        token.accessToken,
+        currentId,
+      );
+      chainRaw.push(details);
+      currentId = details.parent_id || null;
+    }
+
+    chainRaw.reverse();
+
+    const saved: MarketplaceCategoryDocument[] = [];
+    for (const category of chainRaw) {
+      saved.push(await this.upsertMercadoLivreCategory(marketplace, category));
+    }
+
+    const leaf = saved[saved.length - 1];
+    if (!leaf || leaf.externalId !== externalCategoryId) {
+      throw new Error('Falha ao importar categoria: resultado inconsistente');
+    }
+
+    return { chain: saved, category: leaf };
   }
 
   private async syncShopeeCategories(marketplace: MarketplaceDocument, token: any, parentId?: string): Promise<MarketplaceCategoryDocument[]> {

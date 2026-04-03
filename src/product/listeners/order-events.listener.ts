@@ -1,8 +1,9 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { ORDER_EVENTS, OrderSyncedEvent } from '../../order/events/order.events';
+import { ORDER_EVENTS, OrderSyncedEvent, OrderProcessedEvent } from '../../order/events/order.events';
 import { ProductService } from '../product.service';
 import { StockOrchestratorService } from '../../order/services/stock-orchestrator.service';
+import { SyncQueueService } from '../../marketplace-orchestrator/services/sync-queue.service';
 
 @Injectable()
 export class OrderEventsListener {
@@ -11,8 +12,47 @@ export class OrderEventsListener {
     constructor(
         private readonly productService: ProductService,
         @Inject(forwardRef(() => StockOrchestratorService))
-        private readonly stockOrchestrator: StockOrchestratorService
+        private readonly stockOrchestrator: StockOrchestratorService,
+        @Inject(forwardRef(() => SyncQueueService))
+        private readonly syncQueueService: SyncQueueService,
     ) { }
+
+    @OnEvent(ORDER_EVENTS.PROCESSED)
+    async handleOrderProcessedEvent(event: OrderProcessedEvent) {
+        // Proteção contra eventos malformados
+        if (!event || !event.items) {
+            this.logger.warn(`[OrderProcessed] Received malformed event: ${JSON.stringify(event)}`);
+            return;
+        }
+
+        this.logger.log(
+            `[OrderProcessed] Order ${event.externalId} (${event.marketplaceName}) ready. ` +
+            `Items: ${event.items.length}, Total: R$ ${event.totalAmount}, Trigger: ${event.triggeredBy}`,
+        );
+
+        // After stock deduction, enqueue marketplace publish for each affected product
+        // so listing stock quantities are updated across all marketplaces.
+        const productIds = [...new Set(
+            event.items.map(i => i.productId).filter(id => !!id),
+        )];
+
+        if (productIds.length > 0) {
+            this.logger.log(
+                `[OrderProcessed] Enqueuing stock sync for ${productIds.length} product(s): ${productIds.join(', ')}`,
+            );
+        }
+
+        for (const productId of productIds) {
+            try {
+                await this.syncQueueService.enqueue({
+                    productId,
+                    reason: 'stock_deduction',
+                });
+            } catch (err) {
+                this.logger.error(`[OrderProcessed] Failed to enqueue sync for product ${productId}: ${(err as Error).message}`);
+            }
+        }
+    }
 
     @OnEvent(ORDER_EVENTS.SYNCED)
     async handleOrderSyncedEvent(event: OrderSyncedEvent) {

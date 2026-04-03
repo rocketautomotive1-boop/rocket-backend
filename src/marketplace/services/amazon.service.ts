@@ -27,7 +27,7 @@ export class AmazonService {
   ) { }
 
   async createProduct(product: ProductDocument, marketplace: MarketplaceDocument): Promise<any> {
-    this.logger.log(`Criando/atualizando item no Amazon SP-API para produto ID ${product.sku}`)
+    this.logger.log(`Criando/atualizando item no Amazon SP-API para produto ID ${String(product._id)}`)
     try {
       let token = await this.marketplaceAuthService.ensureValidToken(marketplace._id)
       if (!token) throw new Error('Token LWA não disponível para a Amazon')
@@ -42,7 +42,7 @@ export class AmazonService {
         const secretAccessKey = process.env.AMAZON_AWS_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY || ''
         if (!accessKeyId || !secretAccessKey) throw new Error('Credenciais AWS não configuradas')
 
-        const sku = String(product.partNumber || product.sku)
+        const sku = String(product.partNumber || String(product._id))
 
         // Obter descrição formatada, tratando erro se template não encontrado
         let description = '';

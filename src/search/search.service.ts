@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/co
 import { ElasticsearchService } from '@nestjs/elasticsearch';
 import { ProductDocument, ProductModel } from '../product/schemas/product.schema';
 import { ProductService } from '../product/product.service'; // Added import
+import { ProductRepository } from '../product/product.repository';
 import { ProductCompatibilityService } from '../product/services/product-compatibility.service';
 import { CrossReferenceService } from '../product/services/cross-reference.service';
 import { ListingService } from '../listing/listing.service'; // [NEW] Import
@@ -19,7 +20,8 @@ export class SearchService implements OnModuleInit {
         private readonly crossReferenceService: CrossReferenceService,
         @Inject(forwardRef(() => ProductService))
         private readonly productService: ProductService,
-        private readonly listingService: ListingService // [NEW] Injected ListingService
+        private readonly listingService: ListingService,
+        private readonly productRepository: ProductRepository,
     ) { }
 
     async onModuleInit() {
@@ -270,7 +272,7 @@ export class SearchService implements OnModuleInit {
                 thumbnail: thumbnail,
                 brandImage: brandImage,
                 isGenuine: product.brand?.isGenuine || false,
-                quantity: product.stockQuantity || 0,
+                quantity: await this.productRepository.calculateStock(product._id.toString()),
                 price: product.price ? Number(product.price.toString()) : 0,
                 listPrice: product.listPrice ? Number(product.listPrice.toString()) : 0, // NEW
                 description: product.description || '' // NEW

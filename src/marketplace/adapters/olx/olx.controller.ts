@@ -4,7 +4,6 @@ import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { OLXProductAdapter } from './olx-product.adapter';
 import { MarketplaceDescriptionService } from '../../services/marketplace-description.service';
-import { OLXAuthService } from './olx-auth.service';
 import { MarketplaceService } from '../../services/marketplace.service';
 
 @ApiTags('OLX Marketplace')
@@ -13,7 +12,6 @@ export class OLXController {
   private readonly name = 'OLX';
   constructor(
     private readonly olxAdapter: OLXProductAdapter,
-    private readonly olxAuthService: OLXAuthService,
     private readonly descriptionService: MarketplaceDescriptionService,
     private readonly configService: ConfigService,
     private readonly httpService: HttpService,
@@ -32,40 +30,11 @@ export class OLXController {
   }
 
   // ===== AUTENTICAÇÃO =====
-
-  @Post('auth/authenticate')
-  @ApiOperation({ summary: 'Autenticar na OLX usando OAuth' })
-  @ApiResponse({ status: 200, description: 'Autenticação realizada com sucesso' })
-  @ApiResponse({ status: 400, description: 'Dados inválidos' })
-  @ApiResponse({ status: 401, description: 'Credenciais inválidas' })
-  async authenticate(@Body() body: any) {
-    return await this.olxAdapter.authenticate(body.code);
-  }
-
-  @Post('auth/refresh')
-  @ApiOperation({ summary: 'Renovar token da OLX' })
-  @ApiResponse({ status: 200, description: 'Token renovado com sucesso' })
-  @ApiResponse({ status: 400, description: 'Dados inválidos' })
-  @ApiResponse({ status: 401, description: 'Token inválido' })
-  async refreshToken(@Body() body: any) {
-    return await this.olxAdapter.refreshToken(
-      body.clientId,
-      body.clientSecret,
-      body.refreshToken
-    );
-  }
-
-  @Get('auth/url')
-  @ApiOperation({ summary: 'Gerar URL de autorização da OLX' })
-  @ApiQuery({ name: 'clientId', description: 'ID do cliente OLX' })
-  @ApiQuery({ name: 'redirectUri', description: 'URI de redirecionamento' })
-  @ApiQuery({ name: 'scope', description: 'Escopo de permissões', required: false })
-  @ApiResponse({ status: 200, description: 'URL gerada com sucesso' })
-  async generateAuthUrl() {
-    return {
-      authUrl: this.olxAdapter.generateAuthUrl()
-    };
-  }
+  // Nota: autenticação OAuth padrão via sistema centralizado:
+  //   GET  /marketplaces/olx/oauth-url?redirectUri=...   → gerar URL
+  //   POST /marketplaces/olx/authenticate  { code }      → trocar code por token
+  //   POST /marketplaces/olx/refresh-token              → renovar token
+  //   GET  /auth/olx/callback?code=...                  → callback OAuth
 
   @Post('auth/auto-authenticate')
   @ApiOperation({ summary: 'Realizar autenticação automática na OLX' })
@@ -523,10 +492,4 @@ export class OLXController {
     );
   }
 
-  @Get('token')
-  @ApiOperation({ summary: 'Obter token válido para OLX' })
-  @ApiResponse({ status: 200, description: 'Token válido obtido com sucesso' })
-  async getToken() {
-    return await this.olxAuthService.getValidToken(this.name);
-  }
 }

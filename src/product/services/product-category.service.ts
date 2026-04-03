@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CategoryModel, CategoryDocument } from '../schemas/category.schema';
@@ -11,10 +11,15 @@ import { CategoryDiscoveryService } from '../../search/category-discovery.servic
 import { S3Service } from '../../common/s3/s3.service';
 import { ProductModel, ProductDocument } from '../schemas/product.schema';
 import { AiService } from '../../ai/ai.service';
+import { MarketplaceService } from '../../marketplace/services/marketplace.service';
+import { CategorySyncService } from '../../marketplace/services/category/category-sync.service';
 
 @Injectable()
 export class ProductCategoryService {
   private readonly logger = new Logger(ProductCategoryService.name);
+
+  /** Mesmo texto usado no script `apply_category_refactor.js` para pais estruturais criados pela IA. */
+  private readonly structuralParentAiReason = 'Structural Parent created by AI Refactor';
 
   constructor(
     @InjectModel(CategoryModel.name)
@@ -24,7 +29,9 @@ export class ProductCategoryService {
     private readonly categorySearchService: CategorySearchService,
     private readonly s3Service: S3Service,
     private readonly aiService: AiService,
-    @Inject(forwardRef(() => CategoryDiscoveryService)) private readonly categoryDiscoveryService: CategoryDiscoveryService
+    @Inject(forwardRef(() => CategoryDiscoveryService)) private readonly categoryDiscoveryService: CategoryDiscoveryService,
+    private readonly marketplaceService: MarketplaceService,
+    private readonly categorySyncService: CategorySyncService,
   ) { }
 
   private async generateBreadcrumbs(category: CategoryDocument): Promise<string> {
@@ -222,6 +229,166 @@ export class ProductCategoryService {
       totalSkipped: created.filter(c => c.status === 'already_exists').length,
       autoCreate: true
     };
+  }
+
+  /**
+   * 1) Importa a categoria na API do marketplace e persiste em `marketplace_categories`.
+   * 2) Mapeia o caminho para a taxonomia Rocket via IA (`mapMarketplaceCategoryToInternal`).
+   * 3) Cria/atualiza a árvore em `categories`, com pais estruturais marcados com
+   *    aiReason "Structural Parent created by AI Refactor" e a folha com o reasoning da IA.
+   * 4) Associa `marketplaceMappings` na categoria interna folha.
+   */
+  async importMarketplaceExternalCategoryWithAiRefactor(
+    marketplaceTag: string,
+    externalCategoryId: string,
+  ): Promise<{
+    marketplaceTag: string;
+    marketplaceId: Types.ObjectId;
+    marketplacePath: string;
+    marketplaceCategoryChain: unknown[];
+    marketplaceLeaf: { name: string; externalId: string; path?: string };
+    aiMapping: Awaited<ReturnType<AiService['mapMarketplaceCategoryToInternal']>>;
+    internalCategory: CategoryDocument;
+    createdPath: { name: string; id: string; status: 'created' | 'existing' }[];
+  }> {
+    const marketplace = await this.marketplaceService.findByTag(marketplaceTag);
+    if (!marketplace) {
+      throw new NotFoundException(`Marketplace com tag "${marketplaceTag}" não encontrado`);
+    }
+
+    const { chain, category: mlLeaf } = await this.categorySyncService.importCategoryByExternalId(
+      marketplace._id.toString(),
+      externalCategoryId,
+    );
+
+    const marketplacePath =
+      mlLeaf.path ||
+      (mlLeaf.path_from_root?.length
+        ? mlLeaf.path_from_root.map((p: { name: string }) => p.name).join(' > ')
+        : mlLeaf.name);
+
+    const allCategories = await this.categoryModel
+      .find({ active: true })
+      .populate('ancestors')
+      .select('name ancestors')
+      .limit(100)
+      .lean();
+
+    const treeContext = allCategories.map(cat => {
+      const ancestors = (cat.ancestors as any[]) || [];
+      const path = [...ancestors.map(a => a.name), cat.name].join(' > ');
+      return { name: cat.name, path };
+    });
+
+    const aiMapping = await this.aiService.mapMarketplaceCategoryToInternal(marketplacePath, treeContext);
+
+    if (!aiMapping.suggestedTree?.length) {
+      throw new BadRequestException('A IA não retornou uma árvore de categorias válida (suggestedTree vazio).');
+    }
+
+    const leafAiReason = aiMapping.reasoning?.trim() || 'Mapeamento a partir da categoria do marketplace';
+
+    const { leaf, createdPath } = await this.ensureRocketCategoryTreeFromAiSuggestedTree(
+      aiMapping.suggestedTree,
+      leafAiReason,
+    );
+
+    await this.addMarketplaceMapping(leaf._id.toString(), {
+      marketplaceId: marketplace._id.toString(),
+      externalId: externalCategoryId,
+      externalName: mlLeaf.name,
+      path: marketplacePath,
+    });
+
+    const refreshed = await this.categoryModel.findById(leaf._id).exec();
+
+    return {
+      marketplaceTag,
+      marketplaceId: marketplace._id as Types.ObjectId,
+      marketplacePath,
+      marketplaceCategoryChain: chain as unknown[],
+      marketplaceLeaf: {
+        name: mlLeaf.name,
+        externalId: mlLeaf.externalId,
+        path: mlLeaf.path,
+      },
+      aiMapping,
+      internalCategory: refreshed || leaf,
+      createdPath,
+    };
+  }
+
+  /**
+   * Percorre suggestedTree; nós intermediários novos recebem aiReason de pai estrutural;
+   * a folha recebe leafAiReason.
+   */
+  private async ensureRocketCategoryTreeFromAiSuggestedTree(
+    suggestedTree: string[],
+    leafAiReason: string,
+  ): Promise<{
+    leaf: CategoryDocument;
+    createdPath: { name: string; id: string; status: 'created' | 'existing' }[];
+  }> {
+    const createdPath: { name: string; id: string; status: 'created' | 'existing' }[] = [];
+    let currentParent: CategoryDocument | null = null;
+
+    for (let i = 0; i < suggestedTree.length; i++) {
+      const segmentName = suggestedTree[i];
+      const isStructural = i < suggestedTree.length - 1;
+      const segmentSlug = this.generateSlug(segmentName);
+      const currentParentId = currentParent ? currentParent._id : null;
+
+      let segment = await this.categoryModel.findOne({
+        slug: segmentSlug,
+        parentId: currentParentId,
+      });
+
+      if (!segment) {
+        let finalSlug = segmentSlug;
+        let counter = 1;
+        while (await this.categoryModel.findOne({ slug: finalSlug })) {
+          const raceCheck = await this.categoryModel.findOne({ slug: finalSlug });
+          if (
+            String(raceCheck.parentId || null) === String(currentParentId || null) &&
+            raceCheck.name === segmentName
+          ) {
+            segment = raceCheck;
+            break;
+          }
+          finalSlug = `${segmentSlug}-${counter}`;
+          counter++;
+        }
+
+        if (!segment) {
+          const ancestors = currentParent
+            ? [...(currentParent.ancestors || []), currentParent._id as Types.ObjectId]
+            : [];
+          segment = new this.categoryModel({
+            name: segmentName,
+            slug: finalSlug,
+            parentId: currentParentId || undefined,
+            ancestors,
+            active: true,
+            aiReason: isStructural ? this.structuralParentAiReason : leafAiReason,
+          });
+          await segment.save();
+          await this.categorySearchService.indexCategory(segment);
+          createdPath.push({ name: segment.name, id: segment._id.toString(), status: 'created' });
+        } else {
+          createdPath.push({ name: segment.name, id: segment._id.toString(), status: 'existing' });
+        }
+      } else {
+        createdPath.push({ name: segment.name, id: segment._id.toString(), status: 'existing' });
+      }
+
+      currentParent = segment;
+    }
+
+    if (!currentParent) {
+      throw new BadRequestException('Árvore de categorias inválida após resolução de segmentos');
+    }
+
+    return { leaf: currentParent, createdPath };
   }
 
   async mapFromMarketplace(marketplacePath: string, autoCreate: boolean = false) {

@@ -9,7 +9,7 @@ import { ProductFilterService } from './services/product-filter.service';
 import { PaginatedResponseDto, ProductFilterDto } from './dto/product-filter.dto';
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
 import { ProductRepository } from './product.repository';
-import { ProductMovementService } from './services/product-movement.service';
+import { ProductMovementService, resolveMovementCondition } from './services/product-movement.service';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 import { MarketplaceDocument } from '../marketplace/schemas/marketplace.schema';
 import { SearchService } from '../search/search.service';
@@ -20,6 +20,19 @@ import { ProductTitleService } from './services/product-title.service';
 import { ProductCategoryService } from './services/product-category.service';
 import { UserProductivityService } from '../monitoring/user-productivity.service';
 import { ProductivityType } from '../monitoring/schemas/user-productivity.schema';
+import { MercadoLivreCompatibilityAdapter } from '../marketplace/adapters/mercado-livre/mercado-livre-compatibility.adapter';
+
+/** Evita exceção em `Decimal128.fromString` quando o cliente envia "" ou valor inválido. */
+function detailsDecimal128(value: unknown): Types.Decimal128 | undefined {
+  if (value === undefined || value === null) return undefined;
+  const s = String(value).trim().replace(',', '.');
+  if (s === '') return undefined;
+  try {
+    return Types.Decimal128.fromString(s);
+  } catch {
+    return undefined;
+  }
+}
 
 @Injectable()
 export class ProductService {
@@ -43,10 +56,14 @@ export class ProductService {
     private readonly productTitleService: ProductTitleService,
     private readonly userProductivityService: UserProductivityService,
     private readonly productCategoryService: ProductCategoryService,
+    private readonly mercadoLivreCompatibilityAdapter: MercadoLivreCompatibilityAdapter,
   ) { }
 
   @ValidateMongoId()
-  async findOne(id: string): Promise<ProductModel> {
+  async findOne(id: string, options?: { lean?: boolean }): Promise<ProductModel> {
+    if (options?.lean) {
+      return this.productRepository.findByIdLeanClean(id);
+    }
     return this.productRepository.findByIdClean(id);
   }
 
@@ -54,8 +71,73 @@ export class ProductService {
     return this.productRepository.findAllClean({}, { page, limit, sort: { updatedAt: -1 } });
   }
 
+  /**
+   * Read-only lookup by partNumber + brandId. Returns null if not found.
+   * Does NOT create any record — safe to call on every keystroke.
+   */
+  async lookup(partNumber: string, brandId: string, brandName?: string): Promise<ProductModel | null> {
+    // Build brand filter: primary match on brand._id, fallback on brand.name for legacy
+    // records that were created before the brand._id fix (those only have brand.name stored).
+    const brandConditions: any[] = [{ 'brand._id': brandId }];
+    if (brandName) {
+      brandConditions.push({ 'brand.name': { $regex: `^${brandName.trim()}$`, $options: 'i' } });
+    }
+
+    const doc = await this.productRepository.findOneRaw({
+      partNumber: { $regex: `^${partNumber.trim()}$`, $options: 'i' },
+      $or: brandConditions,
+    });
+    if (!doc) return null;
+    return this.productRepository.findByIdClean(doc.id);
+  }
+
   async findAllModels(): Promise<ProductModel[]> {
     return this.productRepository.findAllClean({}, { limit: 0 });
+  }
+
+  @ValidateMongoId()
+  async getProductCompletion(id: string) {
+    const product = await this.productRepository.findByIdClean(id);
+    if (!product) throw new NotFoundException('Produto não encontrado');
+
+    const brandObj = product.brand || (product as any).brands;
+    const hasBrand = !!brandObj?.name || !!brandObj?.shortName;
+    const dataComplete = !!(product.partNumber && hasBrand);
+
+    const imagesComplete = Array.isArray(product.images) && product.images.length > 0;
+
+    const titles = await this.productTitleService.findByProductId(id);
+    const titlesComplete = Array.isArray(titles) && titles.length > 0;
+
+    const categoryComplete = !!product.category;
+
+    const stockQty = await this.productRepository.calculateStock(id);
+    const priceRaw = product.price ? Number(product.price) : 0;
+    const inventoryComplete = stockQty > 0 && priceRaw > 0;
+
+    const compatibilitiesComplete = await this.productRepository.existsCompatibility({ product: id });
+
+    const parseNum = (v: any): number => {
+      if (v === null || v === undefined || v === '') return 0;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const w = parseNum((product as any).weight);
+    const dim = (product as any).dimensions || {};
+    const L = parseNum(dim.length);
+    const Wd = parseNum(dim.width);
+    const H = parseNum(dim.height);
+    const dimensionsComplete = w > 0 && L > 0 && Wd > 0 && H > 0;
+
+    return {
+      data: dataComplete,
+      images: imagesComplete,
+      titles: titlesComplete,
+      category: categoryComplete,
+      inventory: inventoryComplete,
+      compatibilities: compatibilitiesComplete,
+      dimensions: dimensionsComplete,
+    };
   }
 
   async findForStore(page = 1, limit = 20, search?: string, featured?: boolean) {
@@ -72,9 +154,6 @@ export class ProductService {
     return { data, total, page, limit };
   }
 
-  async findBySku(sku: string): Promise<ProductModel | null> {
-    return this.productRepository.findBySkuClean(sku);
-  }
 
   @ValidateMongoId()
   async findDocument(id: string): Promise<ProductDocument> {
@@ -105,12 +184,8 @@ export class ProductService {
       productDoc = (idOrProduct as any).toObject ? (idOrProduct as any).toObject() : idOrProduct;
     }
 
-    // 1. Calculate Trusted Stock
-    // Use stockQuantity from document if available (Optimization)
-    let available_quantity = productDoc.stockQuantity;
-    if (available_quantity === undefined || available_quantity === null) {
-      available_quantity = await this.getProductStock(productDoc.id || productDoc._id);
-    }
+    // 1. Calculate Trusted Stock from stock_movements aggregation (source of truth)
+    const available_quantity = await this.getProductStock(productDoc.id || productDoc._id);
 
     // 2. Fetch Latest Price/Cost from Movements if needed
     // Use costPrice from document if available
@@ -235,7 +310,7 @@ export class ProductService {
     if (!product) return { productMovements: [], boxItems: [] };
 
     // Delegate to specialized service
-    const movements = await this.productMovementService.findByProduct(product.sku as any);
+    const movements = await this.productMovementService.findByProduct(product._id);
 
     // Map allocations to the expected 'boxItems' format for the WMS
     const boxItems = (product.allocations || []).map(alloc => ({
@@ -289,7 +364,7 @@ export class ProductService {
   }
 
   async checkPartNumberBrandUniqueness(partNumber: string, brandId: number | string, excludeProductId?: string): Promise<boolean> {
-    const query: any = { partNumber, 'brand.id': brandId };
+    const query: any = { partNumber, 'brand._id': brandId };
 
     if (excludeProductId) {
       if (Types.ObjectId.isValid(excludeProductId)) {
@@ -335,9 +410,16 @@ export class ProductService {
 
         if (data.barcode) existingProduct.barcode = data.barcode;
         if (data.active !== undefined) existingProduct.active = data.active;
-        if (data.brand?.isGenuine !== undefined) {
+        if (data.brand) {
           if (!existingProduct.brand) existingProduct.brand = {} as any;
-          existingProduct.brand.isGenuine = data.brand.isGenuine;
+          // Repair missing brand._id for products created before the brand._id fix
+          if (data.brand.id || data.brand._id) {
+            const brandIdStr = String(data.brand.id || data.brand._id);
+            if (!existingProduct.brand._id || existingProduct.brand._id !== brandIdStr) {
+              existingProduct.brand._id = brandIdStr;
+            }
+          }
+          if (data.brand.isGenuine !== undefined) existingProduct.brand.isGenuine = data.brand.isGenuine;
         }
         await this.productRepository.save(existingProduct);
         const updated = await this.productRepository.findByIdClean(existingProduct.id);
@@ -349,16 +431,11 @@ export class ProductService {
       }
 
       // Create New
-      const lastProduct = await this.productRepository.findAllRaw({}, { limit: 1, sort: { sku: -1 } });
-      const nextSku = (Number(lastProduct[0]?.sku) || 0) + 1;
-
-      // User requested slug without SKU at the end
       const slugBase = `${data.partNumber}-${data.brand?.name || 'generic'}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
 
       const newProductData = {
         name: data.name || data.partNumber,
         partNumber: data.partNumber,
-        sku: nextSku,
         slug: slugBase,
         description: data.description,
         tax: {
@@ -377,9 +454,8 @@ export class ProductService {
           height: Types.Decimal128.fromString(data.dimensions.height?.toString() || '0')
         } : undefined,
         active: true,
-        stockQuantity: 0, // Default stock 0 on create
         brand: data.brand ? {
-          id: data.brand.id,
+          _id: String(data.brand.id || data.brand._id || ''),
           name: data.brand.name,
           logoUrl: data.brand.logoUrl,
           isGenuine: data.brand.isGenuine
@@ -458,8 +534,6 @@ export class ProductService {
     if (data.barcode !== undefined) update.barcode = data.barcode;
     if (data.isGenuine !== undefined) update.isGenuine = data.isGenuine == 1 || data.isGenuine === true || data.isGenuine === 'true';
 
-    if (data.isGenuine !== undefined) update.isGenuine = data.isGenuine == 1 || data.isGenuine === true || data.isGenuine === 'true';
-
     if (data.ncm !== undefined) update['tax.ncm'] = data.ncm;
     if (data.cfop !== undefined) update['tax.cfop'] = data.cfop;
     if (data.csosn !== undefined) update['tax.csosn'] = data.csosn;
@@ -469,11 +543,20 @@ export class ProductService {
     if (data.description !== undefined) update.description = data.description;
     if (data.details !== undefined) update.details = data.details;
     if (data.attributes !== undefined) update.attributes = data.attributes;
+    if (data.condition !== undefined) update.condition = data.condition;
 
-    if (data.height !== undefined) update['dimensions.height'] = Types.Decimal128.fromString(String(data.height));
-    if (data.width !== undefined) update['dimensions.width'] = Types.Decimal128.fromString(String(data.width));
-    if (data.length !== undefined) update['dimensions.length'] = Types.Decimal128.fromString(String(data.length));
-    if (data.weight !== undefined) update.weight = Types.Decimal128.fromString(String(data.weight));
+    const height = detailsDecimal128(data.height);
+    if (height !== undefined) update['dimensions.height'] = height;
+    const width = detailsDecimal128(data.width);
+    if (width !== undefined) update['dimensions.width'] = width;
+    const length = detailsDecimal128(data.length);
+    if (length !== undefined) update['dimensions.length'] = length;
+    const weight = detailsDecimal128(data.weight);
+    if (weight !== undefined) update.weight = weight;
+
+    if (Object.keys(update).length === 0) {
+      return;
+    }
 
     await this.productRepository.update(id, { $set: update });
 
@@ -494,6 +577,7 @@ export class ProductService {
       }
 
       if (data.name) product.name = data.name;
+      if (data.partNumber) product.partNumber = data.partNumber;
       if (data.description) product.description = data.description;
       if (data.details) product.details = data.details;
       if (data.active !== undefined) product.active = data.active;
@@ -653,7 +737,9 @@ export class ProductService {
         price: movementData.price,
         reason: movementData.reason,
         reference: movementData.reference,
-        conditionId: movementData.conditionId || 1,
+        condition: resolveMovementCondition(movementData.condition, movementData.conditionId),
+        situation: movementData.situation,
+        observation: movementData.observation,
         // Forward new structure fields
         origin: movementData.origin,
         metadata: movementData.metadata,
@@ -690,7 +776,8 @@ export class ProductService {
         type: 'inbound',
         quantity: inventoryData.quantity || 0,
         reason: 'Sincronização com marketplace',
-        conditionId: inventoryData.conditionId
+        condition: inventoryData.condition,
+        conditionId: inventoryData.conditionId,
       });
 
       // Queue trigger removed: product.sync_movement
@@ -812,7 +899,6 @@ export class ProductService {
   }
 
   @ValidateMongoId(0)
-  @ValidateMongoId(1)
   async syncCompatibilitiesWithMarketplace(productId: string, marketplaceId: string): Promise<any> {
     try {
       const product = await this.findOne(productId);
@@ -820,15 +906,17 @@ export class ProductService {
         throw new NotFoundException(`Produto com ID ${productId} não encontrado`);
       }
 
-      const marketplace = await this.marketplaceRegistry.findOne(marketplaceId);
+      const marketplace = await this.marketplaceRegistry.resolveMarketplace(marketplaceId);
       if (!marketplace) {
         throw new NotFoundException(`Marketplace com ID ${marketplaceId} não encontrado`);
       }
 
+      const resolvedMarketplaceId = String(marketplace._id);
+
       // Buscar títulos do produto para o marketplace específico
       // [REF] Fetch from service
       const allTitles = await this.productTitleService.findByProductId(product._id);
-      const productTitles = allTitles.filter((title: any) => String(title.marketplaceId) === String(marketplaceId));
+      const productTitles = allTitles.filter((title: any) => String(title.marketplaceId) === resolvedMarketplaceId);
 
       if (productTitles.length === 0) {
         throw new BadRequestException(`Produto não possui títulos para o marketplace ${marketplace.name}`);
@@ -850,7 +938,7 @@ export class ProductService {
       await this.queueService.addToQueue({
         type: 'product-sync-compatibilities',
         productId,
-        marketplaceId,
+        marketplaceId: resolvedMarketplaceId,
         metadata: {
           action: 'sync_compatibilities',
           syncData
@@ -879,14 +967,16 @@ export class ProductService {
         throw new NotFoundException(`Produto com ID ${productId} não encontrado`);
       }
 
-      const marketplace = await this.marketplaceRegistry.findOne(marketplaceId);
+      const marketplace = await this.marketplaceRegistry.resolveMarketplace(marketplaceId);
       if (!marketplace) {
         throw new NotFoundException(`Marketplace com ID ${marketplaceId} não encontrado`);
       }
 
+      const resolvedMarketplaceId = String(marketplace._id);
+
       // [REF] Fetch titles
       const allTitles = await this.productTitleService.findByProductId(product._id);
-      const productTitles = allTitles.filter((title: any) => String(title.marketplaceId) === String(marketplaceId));
+      const productTitles = allTitles.filter((title: any) => String(title.marketplaceId) === resolvedMarketplaceId);
 
       if (productTitles.length === 0) {
         throw new BadRequestException(`Produto não possui títulos para o marketplace ${marketplace.name}`);
@@ -916,16 +1006,35 @@ export class ProductService {
           continue;
         }
         for (const chunk of chunks) {
-          const payloadML = { products: chunk.map(id => ({ id })), site_id: 'MLB', domain_id: 'MLB-CARS_AND_VANS' };
+          const payloadML = {
+            products: chunk.map((id) => ({ id })),
+            site_id: 'MLB',
+            domain_id: 'MLB-CARS_AND_VANS',
+          };
           try {
-            // Direct call removed to avoid circular dependency.
-            // Compatibility sync should be handled via queue events or a separate orchestrated service.
-            this.logger.warn(`Skipping direct compatibility sync for title ${title.externalId} to avoid circular dependency`);
-            const resp = { status: 'queued' };
-            results.push({ title: title.title, itemId: title.externalId, status: 'success', count: chunk.length, response: resp });
+            const resp = await this.mercadoLivreCompatibilityAdapter.syncCompatibility(
+              title.externalId,
+              payloadML,
+            );
+            results.push({
+              title: title.title,
+              itemId: title.externalId,
+              status: 'success',
+              count: chunk.length,
+              response: resp,
+            });
             successCount += chunk.length;
           } catch (err: any) {
-            results.push({ title: title.title, itemId: title.externalId, status: 'error', message: err?.message });
+            this.logger.warn(
+              `syncCompatibility falhou item=${title.externalId} chunk=${chunk.length}: ${err?.message}`,
+            );
+            results.push({
+              title: title.title,
+              itemId: title.externalId,
+              status: 'error',
+              message: err?.response?.message || err?.message,
+              cause: err?.response?.cause || err?.response,
+            });
             errorCount += chunk.length;
           }
         }
@@ -1013,8 +1122,7 @@ export class ProductService {
       $or: [
         { barcode: barcode },
         { ean: barcode },
-        { 'attributes.value': barcode },
-        { sku: barcode }
+        { 'attributes.value': barcode }
       ]
     });
   }
@@ -1024,7 +1132,6 @@ export class ProductService {
       $or: [
         { barcode: query },
         { ean: query },
-        { sku: query },
         { partNumber: new RegExp(query, 'i') },
         { name: new RegExp(query, 'i') },
         { 'brand.name': new RegExp(query, 'i') }

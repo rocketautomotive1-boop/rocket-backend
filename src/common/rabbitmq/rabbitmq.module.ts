@@ -1,5 +1,5 @@
-import { Module, Global } from '@nestjs/common';
-import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq';
+import { Module, Global, OnModuleInit, Logger } from '@nestjs/common';
+import { RabbitMQModule, AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 @Global()
@@ -9,9 +9,13 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
             imports: [ConfigModule],
             inject: [ConfigService],
             useFactory: (configService: ConfigService) => {
-                const uri = configService.get<string>('RABBITMQ_URI') || 'amqp://guest:guest@localhost:5672';
+                const uri = configService.get<string>('RABBITMQ_URL') || 'amqp://guest:guest@localhost:5672';
                 return {
                     exchanges: [
+                        {
+                            name: 'rocket.orders',
+                            type: 'topic',
+                        },
                         {
                             name: 'rocket.inventory',
                             type: 'topic',
@@ -22,7 +26,15 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
                         },
                         {
                             name: 'rocket.marketplace.results',
-                            type: 'topic', // Or direct, depending on if we want multiple listeners
+                            type: 'topic',
+                        },
+                        {
+                            name: 'rocket.notifications',
+                            type: 'topic',
+                        },
+                        {
+                            name: 'rocket.notifications.dlq',
+                            type: 'topic',
                         },
                     ],
                     uri: uri,
@@ -34,4 +46,18 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
     ],
     exports: [RabbitMQModule],
 })
-export class RabbitMqModule { }
+export class RabbitMqModule implements OnModuleInit {
+    private readonly logger = new Logger('RabbitMqModule');
+
+    constructor(private readonly amqpConnection: AmqpConnection) { }
+
+    onModuleInit() {
+        this.amqpConnection.managedConnection.on('connect', () => {
+            this.logger.log('✅ Conectado ao RabbitMQ com sucesso.');
+        });
+
+        this.amqpConnection.managedConnection.on('disconnect', (err) => {
+            this.logger.warn(`❌ Conexão com RabbitMQ perdida. Tentando reconectar... Motivo: ${err.err?.message || 'Erro desconhecido'}`);
+        });
+    }
+}

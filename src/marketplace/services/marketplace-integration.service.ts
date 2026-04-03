@@ -7,7 +7,8 @@ import { ListingService } from '../../listing/listing.service';
 import { ListingDocument } from '../../listing/schemas/listing.schema';
 import { ProductModel } from '../../product/schemas/product.schema';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
+import { MercadoLivreListingAdapter } from '../adapters/mercado-livre/mercado-livre-listing.adapter';
 
 interface PromiseFulfilledResult<T> {
   status: 'fulfilled';
@@ -23,6 +24,7 @@ export class MarketplaceIntegrationService {
     private readonly registryService: MarketplaceRegistryService,
     private readonly adapterRegistry: MarketplaceAdapterRegistry,
     private readonly listingService: ListingService,
+    private readonly mercadoLivreListingAdapter: MercadoLivreListingAdapter,
     @InjectModel(ProductModel.name) private productModel: Model<ProductModel>,
   ) { }
 
@@ -65,6 +67,283 @@ export class MarketplaceIntegrationService {
       });
   }
 
+  /**
+   * Proxy da busca ML GET /users/{seller_id}/items/search (offset/limit, máx. 50).
+   */
+  async searchMercadoLivreUserItems(params?: { offset?: number; limit?: number; order?: string; tags?: string }): Promise<any> {
+    const ml = await this.registryService.findByName('Mercado Livre');
+    if (!ml) {
+      throw new BadRequestException('Mercado Livre não configurado.');
+    }
+    try {
+      return await this.mercadoLivreListingAdapter.searchUserItems({
+        offset: params?.offset ?? 0,
+        limit: params?.limit !== undefined ? Math.min(50, Math.max(1, params.limit)) : 50,
+        order: params?.order,
+        tags: params?.tags,
+      });
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.message || err?.message || 'Falha ao consultar anúncios no Mercado Livre.';
+      this.logger.warn(`searchMercadoLivreUserItems: ${msg}`);
+      if (status === 401) {
+        throw new BadRequestException('Token do Mercado Livre inválido ou expirado. Autentique novamente.');
+      }
+      throw new BadRequestException(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+  }
+
+  /**
+   * Lista paginada via GET /users/{id}/items/search (opcional tags, ex.: incomplete_compatibilities),
+   * com multiget ML + vínculo productId em listings (Mongo).
+   */
+  async getMercadoLivreListingsFromItemsSearch(params: {
+    offset?: number;
+    limit?: number;
+    tags?: string;
+  }): Promise<{
+    seller_id?: string;
+    results: string[];
+    items: any[];
+    paging: { limit: number; offset: number; total: number };
+  }> {
+    const ml = await this.registryService.findByName('Mercado Livre');
+    if (!ml) {
+      throw new BadRequestException('Mercado Livre não configurado.');
+    }
+    const mId = ml._id as Types.ObjectId;
+    const offset = Math.max(0, params.offset ?? 0);
+    const limit = Math.min(50, Math.max(1, params.limit ?? 20));
+    const tags = params.tags?.trim();
+
+    let raw: any;
+    try {
+      raw = await this.mercadoLivreListingAdapter.searchUserItems({
+        offset,
+        limit,
+        tags,
+      });
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.message || err?.message || 'Falha ao consultar anúncios no Mercado Livre.';
+      this.logger.warn(`getMercadoLivreListingsFromItemsSearch: ${msg}`);
+      if (status === 401) {
+        throw new BadRequestException('Token do Mercado Livre inválido ou expirado. Autentique novamente.');
+      }
+      throw new BadRequestException(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+
+    const externalIds: string[] = (raw?.results || []).map((id: any) => String(id));
+    const paging = raw?.paging || { limit, offset, total: 0 };
+    const seller_id =
+      raw?.seller_id != null ? String(raw.seller_id) : await this.mercadoLivreListingAdapter.getSellerId();
+
+    let multiget: any[] = [];
+    if (externalIds.length) {
+      const chunkSize = 20;
+      for (let i = 0; i < externalIds.length; i += chunkSize) {
+        const chunk = externalIds.slice(i, i + chunkSize);
+        try {
+          const part = await this.mercadoLivreListingAdapter.getListingMultigetByIds(chunk.join(','));
+          multiget.push(...part);
+        } catch (err: any) {
+          this.logger.warn(`Multiget items-search: ${err?.message}`);
+        }
+      }
+    }
+
+    const bodyByExternal = new Map<string, any>();
+    for (const m of multiget) {
+      const b = m?.body;
+      if (b?.id) bodyByExternal.set(String(b.id), b);
+    }
+
+    const listingByExternal = new Map<string, { productId?: string; listingId?: string }>();
+    if (externalIds.length) {
+      const docs = await this.listingService.listingModel
+        .find({ marketplaceId: mId, externalId: { $in: externalIds } })
+        .select('_id productId externalId')
+        .lean()
+        .exec();
+      for (const d of docs as any[]) {
+        listingByExternal.set(String(d.externalId), {
+          productId: d.productId ? String(d.productId) : undefined,
+          listingId: d._id ? String(d._id) : undefined,
+        });
+      }
+    }
+
+    const mpId = String(ml.id ?? ml._id);
+    const items = externalIds.map((extId) => {
+      const body = bodyByExternal.get(extId);
+      const link = listingByExternal.get(extId);
+      const itemTags = Array.isArray(body?.tags)
+        ? body.tags.map((t: any) => String(t))
+        : [];
+      return {
+        id: body?.id || extId,
+        title: body?.title ?? '',
+        price: body?.price ?? 0,
+        available_quantity: body?.available_quantity ?? 0,
+        sold_quantity: body?.sold_quantity ?? 0,
+        status: body?.status ?? '',
+        thumbnail: body?.thumbnail ?? '',
+        permalink: body?.permalink ?? '',
+        date_created: body?.date_created ?? '',
+        tags: itemTags,
+        productId: link?.productId,
+        listingId: link?.listingId,
+        externalId: extId,
+        marketplace: {
+          id: mpId,
+          name: 'Mercado Livre',
+          type: 'mercadolivre',
+          icon: 'store',
+        },
+      };
+    });
+
+    return {
+      seller_id,
+      results: externalIds,
+      items,
+      paging: {
+        limit: paging.limit ?? limit,
+        offset: paging.offset ?? offset,
+        total: paging.total ?? 0,
+      },
+    };
+  }
+
+  /**
+   * Listagens ML cujo produto não possui compatibilidades em product_compatibilities (paginação Mongo + detalhe ML).
+   */
+  async getMercadoLivreListingsWithoutCompatibilities(params: {
+    offset?: number;
+    limit?: number;
+    search?: string;
+  }): Promise<{
+    seller_id?: string;
+    results: string[];
+    items: any[];
+    paging: { limit: number; offset: number; total: number };
+  }> {
+    const ml = await this.registryService.findByName('Mercado Livre');
+    if (!ml) {
+      throw new BadRequestException('Mercado Livre não configurado.');
+    }
+    const mId = ml._id as Types.ObjectId;
+    const offset = Math.max(0, params.offset ?? 0);
+    const limit = Math.min(50, Math.max(1, params.limit ?? 20));
+    const search = params.search?.trim();
+
+    const sellerId = await this.mercadoLivreListingAdapter.getSellerId();
+
+    const pipeline: any[] = [
+      {
+        $match: {
+          marketplaceId: mId,
+          externalId: { $exists: true, $nin: [null, ''] },
+        },
+      },
+      {
+        $lookup: {
+          from: 'product_compatibilities',
+          let: { pid: '$productId' },
+          pipeline: [{ $match: { $expr: { $eq: ['$product', '$$pid'] } } }],
+          as: 'compatRows',
+        },
+      },
+      { $match: { compatRows: { $size: 0 } } },
+    ];
+
+    if (search) {
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      pipeline.push(
+        {
+          $lookup: {
+            from: 'products',
+            localField: 'productId',
+            foreignField: '_id',
+            as: 'p',
+          },
+        },
+        { $unwind: { path: '$p', preserveNullAndEmptyArrays: false } },
+        {
+          $match: {
+            $or: [
+              { 'p.name': { $regex: escaped, $options: 'i' } },
+              { 'p.partNumber': { $regex: escaped, $options: 'i' } },
+              { 'p.sku': { $regex: escaped, $options: 'i' } },
+            ],
+          },
+        },
+      );
+    }
+
+    pipeline.push({ $sort: { updatedAt: -1 } });
+    pipeline.push({
+      $facet: {
+        totalCount: [{ $count: 'count' }],
+        page: [{ $skip: offset }, { $limit: limit }],
+      },
+    });
+
+    const agg = await this.listingService.listingModel.aggregate(pipeline).exec();
+    const facet = agg[0] || { totalCount: [], page: [] };
+    const total = facet.totalCount?.[0]?.count ?? 0;
+    const pageDocs: ListingDocument[] = facet.page || [];
+
+    const externalIds = pageDocs.map((l: any) => l.externalId).filter(Boolean);
+    let multiget: any[] = [];
+    if (externalIds.length) {
+      try {
+        const idsString = externalIds.join(',');
+        multiget = await this.mercadoLivreListingAdapter.getListingMultigetByIds(idsString);
+      } catch (err: any) {
+        this.logger.warn(`Multiget ML sem compat: ${err?.message}`);
+      }
+    }
+
+    const bodyByExternal = new Map<string, any>();
+    for (const m of multiget) {
+      const b = m?.body;
+      if (b?.id) bodyByExternal.set(String(b.id), b);
+    }
+
+    const mpId = String(ml.id ?? ml._id);
+    const items = pageDocs.map((doc: any) => {
+      const body = bodyByExternal.get(String(doc.externalId));
+      return {
+        id: body?.id || doc.externalId,
+        title: body?.title ?? doc.title,
+        price: body?.price ?? doc.price ?? 0,
+        available_quantity: body?.available_quantity ?? 0,
+        sold_quantity: body?.sold_quantity ?? 0,
+        status: body?.status ?? doc.status,
+        thumbnail: body?.thumbnail ?? '',
+        permalink: body?.permalink ?? '',
+        date_created: body?.date_created ?? doc.createdAt,
+        productId: doc.productId ? String(doc.productId) : undefined,
+        listingId: doc._id ? String(doc._id) : undefined,
+        externalId: doc.externalId,
+        marketplace: {
+          id: mpId,
+          name: 'Mercado Livre',
+          type: 'mercadolivre',
+          icon: 'store',
+        },
+      };
+    });
+
+    return {
+      seller_id: sellerId,
+      results: externalIds,
+      items,
+      paging: { limit, offset, total },
+    };
+  }
+
   async getListing(marketplaceId: string): Promise<any> {
     const marketplace = await this.registryService.findOne(marketplaceId);
     if (!marketplace) throw new BadRequestException(`Marketplace ID ${marketplaceId} não encontrado`);
@@ -102,7 +381,7 @@ export class MarketplaceIntegrationService {
 
     const titles = allListings.map(l => ({
       ...l,
-      productId: products.find(p => String(p._id) === String(l.productId))?.sku
+      productId: products.find(p => String(p._id) === String(l.productId))?._id?.toString()
     }));
 
     if (!titles.length) return {};

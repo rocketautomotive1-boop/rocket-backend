@@ -9,6 +9,7 @@ import { ProductService } from '../../product/product.service';
 import { MarketplaceService } from '../../marketplace/services/marketplace.service';
 import { MarketplaceOrderService } from '../../marketplace/services/marketplace-order.service';
 import { MarketplaceRegistryService } from '../../marketplace/services/marketplace-registry.service';
+import { OrderModel, OrderDocument } from '../../order/schemas/order.schema';
 
 @Injectable()
 export class FiscalService {
@@ -19,6 +20,8 @@ export class FiscalService {
         private fiscalDocumentModel: Model<FiscalDocumentDocument>,
         @InjectModel(FiscalIssuerModel.name)
         private fiscalIssuerModel: Model<FiscalIssuerDocument>,
+        @InjectModel(OrderModel.name)
+        private orderModel: Model<OrderDocument>,
 
         private readonly xmlBuilderService: XmlBuilderService,
         private readonly signatureService: SignatureService,
@@ -32,106 +35,143 @@ export class FiscalService {
     ) { }
 
     async prepareNFeData(orderId: string, marketplaceId?: string): Promise<any> {
-        this.logger.log(`Preparing NFe data for order ${orderId} (Marketplace ID: ${marketplaceId})`);
-        const orderData: any = { orderId };
+        this.logger.log(`Preparing NFe data for order ${orderId}`);
 
-        // Try to fetch Fresh Order Data from Marketplace to ensure Buyer Data is present
-        let fullOrder = null;
-        try {
-            let targetMarketplaceId: string = marketplaceId ? String(marketplaceId) : undefined;
-
-            if (!targetMarketplaceId) {
-                // Heuristic detection if marketplaceId is missing via Registry
-                const detectedMk = await this.marketplaceRegistry.detectMarketplaceByOrderId(orderId);
-                if (detectedMk) {
-                    targetMarketplaceId = String(detectedMk._id);
-                }
-            }
-
-            if (targetMarketplaceId) {
-                try {
-                    this.logger.log(`Tentando buscar detalhes do pedido ${orderId} no marketplace ${targetMarketplaceId}`);
-                    fullOrder = await this.marketplaceOrderService.getOrderDetails(orderId, targetMarketplaceId);
-                } catch (e) {
-                    this.logger.warn(`Falha ao buscar detalhes do pedido no marketplace alvo ${targetMarketplaceId}: ${e.message}`);
-                }
-            } else {
-                // Try all active marketplaces
-                const marketplaces = await this.marketplaceService.findAll();
-                const activeMarketplaces = marketplaces.filter(mk => mk.enabled);
-
-                for (const mk of activeMarketplaces) {
-                    try {
-                        fullOrder = await this.marketplaceOrderService.getOrderDetails(orderId, mk.id);
-                        if (fullOrder) {
-                            this.logger.log(`Pedido encontrado no marketplace: ${mk.name}`);
-                            break;
-                        }
-                    } catch (e) {
-                        this.logger.debug(`Pedido não encontrado em ${mk.name}: ${e.message}`);
-                    }
-                }
-            }
-
-            if (fullOrder) {
-                // Merge found data into orderData
-                orderData.marketplaceId = fullOrder.marketplace?.id;
-                orderData.items = fullOrder.items;
-                orderData.totals = {
-                    amount: fullOrder.total_amount,
-                    freight: fullOrder.freight || 0,
-                    discount: fullOrder.discount || 0
-                };
-
-                if (fullOrder.buyer) {
-                    const buyerName = fullOrder.buyer.name || fullOrder.buyer.nickname || (fullOrder.buyer.first_name ? fullOrder.buyer.first_name + ' ' + (fullOrder.buyer.last_name || '') : '');
-
-                    orderData.buyer = {
-                        ...fullOrder.buyer,
-                        name: buyerName,
-                        document: fullOrder.buyer.document || '',
-                        address: fullOrder.buyer.address || fullOrder.shipping_address || fullOrder.address
-                    };
-                }
-
-                // Extract Payment Data to pass to XML Builder
-                if (fullOrder.payments && fullOrder.payments.length > 0) {
-                    const payment = fullOrder.payments.find((p: any) => p.status === 'approved') || fullOrder.payments[0];
-                    orderData.payment = {
-                        paymentMethodId: payment.payment_method_id,
-                        paymentType: payment.payment_type,
-                        authorizationCode: payment.authorization_code,
-                        installments: payment.installments
-                    };
-                }
-            }
-        } catch (error) {
-            this.logger.warn(`Could not enrich order data from marketplace: ${error.message}`);
+        // ── Step 1: Load the stored order from DB first ───────────────────────
+        // orderId may be a MongoDB ObjectId (24-char hex) or a marketplace externalId (numeric string).
+        const isObjectId = /^[0-9a-fA-F]{24}$/.test(orderId);
+        let dbOrder: any = null;
+        if (isObjectId) {
+            dbOrder = await this.orderModel.findById(orderId).populate('fiscalDocuments').lean().exec();
+        }
+        if (!dbOrder) {
+            // Fallback: search by externalId (marketplace order number like "155897305276281")
+            dbOrder = await this.orderModel.findOne({ externalId: orderId }).populate('fiscalDocuments').lean().exec();
+        }
+        if (!dbOrder) {
+            throw new NotFoundException(`Pedido ${orderId} não encontrado no banco de dados.`);
         }
 
-        if (!fullOrder || !orderData.items || orderData.items.length === 0) {
-            throw new NotFoundException(`Pedido ${orderId} não encontrado ou sem itens em nenhum marketplace ativo.`);
+        const externalId = dbOrder.externalId as string;
+        const resolvedMarketplaceId = marketplaceId
+            ? String(marketplaceId)
+            : dbOrder.marketplaceId
+                ? String(dbOrder.marketplaceId)
+                : undefined;
+
+        this.logger.log(`Order resolved: externalId=${externalId}, marketplaceId=${resolvedMarketplaceId}`);
+
+        // ── Step 2: Pre-populate from stored data (always-available fallback) ─
+        // Resolve marketplace name for XML infIntermed
+        let marketplaceName: string | undefined;
+        if (resolvedMarketplaceId) {
+            try {
+                const mp = await this.marketplaceService.findOne(resolvedMarketplaceId);
+                marketplaceName = mp?.name || mp?.type || undefined;
+            } catch { /* non-critical */ }
+        }
+
+        const orderData: any = {
+            orderId,
+            marketplaceId: resolvedMarketplaceId,
+            marketplaceName,
+            items: (dbOrder.items || []).map((i: any) => ({
+                id: i.externalId,
+                sku: i.externalId,
+                title: i.title,
+                quantity: i.quantity,
+                unit_price: i.unitPrice,
+                seller_custom_field: i.productId ? String(i.productId) : undefined,
+            })),
+            totals: {
+                amount: dbOrder.totalAmount || 0,
+                freight: dbOrder.shippingAmount || 0,
+                discount: 0,
+            },
+        };
+
+        // Use stored customer as fallback buyer
+        if (dbOrder.customer?.name) {
+            orderData.buyer = {
+                name: dbOrder.customer.name,
+                document: dbOrder.customer.document || '',
+                email: dbOrder.customer.email || '',
+                phone: dbOrder.customer.phone || '',
+                address: dbOrder.customer.address || {},
+            };
+        }
+
+        // ── Step 3: Enrich from marketplace using the correct externalId ──────
+        if (externalId && resolvedMarketplaceId) {
+            try {
+                this.logger.log(`Enriching NFe data from marketplace for externalId=${externalId}`);
+                const fullOrder = await this.marketplaceOrderService.getOrderDetails(externalId, resolvedMarketplaceId);
+
+                if (fullOrder) {
+                    // Override items with fresh marketplace data
+                    if (fullOrder.items?.length) {
+                        orderData.items = fullOrder.items;
+                    }
+
+                    orderData.totals = {
+                        amount: fullOrder.total_amount || orderData.totals.amount,
+                        freight: fullOrder.shipping?.cost || (fullOrder as any).freight || orderData.totals.freight,
+                        discount: fullOrder.couponAmount || 0,
+                    };
+
+                    if (fullOrder.buyer) {
+                        const buyerName = fullOrder.buyer.name
+                            || (fullOrder.buyer.first_name ? `${fullOrder.buyer.first_name} ${fullOrder.buyer.last_name || ''}`.trim() : '')
+                            || fullOrder.buyer.nickname
+                            || orderData.buyer?.name
+                            || '';
+
+                        orderData.buyer = {
+                            ...fullOrder.buyer,
+                            name: buyerName,
+                            document: fullOrder.buyer.document || orderData.buyer?.document || '',
+                            address: fullOrder.buyer.address || (fullOrder as any).shipping_address || orderData.buyer?.address || {},
+                        };
+                    }
+
+                    if (fullOrder.payments?.length) {
+                        const payment = fullOrder.payments.find((p: any) => p.status === 'approved') || fullOrder.payments[0];
+                        orderData.payment = {
+                            paymentMethodId: payment.payment_method_id,
+                            paymentType: payment.payment_type,
+                            authorizationCode: payment.authorization_code,
+                            installments: payment.installments,
+                        };
+                    }
+                }
+            } catch (e) {
+                this.logger.warn(`Could not enrich NFe data from marketplace (using stored data): ${e.message}`);
+            }
+        }
+
+        // ── Step 4: Validate minimum required data ────────────────────────────
+        if (!orderData.items || orderData.items.length === 0) {
+            throw new NotFoundException(`Pedido ${orderId} não possui itens para emissão da NFe.`);
         }
 
         // Enrich Item Data with Real Product Data (NCM, etc)
+        const IS_MONGO_ID = /^[0-9a-fA-F]{24}$/;
         if (orderData.items && Array.isArray(orderData.items)) {
             for (const item of orderData.items) {
                 let product: any = null;
 
-                // Priority 1: Check seller_custom_field (Internal ID)
-                if (item.seller_custom_field) {
-                    // Try as direct ID
-                    product = await this.productService.findOne(item.seller_custom_field);
+                // Priority 1: seller_custom_field = MongoDB productId (must be a valid ObjectId)
+                // Marketplace IDs (numeric strings like "155897305276281") are never valid here.
+                if (item.seller_custom_field && IS_MONGO_ID.test(String(item.seller_custom_field))) {
+                    try { product = await this.productService.findOne(item.seller_custom_field); } catch { }
                 }
 
-                // Priority 2: Check standard ID if numeric (Legacy)
-                if (!product && item.id && !isNaN(Number(item.id))) {
-                    product = await this.productService.findOne(item.id);
-                }
+                // Priority 2 (removed): numeric ID lookup was catching marketplace line-item IDs,
+                // causing "Invalid ID format" via @ValidateMongoId. Internal product IDs are always ObjectIds.
 
-                // Priority 3: SKU (Part Number)
-                if (!product && item.sku) {
-                    product = await this.productService.findBySku(item.sku) || await this.productService.findOne(item.sku);
+                // Priority 3: seller SKU may be the product ObjectId (Amazon sets SellerSKU = product._id)
+                if (!product && item.sku && IS_MONGO_ID.test(String(item.sku))) {
+                    try { product = await this.productService.findOne(item.sku); } catch { }
                 }
 
                 if (product) {
@@ -148,12 +188,30 @@ export class FiscalService {
         return orderData;
     }
 
-    async emitNFe(orderId: string, orderData: any) {
+    async emitNFe(orderId: string, modalOverrides: any) {
         this.logger.log(`Iniciando emissão de NFe para pedido ${orderId}`);
 
+        // Always fetch fresh, enriched order data (marketplace enrichment, NCM, buyer address, etc.)
+        // then deep-merge the modal confirmations on top so user edits take priority.
+        let orderData: any;
+        try {
+            const prepared = await this.prepareNFeData(orderId, modalOverrides?.marketplaceId);
+            orderData = {
+                ...prepared,
+                ...modalOverrides,
+                // Merge nested objects so partial modal edits don't wipe prepared fields
+                buyer:  { ...prepared.buyer,  ...(modalOverrides?.buyer  || {}) },
+                totals: { ...prepared.totals, ...(modalOverrides?.totals || {}) },
+                items:  (modalOverrides?.items?.length ? modalOverrides.items : prepared.items),
+            };
+        } catch (prepErr) {
+            this.logger.warn(`prepareNFeData falhou (${prepErr.message}); usando dados do modal como fallback`);
+            orderData = modalOverrides;
+        }
+
         // Validate minimal data
-        if (!orderData.buyer || !orderData.buyer.document || !orderData.buyer.address) {
-            this.logger.error(`Dados incompletos: Buyer=${!!orderData.buyer}, Doc=${!!orderData.buyer?.document}, Addr=${!!orderData.buyer?.address}`);
+        if (!orderData?.buyer || !orderData.buyer.document || !orderData.buyer.address) {
+            this.logger.error(`Dados incompletos: Buyer=${!!orderData?.buyer}, Doc=${!!orderData?.buyer?.document}, Addr=${!!orderData?.buyer?.address}`);
             throw new Error('Dados do destinatário incompletos para emissão.');
         }
 
@@ -178,33 +236,52 @@ export class FiscalService {
             }
         }
 
-        // 2. Check if NFe already exists
-        let nfe = await this.fiscalDocumentModel.findOne({ orderId }).exec();
+        // 2. Check if a reusable NFe already exists for this order.
+        //    Resolve both MongoDB ObjectIds and external marketplace IDs so that
+        //    retries never generate a new sequence number for ERROR/DRAFT/REJECTED NFes.
+        const internalOrderId = await this.resolveInternalOrderId(orderId);
+        let nfe = internalOrderId
+            ? await this.fiscalDocumentModel
+                .findOne({
+                    $or: [{ orderId: internalOrderId }, { order: internalOrderId }],
+                    status: { $nin: ['CANCELLED', 'CANCELED'] },
+                })
+                .sort({ createdAt: -1 })
+                .exec()
+            : null;
 
         if (nfe) {
             if (nfe.status === 'AUTHORIZED' || nfe.status === 'PROCESSING') {
                 return { message: 'NFe já emitida ou em processamento', nfeId: nfe._id, status: nfe.status, accessKey: nfe.accessKey };
             }
-            this.logger.log(`Reusing existing NFe ${nfe.number} for retry.`);
-        } else {
-            // Atomic increment for new number
-            issuer = await this.fiscalIssuerModel.findOneAndUpdate(
-                { _id: issuer._id },
-                { $inc: { lastNfeNumber: 1 } },
-                { new: true }
-            ).exec();
+            if (nfe.status === 'CANCELLING') {
+                // A cancellation is in progress — block re-emission until it resolves
+                throw new Error('NFe está em processo de cancelamento. Aguarde a conclusão antes de emitir novamente.');
+            }
+            // DRAFT / ERROR / REJECTED — safe to retry with the same number
+            this.logger.log(`Reusing existing NFe ${nfe.number} série ${nfe.series} (status: ${nfe.status}) for retry.`);
+        }
 
-            const newNfeNumber = issuer.lastNfeNumber;
+        if (!nfe) {
+            // Atomic increment per series — use lean() so seriesCounters is a plain object
+            // (Mongoose Map objects don't support bracket-notation access, causing the fallback || 1)
+            const seriesKey = String(series);
+            const updatedIssuerRaw = await this.fiscalIssuerModel.findOneAndUpdate(
+                { _id: issuer._id },
+                { $inc: { [`seriesCounters.${seriesKey}`]: 1 } },
+                { new: true }
+            ).lean().exec() as any;
+
+            const newNfeNumber: number = updatedIssuerRaw?.seriesCounters?.[seriesKey] ?? 1;
+            this.logger.log(`NFe counter for series ${seriesKey}: ${newNfeNumber} (raw counters: ${JSON.stringify(updatedIssuerRaw?.seriesCounters)})`);
+
+            // Reload issuer as Mongoose document for toObject() later
+            issuer = await this.fiscalIssuerModel.findById(issuer._id).exec();
 
             nfe = new this.fiscalDocumentModel({
-                orderId,
-                issuer: issuer.toObject(), // Embed snapshot of issuer? Or ref? Schema has embedded? Check Schema. Assuming embedded or ref.
-                // Schema likely has issuer as subdoc or ref. If ref, we pass ID. If embedded, object.
-                // Let's assume embedded snapshot is safer for history, but if schema is ref, this fails.
-                // Checking previous schema view... lines 1-30 don't show FiscalDocumentModel.
-                // Standard approach: store issuer snapshot in NFe for fiscal immutability.
-                // Whatever properties match the schema.
-                // For now, simpler: map fields if needed, or pass object if schema handles it.
+                orderId: internalOrderId,
+                order: internalOrderId,
+                issuer: issuer.toObject(),
                 status: 'DRAFT',
                 environment: 'PRODUCTION',
                 number: newNfeNumber,
@@ -235,7 +312,15 @@ export class FiscalService {
             // Update NFe
             nfe.status = result.status === 'authorized' ? 'AUTHORIZED' : (result.status === 'processing' ? 'PROCESSING' : (result.status === 'denied' ? 'REJECTED' : 'ERROR'));
             nfe.protocol = result.protocol;
-            nfe.xml = result.xml || signedXml;
+
+            // When authorized, compose nfeProc (signed NFe + SEFAZ protocol receipt)
+            if (result.status === 'authorized' && result.protNFeXml) {
+                const cleanSigned = signedXml.replace(/<\?xml[^?]*\?>/g, '').trim();
+                nfe.xml = `<?xml version="1.0" encoding="UTF-8"?><nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">${cleanSigned}${result.protNFeXml}</nfeProc>`;
+                this.logger.log(`nfeProc composed. Length: ${nfe.xml.length}`);
+            } else {
+                nfe.xml = result.xml || signedXml;
+            }
 
             if (result.message) {
                 nfe.rejectionReason = result.message;
@@ -246,25 +331,153 @@ export class FiscalService {
             }
 
             await nfe.save();
+            await this.linkNFeToOrder(nfe, orderId);
 
-            return { message: 'NFe emitida com sucesso', nfeId: nfe._id, status: nfe.status, accessKey: nfe.accessKey };
+            return {
+                message: nfe.status === 'AUTHORIZED' ? 'NFe autorizada com sucesso' : (nfe.rejectionReason || 'Emissão concluída'),
+                nfeId: nfe._id,
+                status: nfe.status,
+                accessKey: nfe.accessKey,
+                rejectionReason: nfe.rejectionReason,
+            };
 
         } catch (error) {
             this.logger.error(`Failed to emit NFe: ${error.message}`);
             nfe.status = 'ERROR';
             nfe.rejectionReason = error.message;
             await nfe.save();
+            await this.linkNFeToOrder(nfe, orderId);
             throw error;
         }
     }
 
+    private async linkNFeToOrder(nfe: any, orderId: string): Promise<void> {
+        try {
+            const IS_MONGO_ID = /^[0-9a-fA-F]{24}$/;
+            let dbOrder: any = IS_MONGO_ID.test(orderId)
+                ? await this.orderModel.findById(orderId).exec()
+                : null;
+            if (!dbOrder) {
+                dbOrder = await this.orderModel.findOne({ externalId: orderId }).exec();
+            }
+            if (!dbOrder) return;
+
+            // Link NFe document to order via ObjectId ref
+            if (!nfe.order) {
+                nfe.order = dbOrder._id;
+                await nfe.save();
+            }
+
+            const logMsg = nfe.status === 'AUTHORIZED'
+                ? `NFe ${nfe.number} série ${nfe.series} autorizada. Chave: ${nfe.accessKey}`
+                : nfe.status === 'CANCELLED'
+                    ? `NFe ${nfe.number} série ${nfe.series} cancelada. ${nfe.rejectionReason || ''}`
+                    : `NFe ${nfe.number} série ${nfe.series} ${nfe.status}. ${nfe.rejectionReason || ''}`;
+
+            await this.orderModel.findByIdAndUpdate(dbOrder._id, {
+                // $addToSet prevents duplicate ObjectId refs in fiscalDocuments array
+                $addToSet: { fiscalDocuments: nfe._id },
+                $push: {
+                    logs: {
+                        logType: 'fiscal',
+                        message: logMsg.trim(),
+                        details: {
+                            nfeId: String(nfe._id),
+                            number: nfe.number,
+                            series: nfe.series,
+                            status: nfe.status,
+                            accessKey: nfe.accessKey,
+                            protocol: nfe.protocol,
+                        },
+                        createdAt: new Date(),
+                    },
+                },
+            }).exec();
+        } catch (err) {
+            this.logger.warn(`Could not link NFe to order: ${err.message}`);
+        }
+    }
+
+    async cancelNFe(orderId: string, justification: string): Promise<any> {
+        this.logger.log(`Cancelando NFe do pedido ${orderId}...`);
+
+        if (!justification || justification.trim().length < 15) {
+            throw new Error('Justificativa de cancelamento deve ter no mínimo 15 caracteres.');
+        }
+
+        // Find NFe by order ObjectId or external ID fallback — resolve internal order ObjectId first
+        const IS_MONGO_ID = /^[0-9a-fA-F]{24}$/;
+        const cancelOrderId = IS_MONGO_ID.test(orderId) ? new Types.ObjectId(orderId) : null;
+
+        let internalOrderId: Types.ObjectId | null = cancelOrderId;
+        if (!internalOrderId) {
+            const dbOrder = await this.orderModel.findOne({ externalId: orderId }).lean().exec() as any;
+            if (dbOrder) internalOrderId = dbOrder._id;
+        }
+        if (!internalOrderId) throw new Error(`Pedido ${orderId} não encontrado.`);
+
+        // Atomic lock: only succeed if NFe is currently AUTHORIZED → mark CANCELLING immediately.
+        // This prevents concurrent requests from both proceeding to SEFAZ.
+        const nfe: any = await this.fiscalDocumentModel.findOneAndUpdate(
+            { $or: [{ orderId: internalOrderId }, { order: internalOrderId }], status: 'AUTHORIZED' },
+            { $set: { status: 'CANCELLING' } },
+            { new: false },  // return pre-update doc so we have accessKey/protocol
+        ).exec();
+
+        if (!nfe) {
+            // Either NFe doesn't exist or it's not AUTHORIZED (already CANCELLING/CANCELLED/etc.)
+            const existing: any = await this.fiscalDocumentModel
+                .findOne({ $or: [{ orderId: internalOrderId }, { order: internalOrderId }] })
+                .lean().exec();
+            if (!existing) throw new Error(`NFe para o pedido ${orderId} não encontrada.`);
+            throw new Error(`NFe não pode ser cancelada (status atual: ${existing.status}).`);
+        }
+
+        const issuer = await this.fiscalIssuerModel.findOne({ isActive: true }).exec();
+        if (!issuer) {
+            // Revert lock if issuer is missing
+            await this.fiscalDocumentModel.findByIdAndUpdate(nfe._id, { $set: { status: 'AUTHORIZED' } }).exec();
+            throw new Error('Emitente fiscal não configurado.');
+        }
+
+        const result = await this.sefazService.cancelNFe(nfe, issuer, justification.trim());
+
+        this.logger.log(`Cancelamento SEFAZ retornou: status=${result.status} cStat=${result.cStat} msg=${result.message}`);
+
+        if (result.status === 'cancelled') {
+            nfe.status = 'CANCELLED';
+            nfe.rejectionReason = justification.trim();
+            nfe.protocol = result.protocol || nfe.protocol;
+            await nfe.save();
+            await this.linkNFeToOrder(nfe, orderId);
+        } else {
+            // SEFAZ rejected — revert lock so the NFe can be retried or inspected
+            await this.fiscalDocumentModel.findByIdAndUpdate(nfe._id, { $set: { status: 'AUTHORIZED' } }).exec();
+            throw new Error(`SEFAZ rejeitou o cancelamento: ${result.cStat} - ${result.message}`);
+        }
+
+        return {
+            status: nfe.status,
+            message: result.message,
+            accessKey: nfe.accessKey,
+            protocol: result.protocol,
+        };
+    }
+
     async saveIssuer(data: Partial<FiscalIssuerModel>) {
+        if (data.taxRegime !== undefined) {
+            const raw = String(data.taxRegime).toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const SIMPLES_VARIANTS = ['SIMPLESNACIONAL', 'SIMPLES', 'SN', '1', 'SIMPLESNACIOANL'];
+            if (SIMPLES_VARIANTS.includes(raw)) {
+                data.taxRegime = 'SIMPLES_NACIONAL';
+            }
+        }
         const issuer = await this.fiscalIssuerModel.findOneAndUpdate(
             { isActive: true },
             data,
             { new: true, upsert: true, setDefaultsOnInsert: true }
         ).exec();
-
+        this.logger.log(`Issuer saved. taxRegime=${issuer?.taxRegime}`);
         return issuer;
     }
 
@@ -272,7 +485,38 @@ export class FiscalService {
         return await this.fiscalIssuerModel.findOne({ isActive: true }).exec();
     }
 
+    /** Returns the single most-relevant NFe for an order:
+     *  prefers AUTHORIZED → PROCESSING → ERROR/DRAFT/REJECTED → CANCELLED (last resort).
+     */
     async getNFeByOrderId(orderId: string) {
-        return await this.fiscalDocumentModel.findOne({ orderId }).exec(); // issuer is normally embedded? If ref, .populate('issuer')
+        const docs = await this.listNFesByOrderId(orderId);
+        if (!docs.length) return null;
+        const priority = ['AUTHORIZED', 'PROCESSING', 'CANCELLING', 'ERROR', 'REJECTED', 'DRAFT', 'CANCELLED', 'CANCELED'];
+        return docs.sort((a, b) => priority.indexOf(a.status) - priority.indexOf(b.status))[0];
+    }
+
+    /** Returns all NFe documents for an order, newest first. */
+    async listNFesByOrderId(orderId: string) {
+        const oid = await this.resolveInternalOrderId(orderId);
+        if (!oid) return [];
+        return this.fiscalDocumentModel
+            .find({ $or: [{ orderId: oid }, { order: oid }] })
+            .sort({ createdAt: -1 })
+            .select('-xml -xmlSigned')   // omit large XML fields from list queries
+            .exec();
+    }
+
+    /** Resolves an orderId (MongoDB ObjectId string or marketplace externalId) to the internal _id. */
+    private async resolveInternalOrderId(orderId: string): Promise<Types.ObjectId | null> {
+        const IS_MONGO_ID = /^[0-9a-fA-F]{24}$/;
+        if (IS_MONGO_ID.test(orderId)) {
+            return new Types.ObjectId(orderId);
+        }
+        const order = await this.orderModel
+            .findOne({ externalId: orderId })
+            .select('_id')
+            .lean()
+            .exec() as any;
+        return order ? (order._id as Types.ObjectId) : null;
     }
 }

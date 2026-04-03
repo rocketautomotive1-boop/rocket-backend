@@ -18,7 +18,7 @@ export class PublicationContextService {
         private readonly authService: MarketplaceAuthService,
     ) { }
 
-    async buildContext(listingId: string): Promise<PublicationContext> {
+    async buildContext(listingId: string, requesterId?: string): Promise<PublicationContext> {
         const listing = await this.listingModel.findById(listingId).exec();
         if (!listing) throw new NotFoundException(`Listing ${listingId} not found`);
 

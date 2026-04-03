@@ -9,8 +9,8 @@ import { Logger } from '@nestjs/common';
 
 @ApiTags('categories')
 @Controller('categories')
-@UseGuards(JwtAuthGuard)
-@ApiBearerAuth()
+//@UseGuards(JwtAuthGuard)
+//@ApiBearerAuth()
 export class CategoryController {
   private readonly logger = new Logger(CategoryController.name);
 

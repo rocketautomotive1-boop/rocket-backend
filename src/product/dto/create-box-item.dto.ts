@@ -1,17 +1,17 @@
-import { IsNumber, IsNotEmpty, Min } from 'class-validator';
+import { IsString, IsNotEmpty, IsNumber, Min } from 'class-validator';
 
 export class CreateBoxItemDto {
-  @IsNumber()
+  @IsString()
   @IsNotEmpty()
-  boxId: number;
+  boxId: string;
 
-  @IsNumber()
+  @IsString()
   @IsNotEmpty()
-  productId: number;
+  productId: string;
 
-  @IsNumber()
+  @IsString()
   @IsNotEmpty()
-  conditionId: number;
+  conditionId: string;
 
   @IsNumber()
   @IsNotEmpty()

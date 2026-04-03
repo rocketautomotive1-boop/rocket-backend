@@ -135,12 +135,17 @@ export class SefazService {
                 status = 'processing';
             }
 
+            // Extract raw <protNFe>...</protNFe> from response to compose nfeProc later
+            const protNFeMatch = responseXml.match(/<protNFe[\s\S]*?<\/protNFe>/);
+            const protNFeXml = protNFeMatch ? protNFeMatch[0] : undefined;
+
             return {
                 status: status,
                 protocol: protocol,
                 message: finalMessage,
                 xml: signedXml,
                 responseXml: responseXml,
+                protNFeXml: protNFeXml,
                 cStat: cStat
             };
 
@@ -149,6 +154,105 @@ export class SefazService {
             if (error.response) {
                 this.logger.error(`SEFAZ Response Data: ${error.response.data}`);
             }
+            throw error;
+        }
+    }
+
+    async cancelNFe(nfe: any, issuer: any, justification: string): Promise<any> {
+        this.logger.log(`Cancelling NFe ${nfe.accessKey} via SEFAZ evento 110111...`);
+
+        if (!issuer.certificatePfx || !issuer.certificatePassword) {
+            throw new Error('Certificado Digital não configurado para o emitente.');
+        }
+        if (!nfe.accessKey || !nfe.protocol) {
+            throw new Error('NFe não possui chave de acesso ou protocolo de autorização.');
+        }
+        if (justification.length < 15) {
+            throw new Error('Justificativa deve ter no mínimo 15 caracteres.');
+        }
+
+        const isProduction = nfe.environment === 'PRODUCTION';
+        const baseUrl = isProduction
+            ? 'https://nfe.sefaz.pe.gov.br/nfe-service/services/NFeRecepcaoEvento4'
+            : 'https://nfehomolog.sefaz.pe.gov.br/nfe-service/services/NFeRecepcaoEvento4';
+
+        const tpAmb = isProduction ? '1' : '2';
+        const chNFe = nfe.accessKey;
+        const cUF = chNFe.substring(0, 2); // First 2 digits = cUF
+        // Use current time (UTC-3 only, no extra buffer) so dhEvento is never before dhAutorizacao
+        const dhEvento = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().split('.')[0] + '-03:00';
+        const idEvento = `ID110111${chNFe}01`;
+        const idLote = Math.floor(Math.random() * 1000000);
+
+        const cnpj = issuer.cnpj.replace(/\D/g, '');
+
+        // Build cancellation event XML
+        const eventoXml = `<envEvento versao="1.00" xmlns="http://www.portalfiscal.inf.br/nfe"><idLote>${idLote}</idLote><evento versao="1.00"><infEvento Id="${idEvento}"><cOrgao>${cUF}</cOrgao><tpAmb>${tpAmb}</tpAmb><CNPJ>${cnpj}</CNPJ><chNFe>${chNFe}</chNFe><dhEvento>${dhEvento}</dhEvento><tpEvento>110111</tpEvento><nSeqEvento>1</nSeqEvento><verEvento>1.00</verEvento><detEvento versao="1.00"><descEvento>Cancelamento</descEvento><nProt>${nfe.protocol}</nProt><xJust>${justification.substring(0, 255)}</xJust></detEvento></infEvento></evento></envEvento>`;
+
+        // Sign
+        let pfxBase64 = issuer.certificatePfx;
+        if (pfxBase64.includes('base64,')) pfxBase64 = pfxBase64.split('base64,')[1];
+
+        const signedEvento = await this.signatureService.signEventXml(eventoXml, pfxBase64, issuer.certificatePassword);
+        const cleanSigned = signedEvento.replace(/<\?xml.*?\?>/g, '').trim();
+
+        this.logger.log(`Evento XML assinado (first 1500): ${cleanSigned.substring(0, 1500)}`);
+
+        const soapEnvelope = `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope" xmlns:nfe="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4"><soap12:Header/><soap12:Body><nfe:nfeDadosMsg>${cleanSigned}</nfe:nfeDadosMsg></soap12:Body></soap12:Envelope>`;
+
+        try {
+            const { cert, key } = this.signatureService.getCertAndKey(pfxBase64, issuer.certificatePassword);
+            const agent = new https.Agent({ cert, key, rejectUnauthorized: false });
+
+            const response$ = this.httpService.post(baseUrl, soapEnvelope, {
+                headers: {
+                    'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4/nfeRecepcaoEvento"',
+                    'SOAPAction': 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4/nfeRecepcaoEvento',
+                },
+                httpsAgent: agent,
+                timeout: 30000,
+            }).pipe(timeout(35000));
+
+            const response = await lastValueFrom(response$);
+            this.logger.log(`SEFAZ Cancelamento raw XML (first 2000): ${String(response.data).substring(0, 2000)}`);
+
+            const parsed = this.parser.parse(response.data);
+            this.logger.log(`SEFAZ Cancelamento parsed: ${JSON.stringify(parsed)}`);
+
+            // SEFAZ PE NFeRecepcaoEvento4 — path may vary, try multiple
+            const body = parsed?.Envelope?.Body ?? parsed?.Body;
+            const resultMsg = body?.nfeResultMsg ?? body?.['nfe:nfeResultMsg'];
+            const retEnvEvento = resultMsg?.retEnvEvento;
+
+            // Batch-level cStat (128 = lote processado; others = batch error)
+            const batchCStat = retEnvEvento?.cStat;
+            const batchMotivo = retEnvEvento?.xMotivo;
+            this.logger.log(`SEFAZ Cancelamento batch: ${batchCStat} - ${batchMotivo}`);
+
+            // Event-level: retEvento.infEvento
+            const retEvento = retEnvEvento?.retEvento;
+            const infEvento = Array.isArray(retEvento) ? retEvento[0]?.infEvento : retEvento?.infEvento;
+
+            const cStat = infEvento?.cStat ?? batchCStat;
+            const xMotivo = infEvento?.xMotivo ?? batchMotivo;
+            const nProt = infEvento?.nProt;
+
+            this.logger.log(`SEFAZ Cancelamento: ${cStat} - ${xMotivo}`);
+
+            // 135 = Evento registrado e vinculado a NF-e cancelada
+            // 136 = Evento registrado, mas NF-e não encontrada no Ambiente Nacional (also acceptable)
+            const success = cStat == 135 || cStat == 136;
+
+            return {
+                status: success ? 'cancelled' : 'error',
+                cStat,
+                message: xMotivo || 'Resposta inesperada',
+                protocol: nProt,
+                responseXml: response.data,
+            };
+        } catch (error) {
+            this.logger.error(`SEFAZ Cancelamento Error: ${error.message}`);
+            if (error.response) this.logger.error(`Response: ${error.response.data}`);
             throw error;
         }
     }

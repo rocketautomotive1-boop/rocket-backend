@@ -4,6 +4,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CartModel, CartDocument } from './schemas/cart.schema';
 import { ProductService } from '../product/product.service';
+import { ProductRepository } from '../product/product.repository';
 import { AddToCartDto } from './dto/add-to-cart.dto';
 import { CouponModel, CouponDocument } from './schemas/coupon.schema';
 import { CustomerService } from '../customer/customer.service'; // Assuming path for CustomerService
@@ -14,6 +15,7 @@ export class CartService {
         @InjectModel(CartModel.name) private cartModel: Model<CartDocument>,
         @InjectModel('CouponModel') private couponModel: Model<CouponDocument>, // Corrected type and name
         private readonly productService: ProductService,
+        private readonly productRepository: ProductRepository,
         private readonly customerService: CustomerService,
     ) { }
 
@@ -112,8 +114,8 @@ export class CartService {
             newTotalQuantity += cart.items[existingItemIndex].quantity;
         }
 
-        // Validate Stock
-        const stock = product.stockQuantity ?? 0;
+        // Validate Stock (real-time from stock_movements)
+        const stock = await this.productRepository.calculateStock(productId);
         if (newTotalQuantity > stock) {
             throw new BadRequestException(`Apenas ${stock} unidades disponíveis.`);
         }
@@ -149,8 +151,8 @@ export class CartService {
             throw new NotFoundException('Item not found in cart');
         }
 
-        // Validate Stock
-        const stock = product.stockQuantity ?? 0;
+        // Validate Stock (real-time from stock_movements)
+        const stock = await this.productRepository.calculateStock(productId);
         if (dto.quantity > stock) {
             throw new BadRequestException(`Apenas ${stock} unidades disponíveis.`);
         }

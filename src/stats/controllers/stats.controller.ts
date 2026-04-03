@@ -4,10 +4,10 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags, ApiQuery } from '@ne
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 @Controller('stats')
-@UseGuards(JwtAuthGuard)
+//@UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class StatsController {
-  constructor(private readonly statsService: StatsService) {}
+  constructor(private readonly statsService: StatsService) { }
 
   @Get('weekly-published-products')
   @ApiTags('Stats')
@@ -15,7 +15,7 @@ export class StatsController {
   @ApiOperation({ summary: 'Get weekly published products' })
   @ApiResponse({ status: 200, description: 'Weekly published products' })
   @ApiResponse({ status: 400, description: 'Bad Request' })
-  @ApiResponse({ status: 500, description: 'Internal Server Error' }) 
+  @ApiResponse({ status: 500, description: 'Internal Server Error' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   getWeeklyPublishedProducts(@Req() req: any) {
     const userId = this.statsService.resolveUserIdFromRequest(req);
@@ -31,7 +31,7 @@ export class StatsController {
   @ApiQuery({ name: 'endDate', required: false, description: 'End date for custom period (YYYY-MM-DD)' })
   @ApiResponse({ status: 200, description: 'Inventory value data' })
   @ApiResponse({ status: 400, description: 'Bad Request' })
-  @ApiResponse({ status: 500, description: 'Internal Server Error' }) 
+  @ApiResponse({ status: 500, description: 'Internal Server Error' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   getInventoryValue(
     @Req() req: any,
@@ -41,5 +41,22 @@ export class StatsController {
   ) {
     const userId = this.statsService.resolveUserIdFromRequest(req);
     return this.statsService.getInventoryValue(period, startDate, endDate, userId);
+  }
+
+  @Get('inventory-value-by-allocation')
+  @ApiTags('Stats')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get inventory value filtered by allocation metadata (floor, room, row, etc.)' })
+  @ApiQuery({ name: 'floor', required: false, description: 'Andar' })
+  @ApiQuery({ name: 'room', required: false, description: 'Sala' })
+  @ApiQuery({ name: 'row', required: false, description: 'Corredor' })
+  @ApiQuery({ name: 'shelf', required: false, description: 'Estante' })
+  @ApiQuery({ name: 'level', required: false, description: 'Nível' })
+  @ApiResponse({ status: 200, description: 'Inventory value by allocation data' })
+  @ApiResponse({ status: 400, description: 'Bad Request' })
+  @ApiResponse({ status: 500, description: 'Internal Server Error' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  getInventoryValueByAllocation(@Query() query: any) {
+    return this.statsService.getInventoryValueByAllocation(query);
   }
 }

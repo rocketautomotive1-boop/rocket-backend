@@ -14,10 +14,10 @@ export class QuestionRepository {
     }
 
     async findAll(query: any = {}, options: any = {}): Promise<QuestionDocument[]> {
-        const { page = 1, limit = 50, sort = { createdAt: -1 } } = options;
+        const { limit = 50, offset = 0, sort = { dateCreated: -1 } } = options;
         return this.questionModel.find(query)
             .sort(sort)
-            .skip((page - 1) * limit)
+            .skip(offset)
             .limit(limit)
             .populate('product')
             .exec();
@@ -42,5 +42,13 @@ export class QuestionRepository {
 
     async count(query: any = {}): Promise<number> {
         return this.questionModel.countDocuments(query).exec();
+    }
+
+    async findByIdWithProduct(id: string): Promise<QuestionDocument | null> {
+        return this.questionModel.findById(id).populate('product').exec();
+    }
+
+    async aggregate(pipeline: any[]): Promise<any[]> {
+        return this.questionModel.aggregate(pipeline).exec();
     }
 }

@@ -89,18 +89,24 @@ export class ProductRepository {
         return this.productModel.findById(id).populate({ path: 'category', populate: { path: 'ancestors' } }).exec();
     }
 
+    /**
+     * Lighter document for list / initial load: no images, no draft blob, shallow category (no ancestors chain).
+     */
+    async findByIdLean(id: string): Promise<ProductDocument | null> {
+        return this.productModel
+            .findById(id)
+            .select('-images -draftData')
+            .populate({ path: 'category', select: 'name externalId _id path_from_root' })
+            .exec();
+    }
+
     async findByIdClean(id: string): Promise<ProductModel | null> {
         const doc = await this.findById(id);
         return this.toDto(doc);
     }
 
-    async findBySku(sku: string | number): Promise<ProductDocument | null> {
-        const query = typeof sku === 'number' ? { sku } : { partNumber: sku };
-        return this.productModel.findOne(query).populate({ path: 'category', populate: { path: 'ancestors' } }).exec();
-    }
-
-    async findBySkuClean(sku: string | number): Promise<ProductModel | null> {
-        const doc = await this.findBySku(sku);
+    async findByIdLeanClean(id: string): Promise<ProductModel | null> {
+        const doc = await this.findByIdLean(id);
         return this.toDto(doc);
     }
 
@@ -162,11 +168,6 @@ export class ProductRepository {
     }
 
     // Stock Movement Methods
-    async updateStock(productId: string | Types.ObjectId, quantity: number, session?: ClientSession): Promise<void> {
-        const id = (typeof productId === 'string' && Types.ObjectId.isValid(productId)) ? new Types.ObjectId(productId) : productId;
-        await this.productModel.updateOne({ _id: id as any }, { $inc: { stockQuantity: quantity } }, { session }).exec();
-    }
-
     async updateStockReserved(productId: string | Types.ObjectId, quantity: number, session?: ClientSession): Promise<void> {
         const id = (typeof productId === 'string' && Types.ObjectId.isValid(productId)) ? new Types.ObjectId(productId) : productId;
         await this.productModel.updateOne({ _id: id as any }, { $inc: { stockReserved: quantity } }, { session }).exec();
@@ -212,10 +213,64 @@ export class ProductRepository {
         return stats.length > 0 ? stats[0].total : 0;
     }
 
-    async syncStockFromMovements(productId: string, session?: ClientSession): Promise<number> {
-        const actualStock = await this.calculateStock(productId, session);
-        await this.productModel.updateOne({ _id: new Types.ObjectId(productId) as any }, { $set: { stockQuantity: actualStock } }, { session }).exec();
-        return actualStock;
+    async getProductIdsWithMinStock(minStock: number): Promise<Types.ObjectId[]> {
+        const results = await this.stockMovementModel.aggregate([
+            {
+                $group: {
+                    _id: '$productId',
+                    total: {
+                        $sum: {
+                            $switch: {
+                                branches: [
+                                    { case: { $in: ['$type', ['inbound', 'purchase_return']] }, then: '$quantity' },
+                                    { case: { $in: ['$type', ['outbound', 'sale', 'transfer']] }, then: { $multiply: ['$quantity', -1] } },
+                                    { case: { $eq: ['$type', 'adjustment'] }, then: '$quantity' }
+                                ],
+                                default: 0
+                            }
+                        }
+                    }
+                }
+            },
+            { $match: { total: { $gte: minStock } } },
+            { $project: { _id: 1 } }
+        ]);
+        return results.map(r => r._id);
+    }
+
+    async getProductIdsWithMaxStock(maxStock: number): Promise<Types.ObjectId[]> {
+        const results = await this.stockMovementModel.aggregate([
+            {
+                $group: {
+                    _id: '$productId',
+                    total: {
+                        $sum: {
+                            $switch: {
+                                branches: [
+                                    { case: { $in: ['$type', ['inbound', 'purchase_return']] }, then: '$quantity' },
+                                    { case: { $in: ['$type', ['outbound', 'sale', 'transfer']] }, then: { $multiply: ['$quantity', -1] } },
+                                    { case: { $eq: ['$type', 'adjustment'] }, then: '$quantity' }
+                                ],
+                                default: 0
+                            }
+                        }
+                    }
+                }
+            },
+            { $match: { total: { $lte: maxStock } } },
+            { $project: { _id: 1 } }
+        ]);
+        return results.map(r => r._id);
+    }
+
+    async syncPriceFromMovements(productId: string, session?: ClientSession): Promise<number> {
+        const latest = await this.findLatestMovementWithPrice(productId);
+        if (latest && latest.price) {
+            const price = parseFloat(latest.price.toString());
+            await this.updatePrice(productId, price, session);
+            return price;
+        }
+        return 0;
     }
 
     async findLatestMovementWithPrice(productId: string): Promise<StockMovementDocument | null> {
@@ -239,13 +294,22 @@ export class ProductRepository {
             delete mongoQuery.reference;
         }
 
-        const q = this.stockMovementModel.find(mongoQuery).populate('productId', 'name partNumber sku').sort({ date: -1 });
+        const q = this.stockMovementModel.find(mongoQuery).populate('productId', 'name partNumber').sort({ date: -1 });
         if (limit > 0) q.limit(limit);
         return q.exec();
     }
 
     async findMovementById(id: string): Promise<StockMovementDocument | null> {
-        return this.stockMovementModel.findById(id).populate('productId', 'name partNumber sku').exec();
+        return this.stockMovementModel.findById(id).populate('productId', 'name partNumber').exec();
+    }
+
+    /** Última entrada de estoque (lean — inclui campos legados `conditionId` no documento Mongo). */
+    async findLatestInboundMovement(productId: Types.ObjectId): Promise<Record<string, any> | null> {
+        return this.stockMovementModel
+            .findOne({ productId: productId as any, type: 'inbound' })
+            .sort({ date: -1 })
+            .lean()
+            .exec() as Promise<Record<string, any> | null>;
     }
 
     async createMovement(data: any, session?: ClientSession): Promise<StockMovementDocument> {
@@ -296,9 +360,7 @@ export class ProductRepository {
     }
 
     async findMovementsByReferences(references: string[]): Promise<string[]> {
-        console.log(`[ProductRepo] Finding movements for ${references.length} refs:`, references);
         const movements = await this.stockMovementModel.find({ 'metadata.externalReference': { $in: references } }, { 'metadata.externalReference': 1 }).exec();
-        console.log(`[ProductRepo] Found ${movements.length} movements.`);
         return movements.map(m => m.metadata?.externalReference).filter(Boolean);
     }
 

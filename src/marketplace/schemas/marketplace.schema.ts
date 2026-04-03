@@ -50,6 +50,8 @@ export class MarketplaceDescriptionTemplateSnapshot {
     sections: Record<string, any>[];
 }
 
+export type TokenStrategy = 'oauth2' | 'aws_sigv4' | 'hybrid' | 'api_key' | 'none';
+
 @Schema({ collection: 'marketplaces', timestamps: true })
 export class MarketplaceModel {
     @Prop({ required: true, unique: true })
@@ -60,6 +62,17 @@ export class MarketplaceModel {
 
     @Prop({ default: true })
     enabled: boolean;
+
+    /**
+     * Estratégia de autenticação do marketplace.
+     * oauth2  → token OAuth2 salvo no DB (ML, Shopee, OLX)
+     * aws_sigv4 → apenas variáveis de ambiente AWS (não precisa de token no DB)
+     * hybrid  → LWA OAuth2 no DB + SigV4 via env (Amazon SP-API)
+     * api_key → chave estática em settings.apiKey
+     * none    → sem autenticação necessária
+     */
+    @Prop({ default: 'oauth2' })
+    tokenStrategy: TokenStrategy;
 
     @Prop()
     logoUrl: string;

@@ -1,4 +1,4 @@
-import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { SKIP_JWT_AUTH_KEY } from '../decorators/skip-jwt-auth.decorator';
@@ -8,7 +8,7 @@ export class JwtAuthGuard implements CanActivate {
   constructor(
     private jwtService: JwtService,
     private reflector: Reflector,
-  ) {}
+  ) { }
 
   canActivate(context: ExecutionContext): boolean {
     // Verificar se a rota está marcada para pular autenticação JWT
@@ -25,7 +25,7 @@ export class JwtAuthGuard implements CanActivate {
     const authHeader = request.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return false;
+      throw new UnauthorizedException('Token não fornecido ou formato inválido');
     }
 
     const token = authHeader.split(' ')[1];
@@ -35,7 +35,7 @@ export class JwtAuthGuard implements CanActivate {
       request.user = payload;
       return true;
     } catch (error) {
-      return false;
+      throw new UnauthorizedException('Token inválido ou expirado');
     }
   }
 }

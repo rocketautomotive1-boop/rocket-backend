@@ -1,13 +1,43 @@
 import { Controller, Get, Post, Body, Param, Query, NotFoundException, BadRequestException, HttpCode } from '@nestjs/common';
+import { Types } from 'mongoose';
 import { OrderService } from './order.service';
 import { ProductRepository } from '../product/product.repository';
+import { OrderCancellationService } from './services/order-cancellation.service';
+import { OrderRepository } from './order.repository';
 
 @Controller('orders')
 export class OrderController {
     constructor(
         private readonly orderService: OrderService,
-        private readonly productRepository: ProductRepository
+        private readonly productRepository: ProductRepository,
+        private readonly cancellationService: OrderCancellationService,
+        private readonly orderRepository: OrderRepository,
     ) { }
+
+    @Get('cancellations/inconsistent')
+    async listInconsistentCancellations(@Query('days') days = 30) {
+        return this.cancellationService.findInconsistentCancellations(Number(days));
+    }
+
+    @Post('cancellations/fix-inconsistent')
+    @HttpCode(200)
+    async fixInconsistentCancellations(@Query('days') days = 30) {
+        return this.cancellationService.fixInconsistentCancellations(Number(days));
+    }
+
+    @Post(':id/reprocess-cancellation')
+    @HttpCode(200)
+    async reprocessCancellation(@Param('id') id: string) {
+        const order = Types.ObjectId.isValid(id)
+          ? await this.orderRepository.findById(id)
+          : await this.orderRepository.findByExternalId(id);
+        if (!order) throw new NotFoundException(`Order ${id} not found`);
+        if ((order.status ?? '').toLowerCase() !== 'cancelled') {
+            throw new BadRequestException(`Order ${order.externalId} is not cancelled (status: ${order.status})`);
+        }
+        const result = await this.cancellationService.process(order, {}, 'webhook');
+        return { order: order.externalId, ...result };
+    }
 
     @Post('syncc')
     @HttpCode(202)

@@ -40,6 +40,58 @@ export class SignatureService {
         return { cert, key };
     }
 
+    /** Sign a cancellation/event XML — Signature inserted inside <evento> after <infEvento> */
+    async signEventXml(xml: string, pfxBase64: string, password?: string): Promise<string> {
+        this.logger.log('Signing event XML (infEvento)...');
+        try {
+            const { cert, key } = this.getCertAndKey(pfxBase64, password);
+            const cleanCert = cert
+                .replace('-----BEGIN CERTIFICATE-----', '')
+                .replace('-----END CERTIFICATE-----', '')
+                .replace(/[\r\n]/g, '');
+
+            const sig = new SignedXml();
+            (sig as any).privateKey = key;
+            (sig as any).keyInfoProvider = {
+                getKeyInfo: () => `<X509Data><X509Certificate>${cleanCert}</X509Certificate></X509Data>`,
+                getKey: () => key,
+            };
+
+            sig.addReference({
+                xpath: "//*[local-name(.)='infEvento']",
+                transforms: [
+                    'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
+                    'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+                ],
+                digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
+            });
+
+            sig.canonicalizationAlgorithm = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315';
+            sig.signatureAlgorithm = 'http://www.w3.org/2000/09/xmldsig#rsa-sha1';
+
+            // SEFAZ schema requires <Signature> inside <evento> as sibling of <infEvento>,
+            // NOT at the <envEvento> root. Use location.after to place it right after infEvento.
+            sig.computeSignature(xml, {
+                location: {
+                    reference: "//*[local-name(.)='infEvento']",
+                    action: 'after',
+                },
+            });
+
+            let signedXml = sig.getSignedXml();
+            if (!signedXml.includes('<KeyInfo>')) {
+                const keyInfoXml = `<KeyInfo><X509Data><X509Certificate>${cleanCert}</X509Certificate></X509Data></KeyInfo>`;
+                signedXml = signedXml.replace('</Signature>', `${keyInfoXml}</Signature>`);
+            }
+
+            this.logger.log(`Event XML signed. Signed length: ${signedXml.length}`);
+            return signedXml;
+        } catch (error) {
+            this.logger.error('Failed to sign event XML:', error);
+            throw new InternalServerErrorException(`Erro na assinatura do evento: ${error.message}`);
+        }
+    }
+
     async signXml(xml: string, pfxBase64: string, password?: string): Promise<string> {
         this.logger.log('Signing XML...');
 

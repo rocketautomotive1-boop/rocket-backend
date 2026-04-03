@@ -4,8 +4,10 @@ import { HydratedDocument, Types } from 'mongoose';
 export type OrderDocument = HydratedDocument<OrderModel>;
 
 @Schema()
-class OrderItemSnapshot {
+export class OrderItemSnapshot {
     @Prop() externalId?: string; // Marketplace Item ID / Line Item ID
+    @Prop() sku?: string;        // SellerSKU / item_sku do marketplace (preservado para debug e retificação)
+    @Prop() asin?: string;       // ASIN Amazon (quando disponível)
     @Prop() title: string;
     @Prop() quantity: number;
     @Prop() unitPrice: number;
@@ -49,6 +51,54 @@ class OrderPaymentSnapshot {
     @Prop() authorizationCode: string; // from MySQL 'authorizationCode'
 }
 
+@Schema()
+class OrderItemPricingSnapshot {
+    @Prop() externalId?: string;
+    @Prop() sku?: string;
+    @Prop() title: string;
+    @Prop() quantity: number;
+    @Prop() unitPrice: number;
+    @Prop() costPrice: number;
+
+    @Prop() grossProfit: number;
+    @Prop() profitMarginPercent: number;
+
+    @Prop() commissionAmount: number;
+    @Prop() commissionRate: number;
+
+    @Prop() taxAmount: number;
+    @Prop() taxRate: number;
+
+    @Prop() freightAmount: number;
+
+    @Prop() netProfit: number;
+    @Prop() netMarginPercent: number;
+}
+
+@Schema()
+class OrderPricingSnapshot {
+    @Prop({ type: [SchemaFactory.createForClass(OrderItemPricingSnapshot)] })
+    items: OrderItemPricingSnapshot[];
+
+    @Prop({ type: Object })
+    totals: {
+        grossRevenue: number;
+        totalCostOfGoods: number;
+        totalCommission: number;
+        totalTaxes: number;
+        totalFreight: number;
+        totalOtherCosts: number;
+        totalGrossProfit: number;
+        totalNetProfit: number;
+        avgCostPrice: number;
+        avgSellingPrice: number;
+        profitMarginPercent: number;
+    };
+
+    @Prop() strategy: string; // e.g., 'MERCADOLIVRE'
+    @Prop() calculatedAt: Date;
+}
+
 @Schema({ collection: 'orders', timestamps: true })
 export class OrderModel {
     @Prop({ required: true, unique: true })
@@ -66,7 +116,7 @@ export class OrderModel {
     @Prop({ required: true, default: 0 })
     shippingAmount: number;
 
-    @Prop({ default: 'pending', index: true }) // 'pending', 'deducted', 'error', 'skipped'
+    @Prop({ default: 'pending', index: true }) // 'pending' | 'processing' | 'deducted' | 'unresolved' | 'error' | 'skipped'
     logisticsStatus: string;
 
     @Prop()
@@ -78,10 +128,20 @@ export class OrderModel {
     @Prop({ type: Object })
     payment: {
         method: string;
-        marketplaceFee: number;
-        netAmount: number;
+        marketplaceFee: number;    // Commission/fee charged by the marketplace
+        netAmount: number;         // Amount seller actually receives
+        grossAmount: number;       // Total paid by buyer (total_paid_amount)
+        couponAmount: number;      // Marketplace coupon discount applied
+        taxAmount: number;         // Taxes withheld at source
         installments: number;
+        authorizationCode?: string; // Payment authorization code
     };
+
+    @Prop()
+    packId?: string; // ML pack_id — required for /packs/{packId}/fiscal_documents
+
+    @Prop({ type: Object })
+    marketplaceData?: Record<string, any>; // Raw marketplace-specific extra fields
 
     @Prop({ type: [SchemaFactory.createForClass(OrderItemSnapshot)] })
     items: OrderItemSnapshot[];
@@ -108,6 +168,24 @@ export class OrderModel {
 
     @Prop()
     syncedAt: Date;
+
+    @Prop({ type: SchemaFactory.createForClass(OrderPricingSnapshot) })
+    pricing?: OrderPricingSnapshot; // Pricing calculation snapshot
+
+    @Prop({ type: Object })
+    financialSnapshot?: {
+        gross: number;       // Valor bruto pago pelo comprador (ML billing API > payment)
+        commission: number;  // Comissão do marketplace
+        freight: number;     // Frete cobrado do vendedor
+        taxes: number;       // Impostos retidos
+        coupon: number;      // Cupom aplicado
+        net: number;         // Receita líquida recebida
+        costTotal: number;   // Custo dos produtos
+        grossProfit: number; // Lucro bruto (net - custo)
+        marginPct: number;   // Margem % (grossProfit / gross * 100)
+        resolvedAt: Date;    // Quando foi resolvido
+        whatsappSentAt?: Date; // Quando a notificação WhatsApp foi disparada
+    };
 
     fiscalDocuments?: any[];
 }

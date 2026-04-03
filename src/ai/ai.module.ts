@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
 import { SearchModule } from '../search/search.module';
+import { ProductModule } from '../product/product.module';
 import { AiBatchController } from './ai-batch.controller';
 import { AiBatchService } from './ai-batch.service';
 import { AiClerkController } from './ai-clerk.controller';
@@ -14,6 +15,7 @@ import { ProductDraftsService } from './product-drafts.service';
   imports: [
     ConfigModule,
     forwardRef(() => SearchModule),
+    forwardRef(() => ProductModule),
     MongooseModule.forFeature([
       { name: ProductDraftModel.name, schema: ProductDraftSchema },
       { name: 'UserModel', schema: require('../auth/schemas/user.schema').UserSchema },

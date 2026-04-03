@@ -321,12 +321,11 @@ export class PaginationDto {
 // DTO principal para filtros de produtos
 export class ProductFilterDto {
   // Filtros básicos do produto
-  @ApiPropertyOptional({ description: 'IDs dos produtos', type: [Number] })
+  @ApiPropertyOptional({ description: 'IDs dos produtos (ObjectId)', type: [String] })
   @IsOptional()
   @IsArray()
-  @IsNumber({}, { each: true })
-  @Type(() => Number)
-  ids?: number[];
+  @IsString({ each: true })
+  ids?: string[];
 
   @ApiPropertyOptional({ description: 'IDs internos do MongoDB', type: [String] })
   @IsOptional()

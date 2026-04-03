@@ -325,7 +325,7 @@ export class NfeImportService {
                         price: unitCostStock, // Precise Landed Cost
                         reason: `NF-e Import ${entry.accessKey.slice(0, 8)}`,
                         reference: entry.accessKey,
-                        conditionId: 1
+                        condition: 'new',
                     }, session);
 
                     const product = await this.productModel.findById(item.productId).session(session);
@@ -598,7 +598,6 @@ export class NfeImportService {
                 code: xmlItem.unit,
                 name: xmlItem.unit
             },
-            stockQuantity: 0,
             costPrice: Types.Decimal128.fromString((xmlItem.valueUnit || 0).toString()),
             price: Types.Decimal128.fromString(((xmlItem.valueUnit || 0) * 1.5).toString()),
             active: true,

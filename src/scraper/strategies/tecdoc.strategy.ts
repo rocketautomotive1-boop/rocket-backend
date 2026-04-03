@@ -655,7 +655,7 @@ export class TecDocStrategy implements IScraperStrategy {
             let images = Array.from(container.querySelectorAll('gallery-container img, .gallery img')).map((img: any) => img.src);
             if (images.length === 0) images = Array.from(container.querySelectorAll('img.image-center, .mb-overlay-panel-body img')).map((img: any) => img.src);
 
-            return { partNumber, name, brand, description: attributes.map(a => `${a.name}: ${a.value}`).join('\n'), weight: weight || 0, ean, images, stockQuantity: 0, price: 0, oemCodes: oes, applicationSummary: vehicles };
+            return { partNumber, name, brand, description: attributes.map(a => `${a.name}: ${a.value}`).join('\n'), weight: weight || 0, ean, images, price: 0, oemCodes: oes, applicationSummary: vehicles };
 
         }, applicationSummary, oemCodes, gridProductName);
 

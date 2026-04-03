@@ -4,6 +4,7 @@ export interface RawDiscoveryData {
         title: string;
         price: number;
         currency_id: string;
+        category_path?: string;
         attributes: Array<{
             id: string;
             name: string;

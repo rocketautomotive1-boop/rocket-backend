@@ -37,14 +37,7 @@ export class ShopeeWebhookService {
 
       this.logger.log(`Webhook da Shopee adicionado à fila: ${topic}`);
 
-      this.logger.log(`Webhook da Shopee adicionado à fila: ${topic}`);
-
-      // Notificar admin
-      this.notificationsService.notifyAllAdmins(
-        `Shopee: ${topic}`,
-        'Nova atualização recebida da Shopee',
-        { type: 'shopee_webhook', topic, marketplace: 'shopee' }
-      ).catch(e => this.logger.error(`Erro ao enviar push Shopee: ${e.message}`));
+      // Push notifications now handled centrally by WebhookOrderDispatcher + NotificationBus
 
       return { success: true, message: 'Notificação recebida com sucesso' };
     } catch (error) {

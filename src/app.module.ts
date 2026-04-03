@@ -36,6 +36,7 @@ import { ScraperModule } from './scraper/scraper.module';
 import { FinancialModule } from './financial/financial.module';
 import { ListingModule } from './listing/listing.module'; // Added ListingModule
 import { MarketplaceOrchestratorModule } from './marketplace-orchestrator/marketplace-orchestrator.module';
+import { SchedulerModule } from './scheduler/scheduler.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
@@ -115,6 +116,7 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
     MarketplaceOrchestratorModule,
     UserProductivityModule,
     GatewaysModule,
+    SchedulerModule,
   ],
   controllers: [],
   providers: [

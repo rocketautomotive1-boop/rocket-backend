@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, InternalServerErrorException, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, InternalServerErrorException, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { FiscalService } from './services/fiscal.service';
@@ -26,9 +26,28 @@ export class FiscalController {
     }
 
     @Get('nfe/:orderId')
-    @ApiOperation({ summary: 'Consultar NFe de um pedido' })
+    @ApiOperation({ summary: 'Consultar NFe principal de um pedido (AUTHORIZED > ERROR > DRAFT > CANCELLED)' })
     async getNFe(@Param('orderId') orderId: string) {
         return await this.fiscalService.getNFeByOrderId(orderId);
+    }
+
+    @Get('nfe/:orderId/all')
+    @ApiOperation({ summary: 'Listar todas as NFes de um pedido (mais recente primeiro, sem XML)' })
+    async listNFes(@Param('orderId') orderId: string) {
+        return await this.fiscalService.listNFesByOrderId(orderId);
+    }
+
+    @Post('nfe/:orderId/cancel')
+    @ApiOperation({ summary: 'Cancelar NFe autorizada de um pedido' })
+    async cancelNFe(@Param('orderId') orderId: string, @Body() body: { justification: string }) {
+        if (!body?.justification) {
+            throw new BadRequestException('Justificativa de cancelamento é obrigatória.');
+        }
+        try {
+            return await this.fiscalService.cancelNFe(orderId, body.justification);
+        } catch (error) {
+            throw new InternalServerErrorException(error.message);
+        }
     }
 
     @Post('config/issuer')

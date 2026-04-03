@@ -12,7 +12,7 @@ export class ProductCompatibilityModel {
     product: ProductModel;
 
     @Prop({ index: true })
-    productId: number;
+    productId: string;
 
     @Prop({ required: true, index: true })
     vehicleId: string;

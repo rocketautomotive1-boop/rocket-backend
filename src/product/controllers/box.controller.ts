@@ -12,7 +12,7 @@ export class BoxController {
   constructor(
     private readonly boxService: BoxService,
     private readonly boxItemService: BoxItemService,
-  ) {}
+  ) { }
 
   @Post()
   create(@Body() createBoxDto: CreateBoxDto) {
@@ -21,111 +21,111 @@ export class BoxController {
 
   @Get()
   findAll(@Query('warehouseId') warehouseId?: string, @Query('search') search?: string) {
-    return this.boxService.findAll(warehouseId ? +warehouseId : undefined, search);
+    return this.boxService.findAll(warehouseId, search);
   }
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.boxService.findOne(+id);
+    return this.boxService.findOne(id);
   }
 
   @Put(':id')
   update(@Param('id') id: string, @Body() updateBoxDto: UpdateBoxDto) {
-    return this.boxService.update(+id, updateBoxDto);
+    return this.boxService.update(id, updateBoxDto);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.boxService.remove(+id);
+    return this.boxService.remove(id);
   }
 
   @Get(':id/items')
   getBoxItems(@Param('id') id: string) {
-    return this.boxService.getBoxItems(+id);
+    return this.boxService.getBoxItems(id);
   }
 
   @Post(':id/items')
   addItemToBox(@Param('id') id: string, @Body() addBoxItemDto: AddBoxItemDto) {
     const createBoxItemDto: CreateBoxItemDto = {
-      boxId: +id,
+      boxId: id,
       productId: addBoxItemDto.productId,
       conditionId: addBoxItemDto.conditionId,
       quantity: addBoxItemDto.quantity
     };
-    
+
     return this.boxItemService.create(createBoxItemDto);
   }
 
   @Post(':id/items/multiple')
   addMultipleItemsToBox(@Param('id') id: string, @Body() items: AddBoxItemDto[]) {
     const createBoxItemsDto: CreateBoxItemDto[] = items.map(item => ({
-      boxId: +id,
+      boxId: id,
       productId: item.productId,
       conditionId: item.conditionId,
       quantity: item.quantity
     }));
-    
-    return this.boxItemService.addMultipleItems(+id, createBoxItemsDto);
+
+    return this.boxItemService.addMultipleItems(id, createBoxItemsDto);
   }
 
   @Get(':id/movements')
   getBoxMovements(@Param('id') id: string) {
-    return this.boxService.getBoxMovements(+id);
+    return this.boxService.getBoxMovements(id);
   }
 
   @Get(':id/allocation')
   getBoxAllocation(@Param('id') id: string) {
-    return this.boxService.getBoxAllocation(+id);
+    return this.boxService.getBoxAllocation(id);
   }
 
   @Get(':id/summary')
   getBoxSummary(@Param('id') id: string) {
-    return this.boxItemService.getBoxItemsSummary(+id);
+    return this.boxItemService.getBoxItemsSummary(id);
   }
 
   @Get('code/:code')
   findByCode(@Param('code') code: string, @Query('warehouseId') warehouseId?: string) {
-    return this.boxService.findByCode(code, warehouseId ? +warehouseId : undefined);
+    return this.boxService.findByCode(code, warehouseId);
   }
 
   @Get('code/:code/items')
   getBoxItemsByCode(@Param('code') code: string, @Query('warehouseId') warehouseId?: string) {
-    return this.boxService.getBoxItemsByCode(code, warehouseId ? +warehouseId : undefined);
+    return this.boxService.getBoxItemsByCode(code, warehouseId);
   }
 
   @Post('code/:code/items')
   addItemToBoxByCode(@Param('code') code: string, @Body() addBoxItemDto: AddBoxItemDto, @Query('warehouseId') warehouseId?: string) {
-    return this.boxItemService.addItemToBoxByCode(code, addBoxItemDto, warehouseId ? +warehouseId : undefined);
+    return this.boxItemService.addItemToBoxByCode(code, addBoxItemDto, warehouseId);
   }
 
   @Post('code/:code/items/multiple')
   addMultipleItemsToBoxByCode(@Param('code') code: string, @Body() items: AddBoxItemDto[], @Query('warehouseId') warehouseId?: string) {
-    return this.boxItemService.addMultipleItemsToBoxByCode(code, items, warehouseId ? +warehouseId : undefined);
+    return this.boxItemService.addMultipleItemsToBoxByCode(code, items, warehouseId);
   }
 
   @Get('code/:code/movements')
   getBoxMovementsByCode(@Param('code') code: string, @Query('warehouseId') warehouseId?: string) {
-    return this.boxService.getBoxMovementsByCode(code, warehouseId ? +warehouseId : undefined);
+    return this.boxService.getBoxMovementsByCode(code, warehouseId);
   }
 
   @Get('code/:code/allocation')
   getBoxAllocationByCode(@Param('code') code: string, @Query('warehouseId') warehouseId?: string) {
-    return this.boxService.getBoxAllocationByCode(code, warehouseId ? +warehouseId : undefined);
+    return this.boxService.getBoxAllocationByCode(code, warehouseId);
   }
 
   @Get('code/:code/summary')
   getBoxSummaryByCode(@Param('code') code: string, @Query('warehouseId') warehouseId?: string) {
-    return this.boxItemService.getBoxItemsSummaryByCode(code, warehouseId ? +warehouseId : undefined);
+    return this.boxItemService.getBoxItemsSummaryByCode(code, warehouseId);
   }
 
   @Post('generate')
-  createBoxWithCode(@Body() body: { warehouseId: number; description?: string; allocationId?: number }) {
+  createBoxWithCode(@Body() body: { warehouseId: string; description?: string; allocationId?: string }) {
     return this.boxService.createBoxWithCode(body.warehouseId, body.description, body.allocationId);
   }
 
   @Post('with-allocation')
   createBoxWithAllocation(@Body() body: {
-    warehouseId: number;
+    warehouseId: string;
     // Novo esquema
     floor?: number;
     room?: number;
@@ -140,7 +140,7 @@ export class BoxController {
     rack?: string;
     position?: number;
     // comum
-    conditionId: number;
+    conditionId: string;
     description?: string;
   }) {
     if (
@@ -181,24 +181,35 @@ export class BoxController {
   @Post('code/:code/products')
   addProductToBoxByCode(
     @Param('code') code: string,
-    @Body() body: { productId: number; conditionId: number; quantity?: number },
+    @Body() body: { productId: string; conditionId: string; quantity?: number },
     @Query('warehouseId') warehouseId?: string
   ) {
-    return this.boxItemService.addItemToBoxByCode(
+    return this.boxService.addProductToBoxByCode(
       code,
-      {
-        productId: body.productId,
-        conditionId: body.conditionId,
-        quantity: body.quantity || 1
-      },
-      warehouseId ? +warehouseId : undefined
+      body.productId,
+      body.conditionId,
+      body.quantity || 1,
+      warehouseId
+    );
+  }
+
+  @Post(':id/products')
+  addProductToBox(
+    @Param('id') id: string,
+    @Body() body: { productId: string; conditionId: string; quantity?: number }
+  ) {
+    return this.boxService.addProductToBox(
+      id,
+      body.productId,
+      body.conditionId,
+      body.quantity || 1
     );
   }
 
   // NOVO: endpoint para leitura de QR de box
   @Post('scan')
   scanBox(
-    @Body() body: { qr: string; warehouseId: number; allocationId: number; description?: string }
+    @Body() body: { qr: string; warehouseId: string; allocationId: string; description?: string }
   ) {
     return this.boxService.scanBox(body.qr, body.warehouseId, body.allocationId, body.description);
   }
@@ -207,18 +218,18 @@ export class BoxController {
   @Put(':id/allocation')
   linkBoxToAllocation(
     @Param('id') id: string,
-    @Body() body: { allocationId: number }
+    @Body() body: { allocationId: string }
   ) {
-    return this.boxService.linkBoxToAllocation(+id, body.allocationId);
+    return this.boxService.linkBoxToAllocation(id, body.allocationId);
   }
 
   // NOVO: vincular box existente a uma allocation por código (opcional warehouse)
   @Put('code/:code/allocation')
   linkBoxToAllocationByCode(
     @Param('code') code: string,
-    @Body() body: { allocationId: number },
+    @Body() body: { allocationId: string },
     @Query('warehouseId') warehouseId?: string
   ) {
-    return this.boxService.linkBoxToAllocationByCode(code, body.allocationId, warehouseId ? +warehouseId : undefined);
+    return this.boxService.linkBoxToAllocationByCode(code, body.allocationId, warehouseId);
   }
 }

@@ -6,6 +6,10 @@ export class MarketplaceSyncPayload {
     listingId: string;
     externalId?: string;
     action: 'CREATE' | 'UPDATE' | 'DELETE' | 'PAUSE' | 'UNPAUSE';
+    metadata?: {
+        userId?: string;
+        [key: string]: any;
+    };
 
     product: any; // Full Product Snapshot
 

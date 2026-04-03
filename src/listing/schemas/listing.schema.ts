@@ -21,7 +21,7 @@ export class ListingModel {
 
     @Prop({
         type: String,
-        enum: ['active', 'paused', 'error', 'pending_creation'],
+        enum: ['active', 'paused', 'error', 'pending_creation', 'pending_removal', 'removed'],
         default: 'pending_creation'
     })
     status: string;
@@ -46,6 +46,13 @@ export class ListingModel {
 
     @Prop()
     lastSyncAt?: Date;
+
+    // Distributed in-flight lock. Set when a publish job is dispatched to RabbitMQ.
+    // Cleared by ListingStatusListener when the job result arrives (success or failure).
+    // Acts as a per-listing mutex — prevents concurrent dispatches regardless of force flag.
+    // TTL: 2 minutes (orchestrator enforces stale expiry before allowing re-lock).
+    @Prop({ type: Date, default: null })
+    publishingAt?: Date | null;
 
     createdAt: Date;
     updatedAt: Date;

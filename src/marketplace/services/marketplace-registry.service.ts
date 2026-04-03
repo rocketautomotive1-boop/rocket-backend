@@ -17,6 +17,25 @@ export class MarketplaceRegistryService {
         return this.marketplaceModel.find().exec();
     }
 
+    /**
+     * Resolve marketplace for API routes that may receive a MongoDB id or a legacy numeric ref
+     * (ex.: cliente enviando `1` no sync direto de compatibilidades com ML).
+     */
+    async resolveMarketplace(ref: string): Promise<MarketplaceDocument | null> {
+        const s = String(ref ?? '').trim();
+        if (!s) return null;
+        if (/^[0-9a-fA-F]{24}$/.test(s)) {
+            return this.findOne(s);
+        }
+        if (/^\d+$/.test(s)) {
+            this.logger.warn(
+                `Marketplace ref "${s}" is not a MongoDB ObjectId; using Mercado Livre for compatibility sync`,
+            );
+            return this.findByName('Mercado Livre');
+        }
+        return null;
+    }
+
     async findOne(id: string): Promise<MarketplaceDocument> {
         // Validation to prevent CastError
         if (!id || !/^[0-9a-fA-F]{24}$/.test(String(id))) {

@@ -25,6 +25,30 @@ export class ProductDiscoveryModel {
 
     @Prop()
     error: string;
+
+    /** Dedup: PN normalizado (trim + uppercase). Documentos antigos sem estes campos não entram no dedup até backfill opcional. */
+    @Prop({ index: true })
+    partNumberNorm: string;
+
+    /**
+     * Dedup: marca normalizada (trim + lowercase); vazio quando isGenuine (mesma convenção que query só-PN).
+     */
+    @Prop({ index: true, default: '' })
+    brandNorm: string;
+
+    @Prop({ default: false, index: true })
+    isGenuine: boolean;
+
+    @Prop({ type: Types.ObjectId, ref: 'BrandModel', required: false, index: true })
+    brandId: Types.ObjectId;
 }
 
 export const ProductDiscoverySchema = SchemaFactory.createForClass(ProductDiscoveryModel);
+
+ProductDiscoverySchema.index({
+    partNumberNorm: 1,
+    brandNorm: 1,
+    isGenuine: 1,
+    status: 1,
+    createdAt: -1,
+});

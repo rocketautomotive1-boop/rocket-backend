@@ -20,6 +20,10 @@ import { CrossReferenceGroupModel, CrossReferenceGroupSchema } from './schemas/c
 import { QueueRecordModel, QueueRecordSchema } from '../queue/schemas/queue-record.schema';
 import { ProductDraftModel, ProductDraftSchema } from './schemas/product-draft.schema';
 import { ProductDiscoveryModel, ProductDiscoverySchema } from './schemas/product-discovery.schema';
+import { AllocationModel, AllocationSchema } from './schemas/allocation.schema';
+import { WarehouseModel, WarehouseSchema } from './schemas/warehouse.schema';
+import { BoxModel, BoxSchema } from './schemas/box.schema';
+import { BoxItemModel, BoxItemSchema } from './schemas/box-item.schema';
 
 import { ProductService } from './product.service';
 import { ProductRepository } from './product.repository';
@@ -59,6 +63,7 @@ import { ProductCompatibilityManagementController } from './controllers/product-
 // import { PublishModule } from '../publish/publish.module';
 import { ListingModule } from '../listing/listing.module'; // Added ListingModule
 import { UserProductivityModule } from '../monitoring/user-productivity.module';
+import { MarketplaceOrchestratorModule } from '../marketplace-orchestrator/marketplace-orchestrator.module';
 // ProductDiscoveryController removido (integrado em ProductController)
 
 // Novos controllers
@@ -122,6 +127,10 @@ import { DiscoveryWorker } from './consumers/discovery.consumer';
       { name: QueueRecordModel.name, schema: QueueRecordSchema },
       { name: ProductDraftModel.name, schema: ProductDraftSchema },
       { name: ProductDiscoveryModel.name, schema: ProductDiscoverySchema },
+      { name: AllocationModel.name, schema: AllocationSchema },
+      { name: WarehouseModel.name, schema: WarehouseSchema },
+      // { name: BoxModel.name, schema: BoxSchema }, // Agora é sub-documento de Allocation
+      { name: BoxItemModel.name, schema: BoxItemSchema },
       { name: 'MarketplaceModel', schema: require('../marketplace/schemas/marketplace.schema').MarketplaceSchema },
     ]),
     forwardRef(() => SearchModule),
@@ -137,6 +146,7 @@ import { DiscoveryWorker } from './consumers/discovery.consumer';
     forwardRef(() => OrderModule),
     ListingModule,
     UserProductivityModule,
+    forwardRef(() => MarketplaceOrchestratorModule),
   ],
   controllers: [
     ProductController,

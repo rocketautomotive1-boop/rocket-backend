@@ -186,7 +186,7 @@ export class ViaVarejoProductAdapter {
       category_id: product.category_id || product.categoryId || (product.category as any)?.id || (product.category as any)?._id,
       brand: product.brand,
       model: product.model,
-      sku: product.sku,
+      sku: String(product._id || product.id),
       ean: product.ean,
       weight: product.weight,
       height: product.height,

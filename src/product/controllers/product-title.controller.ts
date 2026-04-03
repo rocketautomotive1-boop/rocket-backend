@@ -1,16 +1,20 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Req, ForbiddenException } from '@nestjs/common';
 import { ProductTitleService } from '../services/product-title.service';
 import { CreateProductTitleDto, UpdateProductTitleDto, CreateProductTitlesBatchDto } from '../dto/product-title.dto';
 import { ProductTitle } from '../product-types';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { UpdateTitlesDto } from '../dto/update-titles.dto';
+import { ListingRemovalService } from '../../marketplace-orchestrator/services/listing-removal.service';
 
 @ApiTags('titles')
 @Controller('titles')
 @UseGuards(JwtAuthGuard)
 export class ProductTitleController {
-  constructor(private readonly productTitleService: ProductTitleService) { }
+  constructor(
+    private readonly productTitleService: ProductTitleService,
+    private readonly listingRemovalService: ListingRemovalService,
+  ) { }
 
   @Get()
   @ApiOperation({ summary: 'Listar todos os títulos de um produto' })
@@ -65,8 +69,27 @@ export class ProductTitleController {
   @Delete(':id')
   @ApiOperation({ summary: 'Remover um título' })
   @ApiResponse({ status: 200, description: 'Título removido com sucesso' })
+  @ApiResponse({ status: 403, description: 'Apenas admins podem remover títulos publicados' })
   @ApiResponse({ status: 404, description: 'Título não encontrado' })
-  async remove(@Param('id') id: number | string): Promise<{ success: boolean; message: string }> {
+  async remove(@Param('id') id: number | string, @Req() req: any): Promise<{ success: boolean; message: string; queued?: boolean; jobId?: string; warning?: string }> {
+    // Check if listing is published — if so, require admin role and use removal service
+    const listing = await this.productTitleService.findOne(id as any);
+    if (listing && (listing as any).externalId) {
+      const isAdmin = req.user?.roles?.includes('admin');
+      if (!isAdmin) {
+        throw new ForbiddenException('Apenas administradores podem remover títulos publicados');
+      }
+      const result = await this.listingRemovalService.removeListing(String(id), req.user?.id);
+      return {
+        success: true,
+        message: result.warning || 'Remoção do anúncio solicitada ao marketplace',
+        queued: result.queued,
+        jobId: result.jobId,
+        warning: result.warning,
+      };
+    }
+
+    // Not published — any authenticated user can delete
     const success = await this.productTitleService.remove(id as any);
     return {
       success,

@@ -37,22 +37,7 @@ export class MercadoLivreWebhookService {
 
       // this.logger.log(`Webhook do Mercado Livre adicionado à fila: ${topic}`);
 
-      // Enviar notificação push se for pergunta ou venda
-      if (topic === 'questions') {
-        const resourceId = (payload.resource || '').split('/').pop();
-        this.notificationsService.notifyAllAdmins(
-          'Nova Pergunta no Mercado Livre',
-          'Toque para visualizar e responder',
-          { type: 'question', id: resourceId, marketplace: 'mercadolivre' }
-        ).catch(e => this.logger.error(`Erro ao enviar push: ${e.message}`));
-      } else if (topic === 'orders_v2') {
-        const resourceId = (payload.resource || '').split('/').pop();
-        this.notificationsService.notifyAllAdmins(
-          'Nova Venda no Mercado Livre!',
-          'Toque para visualizar detalhes do pedido',
-          { type: 'order', id: resourceId, marketplace: 'mercadolivre' }
-        ).catch(e => this.logger.error(`Erro ao enviar push: ${e.message}`));
-      }
+      // Push notifications now handled centrally by WebhookOrderDispatcher + NotificationBus
 
       return { success: true, message: 'Notificação recebida com sucesso' };
     } catch (error) {

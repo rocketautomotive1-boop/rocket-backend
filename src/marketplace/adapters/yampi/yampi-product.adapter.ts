@@ -187,7 +187,7 @@ export class YampiProductAdapter {
       height: product.height,
       width: product.width,
       length: product.length,
-      sku: product.sku,
+      sku: String(product._id || product.id),
       ean: product.ean,
       images: product.images?.map((image: any) => ({
         url: image.url || image.uri,

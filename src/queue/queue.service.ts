@@ -125,7 +125,7 @@ export class QueueService {
       try {
         await lastValueFrom(this.marketplaceClient.emit(pattern, payload.data).pipe(timeout(2000)));
       } catch (err) {
-        // ignore
+        console.error(`[QueueService] Error emitting ${pattern} to MARKETPLACE_SERVICE:`, err instanceof TimeoutError ? 'Timeout (2s)' : (err as any)?.message || err);
       }
     }
   }

@@ -187,4 +187,22 @@ export class WebhookController {
 
     return this.webhookService.processAliExpressWebhook(topic, payload, signature);
   }
+
+  @Post('tiktokshop/:topic')
+  @SkipJwtAuth()
+  @UseGuards(WebhookSignatureGuard)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Receber notificações do TikTok Shop' })
+  @ApiResponse({ status: 200, description: 'Notificação processada com sucesso' })
+  @ApiParam({ name: 'topic', description: 'Tópico da notificação (order, product, etc)' })
+  @ApiHeader({ name: 'x-tts-signature', description: 'Assinatura da notificação' })
+  async handleTikTokShopWebhook(
+    @Param('topic') topic: string,
+    @Body() payload: any,
+    @Headers('x-tts-signature') signature: string,
+  ) {
+    this.logger.log(`Webhook recebido do TikTok Shop: ${topic}`);
+
+    return this.webhookService.processTikTokShopWebhook(topic, payload, signature);
+  }
 }

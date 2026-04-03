@@ -233,6 +233,18 @@ export class MercadoLivreAdapter extends MarketplaceAdapter {
     }
   }
 
+  async getQuestionById(accessToken: string, questionId: string): Promise<any> {
+    try {
+      const response = await axios.get(`${this.baseUrl}/questions/${questionId}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      return response.data;
+    } catch (error) {
+      this.logger.error(`Erro ao buscar pergunta ${questionId}: ${error.message}`);
+      throw error;
+    }
+  }
+
   async getQuestions(accessToken: string, sellerId: string, status?: 'UNANSWERED' | 'ANSWERED'): Promise<any[]> {
     try {
       const allQuestions: any[] = [];

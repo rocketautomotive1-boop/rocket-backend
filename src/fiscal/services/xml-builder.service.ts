@@ -29,6 +29,28 @@ export class XmlBuilderService {
     const isProduction = nfe.environment === 'PRODUCTION';
     const tpAmb = isProduction ? '1' : '2';
 
+    // Determine if operation is internal (same state) or interstate
+    const issuerUF = this.getStateCode(issuer.address.state);
+    const buyerUF  = this.getStateCode(orderData.buyer.address?.state || '');
+    const isInterstate = !!(buyerUF && buyerUF !== issuerUF);
+    const idDest = isInterstate ? '2' : '1';
+    const taxRegimeNorm = String(issuer.taxRegime || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const isSimples = ['SIMPLESNACIONAL', 'SIMPLES', 'SN', '1'].includes(taxRegimeNorm);
+
+    this.logger.log(
+      `[buildNFeXml] taxRegime="${issuer.taxRegime}" → isSimples=${isSimples}, CRT=${isSimples ? '1' : '3'}`
+    );
+    this.logger.log(
+      `CFOP/idDest: issuer=${issuerUF} buyer=${buyerUF} interstate=${isInterstate} ` +
+      `→ CFOP=${isInterstate ? '6108' : '5102'} idDest=${idDest}`
+    );
+
+    // Marketplace intermediary (infIntermed)
+    const mpIntermed = this.getMarketplaceIntermed(
+      orderData.marketplaceName,
+      (issuer as any).marketplaceSellerIds,
+    );
+
     // Generate accurate cNF (Random 8 digits for now, but part of key)
     const cNF = Math.floor(Math.random() * 99999999).toString().padStart(8, '0');
 
@@ -40,16 +62,15 @@ export class XmlBuilderService {
           ide: {
             cUF: this.getStateIbgeCode(this.getStateCode(issuer.address.state)),
             cNF: cNF,
-            natOp: 'VENDA DE MERCADORIA',
+            natOp: 'Venda de mercadoria para consumidor final',
             mod: '55',
             serie: String(nfe.series),
             nNF: String(nfe.number),
             // Adjusted for Timezone (UTC-3) and Safety Buffer (10 min)
-            // We subtract 3h (180min) + 10min = 190min to ensure the ISO string (which is UTC)
-            // visually matches the local time minus buffer, so when we append -03:00 it is correct.
             dhEmi: new Date(Date.now() - (3 * 60 + 10) * 60 * 1000).toISOString().split('.')[0] + '-03:00',
+            dhSaiEnt: new Date(Date.now() - (3 * 60 + 10) * 60 * 1000).toISOString().split('.')[0] + '-03:00',
             tpNF: '1', // 1=Saída
-            idDest: '1', // 1=Internal
+            idDest,
             cMunFG: issuer.address.ibgeCode,
             tpImp: '1', // Portrait
             tpEmis: '1', // Normal
@@ -58,7 +79,7 @@ export class XmlBuilderService {
             finNFe: '1', // Normal
             indFinal: '1', // Consumidor final
             indPres: '2', // Internet
-            indIntermed: '1', // 1=Intermediador/Marketplace
+            indIntermed: mpIntermed ? '1' : '0', // 1=Marketplace/intermediador
             procEmi: '0', // App proprietário
             verProc: 'Rocket 1.0',
           },
@@ -79,7 +100,7 @@ export class XmlBuilderService {
               ...(issuer.address.phone ? { fone: issuer.address.phone.replace(/\D/g, '') } : {})
             },
             IE: issuer.ie.replace(/\D/g, ''),
-            CRT: issuer.taxRegime === 'SIMPLES_NACIONAL' ? '1' : '3',
+            CRT: isSimples ? '1' : '3',
           },
           dest: {
             ...(orderData.buyer.cnpj ? { CNPJ: orderData.buyer.cnpj.replace(/\D/g, '') } : { CPF: (orderData.buyer.cpf || orderData.buyer.document || '00000000000').replace(/\D/g, '') }),
@@ -99,87 +120,78 @@ export class XmlBuilderService {
             },
             indIEDest: '9',
           },
-          det: orderData.items.map((item: any, index: number) => ({
-            '@_nItem': index + 1,
-            prod: {
-              cProd: String(item.internalProduct?.id || item.seller_custom_field || item.sku || item.id),
-              cEAN: 'SEM GTIN',
-              xProd: (item.title || 'Produto sem título').substring(0, 120),
-              NCM: item.ncm || '87089990',
-              CFOP: '5102',
-              uCom: 'UN',
-              qCom: Number(item.quantity),
-              vUnCom: Number(item.unit_price).toFixed(2),
-              vProd: (Number(item.quantity) * Number(item.unit_price)).toFixed(2),
-              cEANTrib: 'SEM GTIN',
-              uTrib: 'UN',
-              qTrib: Number(item.quantity),
-              vUnTrib: Number(item.unit_price).toFixed(2),
-              indTot: '1',
-            },
-            imposto: {
-              ICMS: issuer.taxRegime === 'SIMPLES_NACIONAL' ? {
-                ICMSSN102: {
-                  orig: item.origin || '0',
-                  CSOSN: '102'
-                }
-              } : {
-                // Fix 591/508: Normal Regime (CRT=3)
-                // Use CST 41 (Não tributada) to avoid '508 - CST incompatível com não contribuinte'
-                // and avoid complex tax calculations (BC, Aliquota) of CST 00/90 for now.
-                ICMS40: {
-                  orig: item.origin || '0',
-                  CST: '41', // 41 = Não tributada
-                  // No BC/ICMS fields needed for 41
-                }
+          det: orderData.items.map((item: any, index: number) => {
+            const vProd = Number(item.quantity) * Number(item.unit_price);
+            // IBPT approximation (~27% for auto parts NCM 87089990 — informativo, Lei 12.741/2012)
+            const ibptRate = item.ibptRate ?? 0.2719;
+            const vTotTribItem = parseFloat((vProd * ibptRate).toFixed(2));
+            const cfop = item.cfop || (isInterstate ? '6108' : '5102');
+            return {
+              '@_nItem': index + 1,
+              prod: {
+                cProd: String(item.internalProduct?.id || item.seller_custom_field || item.sku || item.id),
+                cEAN: 'SEM GTIN',
+                xProd: (item.title || 'Produto sem título').substring(0, 120),
+                NCM: item.ncm || '87089990',
+                ...(item.cest ? { CEST: item.cest } : {}),
+                CFOP: cfop,
+                uCom: item.uCom || 'UN',
+                qCom: Number(item.quantity).toFixed(4),
+                vUnCom: Number(item.unit_price).toFixed(8),
+                vProd: vProd.toFixed(2),
+                cEANTrib: 'SEM GTIN',
+                uTrib: item.uCom || 'UN',
+                qTrib: Number(item.quantity).toFixed(4),
+                vUnTrib: Number(item.unit_price).toFixed(8),
+                indTot: '1',
+                ...(item.xPed ? { xPed: String(item.xPed) } : {}),
               },
-              PIS: {
-                PISOutr: {
-                  CST: '99',
-                  vBC: '0.00',
-                  pPIS: '0.00',
-                  vPIS: '0.00'
-                }
+              imposto: {
+                vTotTrib: vTotTribItem.toFixed(2),
+                ICMS: isSimples
+                  ? { ICMSSN102: { orig: item.origin || '0', CSOSN: '102' } }
+                  : { ICMS40:    { orig: item.origin || '0', CST: '41'   } },
+                PIS:    { PISNT:    { CST: '07' } },
+                COFINS: { COFINSNT: { CST: '07' } },
               },
-              COFINS: {
-                COFINSOutr: {
-                  CST: '99',
-                  vBC: '0.00',
-                  pCOFINS: '0.00',
-                  vCOFINS: '0.00'
-                }
+            };
+          }),
+          total: (() => {
+            const vNF = Number(orderData.totals?.amount || orderData.total_amount || 0);
+            const ibptRate = 0.2719;
+            const vTotTrib = parseFloat((vNF * ibptRate).toFixed(2));
+            return {
+              ICMSTot: {
+                vBC: '0.00',
+                vICMS: '0.00',
+                vICMSDeson: '0.00',
+                vFCP: '0.00',
+                vBCST: '0.00',
+                vST: '0.00',
+                vFCPST: '0.00',
+                vFCPSTRet: '0.00',
+                vProd: vNF.toFixed(2),
+                vFrete: Number(orderData.totals?.freight || 0).toFixed(2),
+                vSeg: '0.00',
+                vDesc: Number(orderData.totals?.discount || 0).toFixed(2),
+                vII: '0.00',
+                vIPI: '0.00',
+                vIPIDevol: '0.00',
+                vPIS: '0.00',
+                vCOFINS: '0.00',
+                vOutro: '0.00',
+                vNF: vNF.toFixed(2),
+                vTotTrib: vTotTrib.toFixed(2),
               }
-            }
-          })),
-          total: {
-            ICMSTot: {
-              vBC: '0.00',
-              vICMS: '0.00',
-              vICMSDeson: '0.00',
-              vFCP: '0.00',
-              vBCST: '0.00',
-              vST: '0.00',
-              vFCPST: '0.00',
-              vFCPSTRet: '0.00',
-              vProd: Number(orderData.totals?.amount || orderData.total_amount || 0).toFixed(2),
-              vFrete: Number(orderData.totals?.freight || 0).toFixed(2),
-              vSeg: '0.00',
-              vDesc: Number(orderData.totals?.discount || 0).toFixed(2),
-              vII: '0.00',
-              vIPI: '0.00',
-              vIPIDevol: '0.00',
-              vPIS: '0.00',
-              vCOFINS: '0.00',
-              vOutro: '0.00',
-              vNF: Number(orderData.totals?.amount || orderData.total_amount || 0).toFixed(2),
-            }
-          },
+            };
+          })(),
           transp: {
             modFrete: '9',
           },
           pag: {
             detPag: {
               tPag: this.getPaymentType(orderData.payment?.paymentType),
+              ...(this.getPaymentType(orderData.payment?.paymentType) === '99' ? { xPag: this.getPaymentDescription(orderData.payment?.paymentType) } : {}),
               vPag: Number(orderData.totals?.amount || orderData.total_amount || 0).toFixed(2),
               ...((orderData.payment?.paymentType === 'credit_card' || orderData.payment?.paymentType === 'debit_card') ? {
                 card: {
@@ -191,21 +203,25 @@ export class XmlBuilderService {
               } : {})
             }
           },
-          // Fix 972/973: Resp Tecnico
+          ...(mpIntermed ? {
+            infIntermed: {
+              CNPJ: mpIntermed.cnpj,
+              idCadIntTran: mpIntermed.idCadIntTran,
+            }
+          } : {}),
+          infAdic: (() => {
+            const infAdFisco = isSimples ? 'Emitido por ME/EPP optante do Simples Nacional.' : undefined;
+            const vTotTribDisplay = parseFloat((Number(orderData.totals?.amount || 0) * 0.2719).toFixed(2));
+            const infCpl = `Valor aproximado dos tributos (IBPT) R$${vTotTribDisplay.toFixed(2)}.` +
+              (orderData.additionalInfo ? ' ' + orderData.additionalInfo : '');
+            return { infAdFisco, infCpl };
+          })(),
           infRespTec: {
-            CNPJ: issuer.cnpj.replace(/\D/g, ''), // Use Issuer CNPJ (Proprietary System)
-            xContato: 'Responsavel Tecnico',
-            email: 'suporte@rocket.com',
-            fone: '11999999999'
+            CNPJ: issuer.cnpj.replace(/\D/g, ''),
+            xContato: ((issuer as any).responsibleContact || issuer.fantasyName || issuer.companyName || '').substring(0, 60),
+            email: (issuer as any).email || 'suporte@rocket.com.br',
+            fone: ((issuer as any).phone || issuer.address?.phone || '').replace(/\D/g, '') || '11999999999',
           },
-          infAdic: {
-            infCpl: (
-              (issuer.taxRegime === 'SIMPLES_NACIONAL'
-                ? 'DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. NAO GERA DIREITO A CREDITO FISCAL DE IPI. '
-                : '') +
-              (orderData.additionalInfo || '')
-            ).trim()
-          }
         }
       }
     };
@@ -311,6 +327,38 @@ export class XmlBuilderService {
     };
     // Fallback: If type is missing, assume 99 (Outros) or check logic
     return map[type] || '99';
+  }
+
+  private getPaymentDescription(type: string): string {
+    const map: { [key: string]: string } = {
+      'account_money': 'Dinheiro em conta',
+      'digital_wallet': 'Carteira Digital',
+      'pix': 'PIX',
+      'boleto': 'Boleto Bancario',
+    };
+    return map[type] || 'Outros';
+  }
+
+  /** Dados do intermediador (marketplace) para infIntermed.
+   *  idCadIntTran = ID do vendedor cadastrado no marketplace (por issuer.marketplaceSellerIds).
+   */
+  private getMarketplaceIntermed(
+    name?: string,
+    sellerIds?: Record<string, string>,
+  ): { cnpj: string; idCadIntTran: string } | null {
+    if (!name) return null;
+    const n = name.toLowerCase();
+    const resolve = (cnpj: string, key: string) => {
+      const id = sellerIds?.[key]?.trim();
+      if (!id || id.length < 2) return null; // omit infIntermed if seller ID not configured
+      return { cnpj, idCadIntTran: id };
+    };
+    if (n.includes('mercado') || n.includes('meli')) return resolve('03007331000141', 'mercado_livre') ?? resolve('03007331000141', 'mercadolivre');
+    if (n.includes('amazon'))                         return resolve('15436940000103', 'amazon');
+    if (n.includes('shopee'))                         return resolve('43468032000113', 'shopee');
+    if (n.includes('magalu') || n.includes('magazine')) return resolve('47960950001921', 'magalu');
+    if (n.includes('americanas') || n.includes('b2w')) return resolve('00776574000156', 'americanas');
+    return null;
   }
 
   private getTBand(methodId: string): string {

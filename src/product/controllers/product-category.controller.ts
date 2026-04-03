@@ -51,6 +51,22 @@ export class ProductCategoryController {
     return this.productCategoryService.mapFromMarketplace(body.marketplacePath, body.autoCreate);
   }
 
+  @Post('marketplace-by-tag/:marketplaceTag/import-external/:externalCategoryId')
+  @ApiOperation({
+    summary: 'Importar categoria do marketplace (ID externo) e refatorar na árvore Rocket via IA',
+    description:
+      'Resolve o marketplace pela tag, sincroniza a categoria na API (ex. Mercado Livre), mapeia com IA para a taxonomia interna (pais estruturais com aiReason "Structural Parent created by AI Refactor"), cria/atualiza `categories` e vincula marketplaceMappings na folha.',
+  })
+  async importMarketplaceExternalWithAiRefactor(
+    @Param('marketplaceTag') marketplaceTag: string,
+    @Param('externalCategoryId') externalCategoryId: string,
+  ) {
+    return this.productCategoryService.importMarketplaceExternalCategoryWithAiRefactor(
+      marketplaceTag,
+      externalCategoryId,
+    );
+  }
+
   @Get('debug-counts')
   async debugCounts() {
     // Return top 10 categories with highest productCount

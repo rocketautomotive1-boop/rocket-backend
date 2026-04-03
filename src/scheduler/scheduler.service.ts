@@ -1,11 +1,13 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { QueueService } from '../queue/queue.service';
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
 import { MarketplaceAuthService } from '../marketplace/auth/services/marketplace-auth.service';
+import { QuestionsService } from '../questions/questions.service';
+import { ItemModerationService } from '../marketplace-orchestrator/services/item-moderation.service';
 
 @Injectable()
-export class SchedulerService {
+export class SchedulerService implements OnModuleInit {
     private readonly logger = new Logger(SchedulerService.name);
 
     constructor(
@@ -13,7 +15,21 @@ export class SchedulerService {
         private readonly marketplaceRegistry: MarketplaceRegistryService,
         @Inject(forwardRef(() => MarketplaceAuthService))
         private readonly marketplaceAuthService: MarketplaceAuthService,
+        @Inject(forwardRef(() => QuestionsService))
+        private readonly questionsService: QuestionsService,
+        private readonly itemModerationService: ItemModerationService,
     ) { }
+
+    // On startup: immediately reconcile orders that may have arrived while offline
+    async onModuleInit() {
+        // Small delay to let other modules (auth, tokens) initialize first
+        setTimeout(() => {
+            this.logger.log('Startup reconciliation: syncing recent orders from all marketplaces...');
+            this.handleCronOrdersSync().catch(err =>
+                this.logger.error(`Startup orders reconciliation failed: ${err.message}`),
+            );
+        }, 10_000);
+    }
 
     // Every 10 Minutes: Refresh tokens that are about to expire (Proactive Refresh)
     @Cron('0 */10 * * * *')
@@ -64,6 +80,18 @@ export class SchedulerService {
         }
     }
 
+    // Every 5 Minutes: Sync questions from marketplaces (fallback for missed webhooks)
+    @Cron('0 */5 * * * *')
+    async handleQuestionSync() {
+        this.logger.log('Starting Scheduled Questions Sync...');
+        try {
+            await this.questionsService.syncQuestions();
+            this.logger.log('Questions Sync completed.');
+        } catch (error) {
+            this.logger.error('Error in Questions Sync:', error);
+        }
+    }
+
     // Nightly Cleanup: Remove old completed/failed queue records
     @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
     async handleCronCleanup() {
@@ -73,6 +101,18 @@ export class SchedulerService {
             this.logger.log(`Cleanup complete. Deleted ${deletedCount} old records.`);
         } catch (error) {
             this.logger.error('Error in Nightly Cleanup:', error);
+        }
+    }
+
+    // Every 30 Minutes: Check for ML items closed due to wrong category
+    @Cron('0 */30 * * * *')
+    async handleItemModerationCheck() {
+        this.logger.log('Starting Item Moderation Check...');
+        try {
+            await this.itemModerationService.checkWrongCategoryItems();
+            this.logger.log('Item Moderation Check completed.');
+        } catch (error) {
+            this.logger.error('Error in Item Moderation Check:', error);
         }
     }
 }

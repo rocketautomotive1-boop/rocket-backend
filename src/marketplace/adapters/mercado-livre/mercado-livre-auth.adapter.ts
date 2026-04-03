@@ -142,6 +142,15 @@ export class MercadoLivreAuthAdapter implements IMarketplaceAuthAdapter, OnModul
     }
   }
 
+  async getUserId(marketplaceName: string): Promise<string> {
+    const marketplace = await this.authService.findByName(marketplaceName);
+    if (!marketplace) throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);
+    const activeToken = (marketplace.tokens ?? []).find((t: any) => t.isActive);
+    const userId = activeToken?.additionalData?.userId;
+    if (!userId) throw new Error(`userId não encontrado no token do marketplace "${marketplaceName}"`);
+    return String(userId);
+  }
+
   async forceRefreshAccessToken(marketplaceName: string): Promise<string> {
     const marketplace = await this.authService.findByName(marketplaceName);
     if (!marketplace) throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);

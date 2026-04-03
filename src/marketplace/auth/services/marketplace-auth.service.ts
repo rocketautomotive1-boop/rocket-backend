@@ -5,6 +5,7 @@ import { Model } from 'mongoose';
 import { MarketplaceModel, MarketplaceDocument } from '../../schemas/marketplace.schema';
 import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
 import { IMarketplaceAuthAdapter } from '../../interfaces/marketplace-auth-adapter.interface';
+import { TokenManagerService, ResolvedToken } from './token-manager.service';
 
 @Injectable()
 export class MarketplaceAuthService implements OnModuleInit {
@@ -17,6 +18,7 @@ export class MarketplaceAuthService implements OnModuleInit {
         @InjectModel(MarketplaceModel.name) private marketplaceModel: Model<MarketplaceDocument>,
         @Inject(forwardRef(() => MarketplaceRegistryService))
         private registryService: MarketplaceRegistryService,
+        private tokenManager: TokenManagerService,
     ) { }
 
     onModuleInit() {
@@ -124,32 +126,27 @@ export class MarketplaceAuthService implements OnModuleInit {
         return adapter.generateAuthUrl(redirectUri);
     }
 
-    async ensureValidToken(marketplaceId: string | any): Promise<any> {
+    async ensureValidToken(marketplaceId: string | any): Promise<ResolvedToken> {
         const idStr = String(marketplaceId);
         if (!/^[0-9a-fA-F]{24}$/.test(idStr)) {
             throw new Error(`Invalid Marketplace ID format for token check: ${idStr}`);
         }
 
+        const resolved = await this.tokenManager.resolveToken(idStr);
+
+        // Estratégias sem DB (aws_sigv4, none) não precisam de refresh
+        if (!resolved.fromDatabase) return resolved;
+
+        // Token ainda válido
+        if (!this.tokenManager.isTokenExpiringSoon(resolved)) return resolved;
+
+        // Token prestes a expirar — refresh via adapter
         const marketplace = await this.marketplaceModel.findById(marketplaceId);
-        if (!marketplace) throw new Error('Marketplace não encontrado');
+        const activeToken = marketplace?.tokens?.find(t => t.isActive);
+        if (!activeToken) return resolved; // sem token para refresh (ex: hybrid sem LWA)
 
-        const activeToken = marketplace.tokens?.find(t => t.isActive);
-
-        if (!activeToken) {
-            throw new Error(`Nenhum token ativo encontrado para ${marketplace.name}`);
-        }
-
-        // Check expiration with a small buffer (e.g., 5 minutes)
-        const now = new Date();
-        const expiresAt = new Date(activeToken.expiresAt);
-        const bufferMs = 5 * 60 * 1000;
-
-        if (expiresAt.getTime() - now.getTime() > bufferMs) {
-            const tokenObj = (activeToken as any).toObject ? (activeToken as any).toObject() : activeToken;
-            return tokenObj;
-        }
-
-        return this.refreshToken(marketplaceId, activeToken);
+        const refreshed = await this.refreshToken(marketplaceId, activeToken);
+        return { ...resolved, ...refreshed, fromDatabase: true };
     }
 
     async getToken(marketplaceId: number | string | any): Promise<any | null> {

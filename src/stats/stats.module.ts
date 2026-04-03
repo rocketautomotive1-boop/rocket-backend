@@ -9,11 +9,14 @@ import { StockMovementModel, StockMovementSchema } from '../product/schemas/stoc
 import { AuthModule } from '../auth/auth.module';
 import { ListingModule } from '../listing/listing.module'; // [FIX]
 
+import { AllocationModel, AllocationSchema } from '../product/schemas/allocation.schema';
+
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: ProductModel.name, schema: ProductSchema },
       { name: StockMovementModel.name, schema: StockMovementSchema },
+      { name: 'AllocationModel', schema: AllocationSchema },
     ]),
     ListingModule, // [FIX] Import ListingModule
     forwardRef(() => AuthModule),

@@ -50,7 +50,7 @@ export class MarketplaceAuthController {
     @Post(':tag/refresh-token')
     @ApiOperation({ summary: 'Atualizar token de acesso para um marketplace' })
     @ApiResponse({ status: 200, description: 'Token atualizado com sucesso' })
-    async refreshToken(@Param('tag') tag: string): Promise<MarketplaceToken> {
+    async refreshToken(@Param('tag') tag: string) {
         // Note: MarketplaceService.refreshToken delegated to AuthService usually, or we can go direct.
         // The original controller called MarketplaceService.refreshToken.
         // Let's check MarketplaceService.refreshToken implementation to be sure.

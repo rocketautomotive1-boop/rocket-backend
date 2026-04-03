@@ -8,7 +8,7 @@ import { CategoryModel } from '../product/schemas/category.schema';
 @Injectable()
 export class CategoryDiscoveryService implements OnModuleInit {
     private readonly logger = new Logger(CategoryDiscoveryService.name);
-    private readonly index = 'categories-discovery-v7'; // Bump to v7 for aiReason and attributes fields
+    private readonly index = 'categories-discovery-v8'; // Bump to v8 to add marketplace mappings path
 
     constructor(
         private readonly elasticsearchService: ElasticsearchService,
@@ -55,7 +55,8 @@ export class CategoryDiscoveryService implements OnModuleInit {
                                     type: 'nested',
                                     properties: {
                                         marketplace: { type: 'keyword' },
-                                        externalId: { type: 'keyword' }
+                                        externalId: { type: 'keyword' },
+                                        path: { type: 'text', analyzer: 'category_analyzer' }
                                     }
                                 }
                             }
@@ -156,7 +157,8 @@ export class CategoryDiscoveryService implements OnModuleInit {
 
         const msMappings = (doc.marketplaceMappings || []).map(m => ({
             marketplace: String(m.marketplaceId),
-            externalId: m.externalId
+            externalId: m.externalId,
+            path: m.path || ''
         }));
 
         return [
@@ -209,7 +211,13 @@ export class CategoryDiscoveryService implements OnModuleInit {
     async discover(query: string): Promise<any> {
         try {
             const cleanQuery = query.trim();
-            const words = cleanQuery.split(' ').filter(w => w.length > 0);
+            // Truncate to max 4 terms for better precision
+            const allWords = cleanQuery.split(' ').filter(w => w.length > 0);
+            const words = allWords.slice(0, 4);
+            const limitedQuery = words.join(' ');
+
+            this.logger.debug(`Discovery Query: "${cleanQuery}" -> Truncated to: "${limitedQuery}"`);
+
             const shouldClauses: any[] = [];
 
             // 0. EXACT MATCH BOOST (The "Killer" Feature - v4 Reinforced)
@@ -217,7 +225,7 @@ export class CategoryDiscoveryService implements OnModuleInit {
             shouldClauses.push({
                 match: {
                     "name.exact": {
-                        query: cleanQuery,
+                        query: limitedQuery,
                         boost: 500.0 // Super Massive boost
                     }
                 }
@@ -227,7 +235,7 @@ export class CategoryDiscoveryService implements OnModuleInit {
             shouldClauses.push({
                 term: {
                     "name.keyword": {
-                        value: cleanQuery,
+                        value: limitedQuery,
                         boost: 500.0
                     }
                 }
@@ -237,7 +245,7 @@ export class CategoryDiscoveryService implements OnModuleInit {
             shouldClauses.push({
                 match_phrase: {
                     name: {
-                        query: cleanQuery,
+                        query: limitedQuery,
                         boost: 10.0
                     }
                 }
@@ -247,7 +255,7 @@ export class CategoryDiscoveryService implements OnModuleInit {
             shouldClauses.push({
                 match_phrase: {
                     synonyms: {
-                        query: cleanQuery,
+                        query: limitedQuery,
                         boost: 30.0
                     }
                 }
@@ -257,7 +265,7 @@ export class CategoryDiscoveryService implements OnModuleInit {
             shouldClauses.push({
                 match: {
                     "synonyms": {
-                        query: cleanQuery,
+                        query: limitedQuery,
                         operator: "and", // Prevent partial matches from hijacking score
                         boost: 200.0
                     }
@@ -305,7 +313,7 @@ export class CategoryDiscoveryService implements OnModuleInit {
             shouldClauses.push({
                 match: {
                     examples: {
-                        query: cleanQuery,
+                        query: limitedQuery,
                         boost: 20.0,
                         operator: "or"
                     }
@@ -315,7 +323,7 @@ export class CategoryDiscoveryService implements OnModuleInit {
             shouldClauses.push({
                 match: {
                     usageGuide: {
-                        query: cleanQuery,
+                        query: limitedQuery,
                         boost: 2.0
                     }
                 }
@@ -325,8 +333,24 @@ export class CategoryDiscoveryService implements OnModuleInit {
             shouldClauses.push({
                 match: {
                     breadcrumbs: {
-                        query: cleanQuery,
+                        query: limitedQuery,
                         boost: 1.0
+                    }
+                }
+            });
+
+            // 4.5 Mappings Path Context
+            shouldClauses.push({
+                nested: {
+                    path: 'mappings',
+                    ignore_unmapped: true,
+                    query: {
+                        match: {
+                            'mappings.path': {
+                                query: limitedQuery,
+                                boost: 2.0
+                            }
+                        }
                     }
                 }
             });
@@ -404,7 +428,7 @@ export class CategoryDiscoveryService implements OnModuleInit {
             const result = await this.elasticsearchService.search({
                 index: this.index,
                 body: {
-                    size: 5,
+                    size: 10,
                     query: {
                         bool: {
                             should: shouldClauses,

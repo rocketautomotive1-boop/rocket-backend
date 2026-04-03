@@ -11,8 +11,8 @@ export enum ProductivityType {
 
 @Schema({ collection: 'user_productivity', timestamps: true })
 export class UserProductivity {
-    @Prop({ required: true, index: true })
-    userId: string;
+    @Prop({ type: Types.ObjectId, index: true })
+    userId?: Types.ObjectId;
 
     @Prop({ required: true, index: true })
     date: Date; // Normalized to start of day

@@ -259,7 +259,7 @@ export class ProductCompatibilityService {
 
   async deleteCompatibility(id: string | number): Promise<void> {
     try {
-      const query = typeof id === 'string' && Types.ObjectId.isValid(id) ? { _id: id } : { productId: id as number };
+      const query = { _id: id };
       await this.compatibilityModel.deleteOne(query).exec();
       this.logger.log(`Compatibilidade ${id} deletada com sucesso`);
     } catch (error) {

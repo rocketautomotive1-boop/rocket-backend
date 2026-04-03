@@ -35,7 +35,17 @@ export class QuestionModel {
     @Prop({ type: Types.ObjectId, required: true })
     marketplaceId: Types.ObjectId;
 
+    @Prop()
+    buyerName: string;
 
+    @Prop()
+    aiSuggestedAnswer: string;
+
+    @Prop({ default: false })
+    aiSuggestionUsed: boolean;
+
+    @Prop()
+    responseTimeMinutes: number;
 }
 
 export const QuestionSchema = SchemaFactory.createForClass(QuestionModel);

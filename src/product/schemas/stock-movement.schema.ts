@@ -38,11 +38,27 @@ export class StockMovementModel {
         location: string; // 'Corredor A', 'MLB', 'SHO'
     };
 
+    /** Condição comercial do lote: novo / usado / recondicionado (alinhado ao estoque, não ao cadastro do produto). */
+    @Prop({ default: 'new' })
+    condition: string;
+
+    @Prop({ default: 'normal' })
+    situation: string;
+
+    @Prop()
+    observation: string;
+
     @Prop({ type: Object })
     metadata: {
         operator?: string;
         externalReference?: string;
     };
+
+    @Prop({ type: Types.ObjectId, ref: 'AllocationModel', index: true })
+    fromAllocationId?: Types.ObjectId;
+
+    @Prop({ type: Types.ObjectId, ref: 'AllocationModel', index: true })
+    toAllocationId?: Types.ObjectId;
 }
 
 export const StockMovementSchema = SchemaFactory.createForClass(StockMovementModel);

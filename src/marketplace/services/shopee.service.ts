@@ -31,7 +31,7 @@ export class ShopeeService {
    * Cria um produto na Shopee
    */
   async createProduct(product: ProductDocument, marketplace: MarketplaceDocument): Promise<any> {
-    this.logger.log(`Criando produto ID ${product.sku} na Shopee`);
+    this.logger.log(`Criando produto ID ${String(product._id)} na Shopee`);
 
     try {
       // Obter token válido
@@ -102,9 +102,9 @@ export class ShopeeService {
       }
 
       if (externalIdToUpdate) {
-        this.logger.log(`ExternalId detectado (${externalIdToUpdate}) para produto ${product.sku}. Executando atualização na Shopee.`);
+        this.logger.log(`ExternalId detectado (${externalIdToUpdate}) para produto ${String(product._id)}. Executando atualização na Shopee.`);
         const shopeeUpdateData = {
-          id: product.sku,
+          id: String(product._id),
           item_id: parseInt(externalIdToUpdate),
           shop_id: parseInt(token.additionalData.shopId),
           name: shopeeSpecificTitle || product.name,
@@ -186,10 +186,10 @@ export class ShopeeService {
           const titles = Array.isArray((product as any).titles) ? (product as any).titles : []
           const titleForShopee = titles.find((t: any) => (String(t?.marketplace?.id) === String(marketplace._id)) || (String(t?.marketplaceId) === String(marketplace._id)))
           if (titleForShopee) {
-            await this.helperService.saveTitleExternalId(titleForShopee, externalIdToUpdate, product.sku, 'Shopee')
+            await this.helperService.saveTitleExternalId(titleForShopee, externalIdToUpdate, String(product._id), 'Shopee')
           }
         } catch (err) {
-          this.logger.warn(`Falha ao salvar externalId no título do produto ${product.sku}: ${err.message}`)
+          this.logger.warn(`Falha ao salvar externalId no título do produto ${String(product._id)}: ${err.message}`)
         }
         return {
           success: true,
@@ -200,7 +200,7 @@ export class ShopeeService {
       }
 
       const shopeeData = {
-        id: product.sku,
+        id: String(product._id),
         shop_id: parseInt(token.additionalData.shopId),
         category_id: normalizedCategoryId,
         name: shopeeSpecificTitle || product.name,
@@ -266,10 +266,10 @@ export class ShopeeService {
         const titleForShopee = titles.find((t: any) => (String(t?.marketplace?.id) === String(marketplace._id)) || (String(t?.marketplaceId) === String(marketplace._id)) || (t?.marketplace?.name === 'Shopee'))
           || titles.find((t: any) => !t?.marketplaceId)
         if (titleForShopee) {
-          await this.helperService.saveTitleExternalId(titleForShopee, response.item_id.toString(), product.sku, 'Shopee')
+          await this.helperService.saveTitleExternalId(titleForShopee, response.item_id.toString(), String(product._id), 'Shopee')
         }
       } catch (err) {
-        this.logger.warn(`Falha ao salvar externalId no título do produto ${product.sku}: ${err.message}`)
+        this.logger.warn(`Falha ao salvar externalId no título do produto ${String(product._id)}: ${err.message}`)
       }
 
       return {
@@ -291,7 +291,7 @@ export class ShopeeService {
     marketplace: MarketplaceDocument,
     productTitle: ProductTitle
   ): Promise<any> {
-    this.logger.log(`Atualizando produto ID ${product.sku} na Shopee (externalId: ${productTitle.externalId})`);
+    this.logger.log(`Atualizando produto ID ${String(product._id)} na Shopee (externalId: ${productTitle.externalId})`);
 
     try {
       // Obter token válido
@@ -313,7 +313,7 @@ export class ShopeeService {
         )?.title
         : undefined;
 
-      const effectiveName = shopeeSpecificTitle || product.name || product.partNumber || `Produto ${product.sku}`;
+      const effectiveName = shopeeSpecificTitle || product.name || product.partNumber || `Produto ${String(product._id)}`;
 
       // Calculate real values for specific updates
       const realPrice = (await this.getLatestPrice(product)) ?? product.price;
@@ -321,7 +321,7 @@ export class ShopeeService {
 
       // Preparar dados para atualização
       const shopeeData = {
-        id: product.sku,
+        id: String(product._id),
         item_id: parseInt(productTitle.externalId),
         shop_id: parseInt(token.additionalData.shopId),
         name: effectiveName,
@@ -447,7 +447,7 @@ export class ShopeeService {
 
   // TODO: Refactor to use ProductService or StockMovementModel
   private async getAvailableQuantity(product: ProductDocument): Promise<number> {
-    return this.productService.getProductStock(String(product.sku));
+    return this.productService.getProductStock(String(String(product._id)));
   }
 
   // TODO: Refactor to use ProductService or custom query

@@ -9,6 +9,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
 import { UserModel, UserSchema } from './schemas/user.schema';
 
 @Module({
@@ -36,7 +37,8 @@ import { UserModel, UserSchema } from './schemas/user.schema';
     LocalStrategy,
     GoogleStrategy,
     JwtAuthGuard,
+    RolesGuard,
   ],
-  exports: [AuthService, JwtModule, JwtAuthGuard],
+  exports: [AuthService, JwtModule, JwtAuthGuard, RolesGuard],
 })
 export class AuthModule { }

@@ -29,17 +29,22 @@ export class MarketplaceOrderService {
         private readonly listingService: ListingService, // [NEW]
     ) { }
 
-    async attachFiscalDocument(orderId: string, marketplaceId: string, xmlContent: string): Promise<any> {
+    async attachFiscalDocument(
+        orderId: string,
+        marketplaceId: string,
+        xmlContent: string,
+        options?: { packId?: string; pdfBase64?: string },
+    ): Promise<any> {
         const marketplace = await this.registryService.findOne(marketplaceId);
         if (!marketplace) throw new BadRequestException('Marketplace not found');
 
         try {
             const adapter = this.adapterRegistry.getOrderAdapter(marketplace.name);
             if (adapter.uploadInvoice) {
-                return await adapter.uploadInvoice(orderId, xmlContent);
+                return await adapter.uploadInvoice(orderId, xmlContent, options);
             }
         } catch (e) {
-            this.logger.warn(`No adapted found or uploadInvoice not supported for ${marketplace.name}`);
+            this.logger.warn(`uploadInvoice not supported for ${marketplace.name}: ${e.message}`);
         }
 
         throw new BadRequestException(`Fiscal Document upload failed or not supported for ${marketplace.name}`);
@@ -49,33 +54,34 @@ export class MarketplaceOrderService {
         params?: { status?: string; limit?: number; offset?: number; includeSyncStatus?: boolean; syncStatus?: string; q?: string }
     ): Promise<StandardOrder[]> {
         const marketplaces = await this.registryService.findAll();
-        const enabledMarketplaces = marketplaces.filter(m => m.enabled);
-        this.logger.log(`Enabled Marketplaces for sync: [${enabledMarketplaces.map(m => m.name).join(', ')}]`);
+        const enabledMarketplaces = marketplaces
+            .filter(m => m.enabled && this.adapterRegistry.hasOrderAdapter(m.name));
+        this.logger.log(`Enabled Marketplaces for order fetch: [${enabledMarketplaces.map(m => m.name).join(', ')}]`);
 
         const results = await Promise.allSettled(
             enabledMarketplaces.map(async (marketplace) => {
                 try {
                     this.logger.log(`Fetching orders from ${marketplace.name} (ID: ${marketplace._id})...`);
-                    // const adapter = this.adapterRegistry.getOrderAdapter(marketplace.name);
+                    const adapter = this.adapterRegistry.getOrderAdapter(marketplace.name);
                     const mId = marketplace._id;
 
-                    // let orders = await adapter.getOrders({
-                    //     status: params?.status,
-                    //     limit: params?.limit,
-                    //     offset: params?.offset
-                    // });
+                    let orders = await adapter.getOrders({
+                        status: params?.status,
+                        limit: params?.limit,
+                        offset: params?.offset,
+                    });
 
-                    //  this.logger.log(`Fetched ${orders.length} orders from ${marketplace.name}.`);
+                    this.logger.log(`Fetched ${orders.length} orders from ${marketplace.name}.`);
 
-                    //  if (!orders.length) return [];
+                    if (!orders.length) return [];
 
-                    //  orders = orders.map(o => ({ ...o, marketplaceId: String(mId) }));
+                    orders = orders.map(o => ({ ...o, marketplaceId: String(mId) }));
 
-                    //   if (params?.includeSyncStatus || params?.syncStatus) {
-                    //      return await this.enrichOrdersWithSyncStatus(orders, params?.syncStatus);
-                    //  }
+                    if (params?.includeSyncStatus || params?.syncStatus) {
+                        return await this.enrichOrdersWithSyncStatus(orders, params?.syncStatus);
+                    }
 
-                    // return orders;
+                    return orders;
                 } catch (error) {
                     this.logger.error(`Failed to fetch orders from ${marketplace.name}: ${error.message}`, error.stack);
                     return [];
@@ -87,6 +93,7 @@ export class MarketplaceOrderService {
             .filter(r => r.status === 'fulfilled')
             .map(r => (r as PromiseFulfilledResult<StandardOrder[]>).value)
             .flat()
+            .filter(Boolean)
             .map(o => this.normalizeToStandardOrder(o));
 
         // Lazy Sync: Save fetched orders to DB in background
@@ -101,7 +108,7 @@ export class MarketplaceOrderService {
                 // If the user provided a search term, we prioritize finding matches.
                 // Repo method: findAll(offset, limit, search)
                 const localMatches = await this.orderRepository.findAll(0, 50, params.q);
-                const localOrders = localMatches.map(o => this.normalizeToStandardOrder(o));
+                const localOrders = localMatches.filter(Boolean).map(o => this.normalizeToStandardOrder(o));
 
                 // Merge Live + Local (Deduplicate by ID or ExternalID)
                 const liveIds = new Set(finalOrders.map(o => o.id));
@@ -163,14 +170,14 @@ export class MarketplaceOrderService {
         return orders;
     }
 
-    async getOrderDetails(orderId: string, marketplaceId: string): Promise<StandardOrder> {
+    async getOrderDetails(orderId: string, marketplaceId: string, options?: { skipEnrichment?: boolean }): Promise<StandardOrder> {
         const marketplace = await this.registryService.findOne(marketplaceId);
         if (!marketplace) throw new BadRequestException('Marketplace not found');
 
         const adapter = this.adapterRegistry.getOrderAdapter(marketplace.name);
         let order = await adapter.getOrderDetails(orderId);
 
-        if (order) {
+        if (order && !options?.skipEnrichment) {
             order = await this.enrichOrder(order);
         }
 
@@ -181,10 +188,11 @@ export class MarketplaceOrderService {
         if (!order || !order.items) return order;
 
         for (const item of order.items) {
-            if (item.sku) {
-                const internalProduct = await this.productRepository.findBySku(item.sku);
+            const itemProductId = item.productId || item.internalProduct?._id;
+            if (itemProductId) {
+                const internalProduct = await this.productRepository.findById(String(itemProductId));
                 if (internalProduct) {
-                    const attributes = await this.productService.getAttributes((internalProduct as any).sku || internalProduct.sku);
+                    const attributes = await this.productService.getAttributes(String(internalProduct._id));
 
                     item.internalProduct = {
                         ...(internalProduct.toObject ? internalProduct.toObject() : internalProduct),
@@ -323,17 +331,11 @@ export class MarketplaceOrderService {
             marketplaceId: mId
         }).lean().exec();
 
-        // Get SKUs for these listings
-        const productIds = [...new Set(listings.map(l => l.productId))];
-        const products = await this.productRepository.findAllClean({ _id: { $in: productIds } });
-        const productSkuMap = new Map(products.map(p => [String(p._id), p.sku]));
-
+        // Map listings by externalId for item enrichment
         const ptMap = new Map<string, any>();
         for (const l of listings) {
-            const sku = productSkuMap.get(String(l.productId));
-            if (sku) {
-                // Use listing as title source, attach SKU
-                ptMap.set(l.externalId, { ...l, productSku: sku });
+            if (l.productId) {
+                ptMap.set(l.externalId, { ...l, productSku: String(l.productId) });
             }
         }
 

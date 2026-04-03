@@ -22,8 +22,8 @@ export class ScraperService {
         let browser: Browser;
         try {
             browser = await puppeteer.launch({
-                headless: false, // Set to true in prod. False helps debugging.
-                args: ['--no-sandbox', '--disable-setuid-sandbox'],
+                headless: true,
+                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
                 defaultViewport: { width: 1920, height: 1080 }
             });
 

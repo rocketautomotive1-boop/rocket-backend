@@ -106,27 +106,16 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
   }
 
   /**
-   * Obter token válido para OLX com gerenciamento automático
-   * @param marketplaceName - Nome do marketplace
+   * Obter token válido para OLX por nome do marketplace.
+   * Usado internamente por OLXImportService e OLXHttpInterceptor.
+   * Para uso externo, prefira MarketplaceAuthService.ensureValidToken(marketplaceId).
    */
   async getValidToken(marketplaceName: string): Promise<any> {
-
-    try {
-      const marketplace = await this.authService.findByName(marketplaceName);
-      if (!marketplace) {
-        throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);
-      }
-
-      const validToken = await this.authService.ensureValidToken(marketplace._id);
-      return validToken;
-    } catch (error) {
-      this.logger.error(`Erro ao obter token válido para OLX: ${error.message}`, {
-        error: error.message,
-        response: error.response?.data,
-        status: error.response?.status
-      });
-      throw error;
+    const marketplace = await this.authService.findByName(marketplaceName);
+    if (!marketplace) {
+      throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);
     }
+    return this.authService.ensureValidToken(marketplace._id);
   }
 
   /**
@@ -340,50 +329,6 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
     } catch (error) {
       this.logger.error(`Erro ao verificar status dos tokens da OLX: ${error.message}`);
       throw error;
-    }
-  }
-
-  async processCallbackCode(code: string, marketplace: any): Promise<any> {
-    try {
-      this.logger.log(`Processando código de callback: ${code}`);
-
-      const clientId = marketplace.appId;
-      const clientSecret = this.configService.get(`OLX_CLIENT_SECRET_${clientId}`);
-      const redirectUri = this.configService.get('OLX_REDIRECT_URI');
-
-      if (!clientId || !clientSecret) {
-        throw new Error('Credenciais da OLX não configuradas');
-      }
-
-      const tokenResponse = await firstValueFrom(
-        this.httpService.post(`${this.baseUrl}/oauth/token`, {
-          grant_type: 'authorization_code',
-          client_id: clientId,
-          client_secret: clientSecret,
-          redirect_uri: redirectUri,
-          code: code
-        }, {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          }
-        })
-      );
-
-      return this.authService.saveToken(marketplace._id, {
-        accessToken: tokenResponse.data.access_token,
-        refreshToken: tokenResponse.data.refresh_token || null,
-        expiresAt: new Date(Date.now() + (tokenResponse.data.expires_in || 3600) * 1000),
-        tokenType: tokenResponse.data.token_type || 'Bearer',
-        additionalData: {
-          clientId,
-          scope: tokenResponse.data.scope || 'autoupload basic_user_info',
-          authMethod: 'callback_automatic'
-        },
-        isActive: true
-      });
-    } catch (error) {
-      this.logger.error(`Erro ao processar callback: ${error.message}`);
-      throw new Error(`Falha ao processar callback: ${error.message}`);
     }
   }
 

@@ -24,7 +24,7 @@ export class OLXImportService {
   async importAd(product: any): Promise<any> {
     try {
       // Validar dados obrigatórios
-      if (!product || !product.sku) {
+      if (!product || !String(product._id)) {
         throw new Error('Dados do produto inválidos ou incompletos');
       }
 
@@ -212,7 +212,7 @@ export class OLXImportService {
 
       return {
         ad_list: [{
-          id: externalId || `SKU_${product.sku}`,
+          id: externalId || `SKU_${String(product._id)}`,
           operation: externalId ? 'update' : 'insert',
           category: 2101,
           subject: product.titles?.[0]?.title || product.name,
@@ -234,7 +234,7 @@ export class OLXImportService {
       // Fallback para descrição padrão se o template falhar
       return {
         ad_list: [{
-          id: externalId || product.sku,
+          id: externalId || String(product._id),
           operation: externalId ? 'update' : 'insert',
           category: 2101,
           subject: product.titles?.[0]?.title || product.name,

@@ -23,17 +23,26 @@ export class FiscalIssuerModel {
     @Prop({ default: 'SIMPLES_NACIONAL' })
     taxRegime: string;
 
-    @Prop({ default: 0 })
-    lastNfeNumber: number;
-
     @Prop({ default: 1 })
     nfeSeries: number;
+
+    @Prop()
+    email: string;
+
+    @Prop()
+    responsibleContact: string; // Name of technical responsible (for infRespTec)
+
+    @Prop()
+    phone: string; // Technical contact phone (for infRespTec, fallback to address.phone)
 
     @Prop()
     certificatePfx: string; // Base64 or Path
 
     @Prop()
     certificatePassword: string;
+
+    @Prop({ type: Map, of: Number, default: {} })
+    seriesCounters: Map<string, number>; // Per-series NFe counter: { '1': 100, '2': 50 }
 
     @Prop({ type: Object })
     address: {
@@ -50,6 +59,21 @@ export class FiscalIssuerModel {
     @Prop({ default: true })
     isActive: boolean;
 
+    /**
+     * true  → empresa possui liminar judicial isentando-a do DIFAL (EC 87/2015).
+     *         ICMSUFDest será incluído no XML mas com todos os valores zerados.
+     * false → empresa recolhe DIFAL normalmente (obrigatório para SN desde 01/01/2023).
+     */
+    @Prop({ default: false })
+    difalExempt: boolean;
+
+    /**
+     * IDs do vendedor em cada marketplace, usados no campo idCadIntTran (infIntermed).
+     * Chaves: 'mercado_livre', 'amazon', 'shopee', 'magalu', 'americanas'
+     * Valores: ID numérico do vendedor na plataforma (ex: ML → '2417879606')
+     */
+    @Prop({ type: Object, default: {} })
+    marketplaceSellerIds: Record<string, string>;
 
 }
 
@@ -62,11 +86,8 @@ export class FiscalDocumentModel {
     @Prop({ type: Types.ObjectId, ref: 'OrderModel', index: true })
     order?: Types.ObjectId;
 
-    @Prop({ required: true, index: true })
-    orderId: string; // Marketplace Order ID (String)
-
-    @Prop()
-    internalOrderId: number; // Keep legacy ID just in case
+    @Prop({ type: Types.ObjectId, ref: 'OrderModel', index: true })
+    orderId?: Types.ObjectId; // MongoDB ObjectId of the linked order (same as order, kept for query compat)
 
     @Prop({ default: 1 })
     series: number;

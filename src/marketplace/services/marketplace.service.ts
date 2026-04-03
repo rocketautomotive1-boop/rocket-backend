@@ -58,7 +58,7 @@ export class MarketplaceService {
     return this.registryService.removeRequirement(marketplaceId, fieldName);
   }
 
-  async refreshToken(marketplaceId: string): Promise<MarketplaceToken> {
+  async refreshToken(marketplaceId: string) {
     return this.authService.ensureValidToken(marketplaceId);
   }
 

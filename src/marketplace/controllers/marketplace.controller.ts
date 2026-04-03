@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Param, Put, Delete, Query, BadRequestException, ParseIntPipe, NotFoundException, Inject, forwardRef } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, Delete, Query, BadRequestException, ParseIntPipe, NotFoundException, Inject, forwardRef, Req } from '@nestjs/common';
+import { Request } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { MarketplaceService } from '../services/marketplace.service';
 import { MarketplaceModel, MarketplaceDocument } from '../schemas/marketplace.schema';
@@ -344,9 +345,11 @@ export class MarketplaceController {
   }
 
   @Post('products/:productId/publish')
-  async publishProduct(@Param('productId') productId: number) {
-    // Forward to Orchestrator
-    this.marketplaceOrchestratorService.syncProductToAllMarketplaces(String(productId));
+  async publishProduct(@Param('productId') productId: number, @Req() req: Request) {
+    const user = (req as any).user;
+    const userId = user?.sub || user?.userId || user?.id;
+    // Forward to Orchestrator with User Context
+    this.marketplaceOrchestratorService.syncProductToAllMarketplaces(String(productId), undefined, userId);
     return { success: true, message: 'Publicação iniciada via Orchestrator (Async)' };
   }
 
@@ -385,6 +388,53 @@ export class MarketplaceController {
     } as any;
     // Use Integration Service
     return this.marketplaceIntegrationService.getAllListings(params);
+  }
+
+  @Get('mercadolivre/items/search')
+  @ApiOperation({ summary: 'Proxy da busca ML GET /users/{seller}/items/search (offset/limit, máx. 50, tags opcional)' })
+  async searchMercadoLivreItems(
+    @Query('offset') offset?: string,
+    @Query('limit') limit?: string,
+    @Query('order') order?: string,
+    @Query('tags') tags?: string,
+  ) {
+    return this.marketplaceIntegrationService.searchMercadoLivreUserItems({
+      offset: offset !== undefined && offset !== '' ? parseInt(offset, 10) : 0,
+      limit: limit !== undefined && limit !== '' ? parseInt(limit, 10) : 50,
+      order,
+      tags,
+    });
+  }
+
+  @Get('mercadolivre/listings/items-search')
+  @ApiOperation({
+    summary:
+      'Anúncios ML via GET /users/{seller}/items/search + multiget (tags opcional, ex. incomplete_compatibilities)',
+  })
+  async getMercadoLivreListingsItemsSearch(
+    @Query('offset') offset?: string,
+    @Query('limit') limit?: string,
+    @Query('tags') tags?: string,
+  ) {
+    return this.marketplaceIntegrationService.getMercadoLivreListingsFromItemsSearch({
+      offset: offset !== undefined && offset !== '' ? parseInt(offset, 10) : 0,
+      limit: limit !== undefined && limit !== '' ? parseInt(limit, 10) : 20,
+      tags,
+    });
+  }
+
+  @Get('mercadolivre/listings/without-compatibilities')
+  @ApiOperation({ summary: 'Anúncios Mercado Livre cujo produto não tem compatibilidades (paginação + detalhe ML)' })
+  async getMercadoLivreListingsWithoutCompatibilities(
+    @Query('offset') offset?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.marketplaceIntegrationService.getMercadoLivreListingsWithoutCompatibilities({
+      offset: offset !== undefined && offset !== '' ? parseInt(offset, 10) : 0,
+      limit: limit !== undefined && limit !== '' ? parseInt(limit, 10) : 20,
+      search,
+    });
   }
 
   @Get(':marketplaceId/orders')
@@ -455,8 +505,14 @@ export class MarketplaceController {
       throw new BadRequestException('Conteúdo do XML não encontrado no documento fiscal.');
     }
 
-    // 3. Attach to Marketplace
-    return await this.marketplaceOrderService.attachFiscalDocument(order.externalId, marketplaceId, xmlContent);
+    // 3. Attach to Marketplace — pass pack_id for ML (required for Flex/Turbo/ME1/DropOff)
+    const packId = (order as any).packId || undefined;
+    return await this.marketplaceOrderService.attachFiscalDocument(
+      order.externalId,
+      marketplaceId,
+      xmlContent,
+      { packId },
+    );
   }
 
   @Get(':marketplaceId/listings')

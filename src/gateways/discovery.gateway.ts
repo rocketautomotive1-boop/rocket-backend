@@ -54,17 +54,15 @@ export class DiscoveryGateway implements OnGatewayConnection, OnGatewayDisconnec
     @OnEvent('queue.job.update')
     handleDiscoveryStatusUpdate(payload: any) {
         const { jobId, status } = payload;
-        if (jobId) {
-            this.logger.debug(`Emitting discovery status for job ${jobId}: ${status}`);
+        if (!jobId) return;
 
-            // Log room size to verify subscribers
-            // When using namespaces, this.server is a Namespace, so we access adapter directly
-            const adapter = this.server.adapter;
-            const roomSize = adapter?.rooms?.get(`job_${jobId}`)?.size || 0;
-            this.logger.debug(`Broadcasting to room job_${jobId} with ${roomSize} subscribers`);
+        const adapter = this.server.adapter;
+        const roomSize = adapter?.rooms?.get(`job_${jobId}`)?.size || 0;
 
-            this.server.to(`job_${jobId}`).emit('discoveryStatus', payload);
-        }
+        if (roomSize === 0) return;
+
+        this.logger.debug(`Emitting discovery status for job ${jobId}: ${status} (${roomSize} subscribers)`);
+        this.server.to(`job_${jobId}`).emit('discoveryStatus', payload);
     }
 }
 

@@ -63,8 +63,7 @@ export class OrderRepository {
                 { externalId: regex },
                 { 'customer.name': regex },
                 { 'customer.email': regex },
-                { 'items.title': regex },
-                { 'items.sku': regex }
+                { 'items.title': regex }
             ];
 
             // If strictly numeric (or ObjectId-like), can search additional fields if needed, 
@@ -76,7 +75,8 @@ export class OrderRepository {
             .sort({ createdAt: -1 })
             .skip(offset)
             .limit(limit)
-            .populate({ path: 'items.product', select: 'stockQuantity' })
+            .populate('fiscalDocuments')
+            .populate({ path: 'items.productId', select: 'partNumber' })
             .exec();
     }
 

@@ -1,16 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsNotEmpty } from 'class-validator';
+import { IsString, IsOptional, IsNotEmpty } from 'class-validator';
 
 export class CreateBoxDto {
   @ApiProperty({ description: 'ID do warehouse onde a caixa será armazenada' })
-  @IsNumber()
+  @IsString()
   @IsNotEmpty()
-  warehouseId: number;
+  warehouseId: string;
 
   @ApiPropertyOptional({ description: 'ID da alocação onde a caixa será posicionada' })
-  @IsNumber()
+  @IsString()
   @IsOptional()
-  allocationId?: number;
+  allocationId?: string;
 
   @ApiPropertyOptional({ description: 'Código único da caixa (gerado automaticamente se não fornecido)' })
   @IsString()
