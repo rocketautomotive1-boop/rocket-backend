@@ -85,6 +85,19 @@ export class ProductController {
     return this.discoveryService.findRecent(20);
   }
 
+  @Get('discovery/by-pn')
+  @ApiOperation({ summary: 'Buscar discovery existente por partNumber + brandId' })
+  @ApiQuery({ name: 'partNumber', required: true })
+  @ApiQuery({ name: 'brandId', required: false })
+  async getDiscoveryByPartNumber(
+    @Query('partNumber') partNumber: string,
+    @Query('brandId') brandId?: string,
+  ) {
+    if (!partNumber) throw new BadRequestException('partNumber é obrigatório');
+    const discovery = await this.discoveryService.findByPartNumberAndBrand(partNumber, brandId);
+    return { found: !!discovery, discovery: discovery ?? null };
+  }
+
   @Get('lookup')
   @ApiOperation({ summary: 'Lookup read-only por partNumber + brandId — sem criação' })
   @ApiQuery({ name: 'partNumber', required: true })
@@ -171,11 +184,10 @@ export class ProductController {
   }
 
   @Get('autocomplete')
-  @ApiOperation({ summary: 'Autocomplete de produtos' })
+  @ApiOperation({ summary: 'Autocomplete de produtos (desabilitado - migração para MongoDB Search)' })
   @ApiQuery({ name: 'q', required: true })
   async autocomplete(@Query('q') term: string) {
-    if (!term) return [];
-    return this.searchService.autocomplete(term);
+    return [];
   }
 
   @Delete('elastic/index')

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { QueueRecordModel, QueueRecordDocument } from '../../queue/schemas/queue-record.schema';
-import { ProductDiscoveryDocument } from '../schemas/product-discovery.schema';
+import { ProductDiscoveryDocument, ProductDiscoveryModel } from '../schemas/product-discovery.schema';
 import { Types } from 'mongoose';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { v4 as uuidv4 } from 'uuid';
@@ -244,5 +244,27 @@ export class ProductDiscoveryService {
 
     async searchImages(query: string): Promise<WebImageResult[]> {
         return this.serpAdapter.searchImages(query);
+    }
+
+    async findByPartNumberAndBrand(
+        partNumber: string,
+        brandId?: string,
+    ): Promise<ProductDiscoveryModel | null> {
+        const partNumberNorm = partNumber.trim().toUpperCase();
+
+        const query: any = {
+            partNumberNorm,
+            status: 'done',
+        };
+
+        if (brandId) {
+            query.brandId = new Types.ObjectId(brandId);
+        }
+
+        return this.discoveryModel
+            .findOne(query)
+            .sort({ createdAt: -1 })
+            .lean()
+            .exec();
     }
 }
