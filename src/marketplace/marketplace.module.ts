@@ -5,6 +5,7 @@ import { MarketplaceController } from './controllers/marketplace.controller';
 import { MarketplaceService } from './services/marketplace.service';
 import { MercadoLivreAdapter } from './adapters/mercado-livre/mercado-livre.adapter';
 import { GoogleSerpDiscoveryAdapter } from './adapters/google/google-serp-discovery.adapter';
+import { MercadoLivreScraperAdapter } from './adapters/mercado-livre/mercado-livre-scraper.adapter';
 import { ShopeeAdapter } from './adapters/shopee/shopee.adapter';
 import { CategoryController } from './controllers/category.controller';
 import { CategoryService } from './services/category.service';
@@ -156,6 +157,7 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     MercadoLivreListingAdapter,
     MercadoLivreCompatibilityAdapter,
     GoogleSerpDiscoveryAdapter,
+    MercadoLivreScraperAdapter,
     ShopeeProductAdapter,
 
     ShopeeOrderAdapter,
@@ -240,6 +242,7 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     OLXHighlightsService,
     OLXWebhookService,
     GoogleSerpDiscoveryAdapter,
+    MercadoLivreScraperAdapter,
     MarketplaceRegistryModule,
     MarketplaceAuthModule,
     RocketProductAdapter,
