@@ -5,11 +5,14 @@ import { IMarketplaceDiscoveryAdapter, RawDiscoveryData } from '../../interfaces
 @Injectable()
 export class MercadoLivreScraperAdapter implements IMarketplaceDiscoveryAdapter {
     private readonly logger = new Logger(MercadoLivreScraperAdapter.name);
+    private readonly ML_SEARCH_BASE_URL = 'https://lista.mercadolivre.com.br';
+    private readonly MAX_RESULTS = 15;
+    private readonly REQUEST_TIMEOUT_MS = 8_000;
 
     async search(query: string): Promise<RawDiscoveryData> {
         // ML search URLs use hyphens instead of %20
         const slug = encodeURIComponent(query).replace(/%20/g, '-');
-        const url = `https://lista.mercadolivre.com.br/${slug}`;
+        const url = `${this.ML_SEARCH_BASE_URL}/${slug}`;
 
         this.logger.log(`ML scraper: GET ${url}`);
 
@@ -21,7 +24,7 @@ export class MercadoLivreScraperAdapter implements IMarketplaceDiscoveryAdapter 
                 'Referer': 'https://www.mercadolivre.com.br/',
                 'Cache-Control': 'no-cache',
             },
-            timeout: 8000,
+            timeout: this.REQUEST_TIMEOUT_MS,
         });
 
         const state = this.extractPreloadedState(html);
@@ -39,7 +42,7 @@ export class MercadoLivreScraperAdapter implements IMarketplaceDiscoveryAdapter 
                 Number(r.available_quantity) > 0 &&
                 r.status === 'active'
             )
-            .slice(0, 15)
+            .slice(0, this.MAX_RESULTS)
             .map((r: any) => ({
                 id: r.id || r.permalink,
                 title: r.title || '',
@@ -62,7 +65,7 @@ export class MercadoLivreScraperAdapter implements IMarketplaceDiscoveryAdapter 
         return { items };
     }
 
-    private extractPreloadedState(html: string): any | null {
+    private extractPreloadedState(html: string): unknown | null {
         // Pattern 1: encoded — window.__PRELOADED_STATE__ = JSON.parse(decodeURIComponent("..."))
         const encodedMatch = html.match(
             /window\.__PRELOADED_STATE__\s*=\s*JSON\.parse\(decodeURIComponent\("([^"]+)"\)\)/
@@ -90,14 +93,15 @@ export class MercadoLivreScraperAdapter implements IMarketplaceDiscoveryAdapter 
         return null;
     }
 
-    private findResultsArray(state: any): any[] {
+    private findResultsArray(state: unknown): any[] {
         // Try the most common ML state paths first
+        const s = state as any;
         const candidates = [
-            state?.results,
-            state?.initialState?.results,
-            state?.listingState?.results,
-            state?.pageState?.results,
-            state?.shops?.results,
+            s?.results,
+            s?.initialState?.results,
+            s?.listingState?.results,
+            s?.pageState?.results,
+            s?.shops?.results,
         ];
         for (const c of candidates) {
             if (Array.isArray(c) && c.length > 0) return c;
@@ -107,13 +111,13 @@ export class MercadoLivreScraperAdapter implements IMarketplaceDiscoveryAdapter 
     }
 
     /** Recursively walk the state object looking for an array of ML listing items. */
-    private deepFindResults(obj: any, depth = 0): any[] | null {
+    private deepFindResults(obj: unknown, depth = 0): any[] | null {
         if (depth > 6 || typeof obj !== 'object' || obj === null) return null;
         if (Array.isArray(obj) && obj.length > 0 && obj[0]?.title && obj[0]?.permalink) {
             return obj;
         }
-        for (const key of Object.keys(obj)) {
-            const found = this.deepFindResults(obj[key], depth + 1);
+        for (const key of Object.keys(obj as any)) {
+            const found = this.deepFindResults((obj as any)[key], depth + 1);
             if (found) return found;
         }
         return null;
