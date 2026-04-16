@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { RabbitSubscribe } from '@golevelup/nestjs-rabbitmq';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GoogleSerpDiscoveryAdapter } from '../../marketplace/adapters/google/google-serp-discovery.adapter';
+import { MercadoLivreScraperAdapter } from '../../marketplace/adapters/mercado-livre/mercado-livre-scraper.adapter';
+import { RawDiscoveryData } from '../../marketplace/interfaces/discovery.interface';
 import { AiBatchService } from '../../ai/ai-batch.service';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -9,6 +11,7 @@ import { QueueRecordModel, QueueRecordDocument } from '../../queue/schemas/queue
 import { ProductDiscoveryModel, ProductDiscoveryDocument } from '../schemas/product-discovery.schema';
 import { ProductModel } from '../schemas/product.schema';
 import { computeDiscoveryDedupFields } from '../utils/discovery-dedup.util';
+import { CategorySearchService } from '../../search/category-search.service';
 
 @Injectable()
 export class DiscoveryWorker {
@@ -16,6 +19,7 @@ export class DiscoveryWorker {
 
     constructor(
         private readonly serpAdapter: GoogleSerpDiscoveryAdapter,
+        private readonly mlScraper: MercadoLivreScraperAdapter,
         private readonly aiService: AiBatchService,
         @InjectModel('QueueRecordModel')
         private readonly queueModel: Model<QueueRecordDocument>,
@@ -24,6 +28,7 @@ export class DiscoveryWorker {
         @InjectModel('ProductModel')
         private readonly productModel: Model<any>,
         private readonly eventEmitter: EventEmitter2,
+        private readonly categorySearchService: CategorySearchService,
     ) { }
 
     @RabbitSubscribe({
@@ -91,21 +96,25 @@ export class DiscoveryWorker {
             productId: msg.productId
         });
 
-        // 1. SERP search
-        const rawData = await this.serpAdapter.search(msg.query);
+        // 1. ML scraper (primary) → Serper (fallback)
+        let rawData: RawDiscoveryData;
+        try {
+            rawData = await this.mlScraper.search(msg.query);
+            if (rawData.items.length < 3) {
+                this.logger.log(`ML scraper returned ${rawData.items.length} results — falling back to Serper`);
+                rawData = await this.serpAdapter.search(msg.query);
+            } else {
+                this.logger.log(`ML scraper: using ${rawData.items.length} results`);
+            }
+        } catch (err: any) {
+            this.logger.warn(`ML scraper failed (${err.message}) — falling back to Serper`);
+            rawData = await this.serpAdapter.search(msg.query);
+        }
 
         // 2. Clean and enrich data with AI
         const processedData = await this.aiService.sanitizeDiscoveryData(msg.query, rawData.items);
 
-        // Most frequent category_path from SERP results
-        const categoryPaths = rawData.items.map((it: any) => it.category_path).filter(Boolean);
-        if (categoryPaths.length > 0) {
-            const counts = categoryPaths.reduce((acc: any, val: string) => {
-                acc[val] = (acc[val] || 0) + 1;
-                return acc;
-            }, {});
-            processedData.categoryPath = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
-        }
+        // categoryPath is now supplied by the AI in processedData (sanitizeDiscoveryData)
 
         const pnRaw = msg.partNumber?.trim() || msg.query.split(/\s+/)[0] || '';
         const dedup = computeDiscoveryDedupFields({
@@ -156,6 +165,30 @@ export class DiscoveryWorker {
                 { $addToSet: { oemCodes: { $each: processedData.oemCodes } } },
             );
             this.logger.log(`Applied ${processedData.oemCodes.length} OEM codes to product ${resolvedProductId}`);
+        }
+
+        // Auto-apply category to product if AI suggested a categoryPath and product has no category yet
+        if (resolvedProductId && processedData.categoryPath) {
+            try {
+                const product = await this.productModel.findById(resolvedProductId).select('category').lean().exec();
+                if (product && !product.category) {
+                    // Search by the leaf segment for best Atlas Search match
+                    const segments = (processedData.categoryPath as string).split('>').map((s: string) => s.trim()).filter(Boolean);
+                    const searchQuery = segments[segments.length - 1] || processedData.categoryPath;
+                    const results = await this.categorySearchService.searchCategories(searchQuery);
+                    if (results.length > 0) {
+                        await this.productModel.updateOne(
+                            { _id: new Types.ObjectId(resolvedProductId) },
+                            { $set: { category: results[0]._id } },
+                        );
+                        this.logger.log(`Auto-applied category "${results[0].name}" (${results[0]._id}) to product ${resolvedProductId} from path "${processedData.categoryPath}"`);
+                    } else {
+                        this.logger.log(`No category found for path "${processedData.categoryPath}" — skipping auto-apply`);
+                    }
+                }
+            } catch (err) {
+                this.logger.warn(`Category auto-apply failed for product ${resolvedProductId}: ${err.message}`);
+            }
         }
 
         const completedResult = { ...processedData, rawItems: rawData.items, _discoveryId: (discoveryDoc._id as Types.ObjectId).toString() };
