@@ -1,12 +1,16 @@
-import { Injectable, Inject, BadRequestException, NotFoundException, Logger, forwardRef } from '@nestjs/common';
-import { Types } from 'mongoose';
+import { Injectable, Inject, BadRequestException, NotFoundException, Logger, forwardRef, ConflictException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import { ProductModel, ProductDocument } from './schemas/product.schema';
+import { BrandModel, BrandDocument } from './schemas/brand.schema';
+import { ProductDiscoveryModel, ProductDiscoveryDocument } from './schemas/product-discovery.schema';
+import { CreateFromDiscoveryDto } from './dto/create-from-discovery.dto';
 
 import { QueueService } from '../queue/queue.service';
 
 import { ProductCompatibilityService } from './services/product-compatibility.service';
 import { ProductFilterService } from './services/product-filter.service';
-import { PaginatedResponseDto, ProductFilterDto } from './dto/product-filter.dto';
+import { PaginatedResponseDto, ProductFilterDto, ProductStatus } from './dto/product-filter.dto';
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
 import { ProductRepository } from './product.repository';
 import { ProductMovementService, resolveMovementCondition } from './services/product-movement.service';
@@ -57,6 +61,8 @@ export class ProductService {
     private readonly userProductivityService: UserProductivityService,
     private readonly productCategoryService: ProductCategoryService,
     private readonly mercadoLivreCompatibilityAdapter: MercadoLivreCompatibilityAdapter,
+    @InjectModel(BrandModel.name) private readonly brandModel: Model<BrandDocument>,
+    @InjectModel(ProductDiscoveryModel.name) private readonly productDiscoveryModel: Model<ProductDiscoveryDocument>,
   ) { }
 
   @ValidateMongoId()
@@ -645,7 +651,9 @@ export class ProductService {
 
       product.images = imageDataList.map((img, index) => ({
         url: img.url,
+        key: img.key,
         originalName: img.filename || `image-${index}`,
+        mimeType: img.mimeType,
         main: index === 0,
         order: index,
         status: 'active'
@@ -1146,5 +1154,60 @@ export class ProductService {
   async countByCategory(categoryId: string): Promise<number> {
     const query = { category: new Types.ObjectId(categoryId), active: true };
     return this.productRepository.count(query);
+  }
+
+  async createFromDiscovery(dto: CreateFromDiscoveryDto): Promise<ProductModel> {
+    // 1. Busca a marca
+    const brand = await this.brandModel.findById(dto.brandId).lean().exec();
+    if (!brand) throw new BadRequestException('Marca não encontrada');
+
+    // 2. Dados do discovery (se houver)
+    let discoveryData: any = {};
+    if (dto.discoveryId && Types.ObjectId.isValid(dto.discoveryId)) {
+      const discovery = await this.productDiscoveryModel
+        .findById(dto.discoveryId)
+        .lean()
+        .exec();
+      if (discovery?.data) discoveryData = discovery.data;
+    }
+
+    // 3. Duplicate partNumber guard — return existing product instead of throwing so
+    // the identify flow is idempotent (lookup may miss it if brand._id type differs).
+    const existing = await this.productRepository.findOneRaw({ partNumber: dto.partNumber });
+    if (existing) return this.productRepository.findByIdClean(existing.id);
+
+    // 4. Generate slug (same pattern as create())
+    const slugBase = `${dto.partNumber}-${brand.name || 'generic'}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+
+    // 5. Cria o produto com campos pré-preenchidos
+    const created = await this.productRepository.create({
+      name: discoveryData.name || dto.partNumber,
+      slug: slugBase,
+      partNumber: dto.partNumber,
+      barcode: dto.barcode,
+      brand: {
+        _id: brand._id,
+        name: brand.name,
+        shortName: (brand as any).shortName,
+        logoUrl: (brand as any).logoUrl,
+        isGenuine: (brand as any).isGenuine,
+      },
+      description: discoveryData.description ?? '',
+      details: discoveryData.details ?? '',
+      weight: discoveryData.weight ? Types.Decimal128.fromString(discoveryData.weight.toString()) : undefined,
+      dimensions: (discoveryData.height || discoveryData.width || discoveryData.length) ? {
+        height: Types.Decimal128.fromString((discoveryData.height || 0).toString()),
+        width: Types.Decimal128.fromString((discoveryData.width || 0).toString()),
+        length: Types.Decimal128.fromString((discoveryData.length || 0).toString()),
+      } : undefined,
+      status: ProductStatus.DRAFT,
+    });
+
+    const result = await this.productRepository.findByIdClean(created.id);
+
+    // 6. Elasticsearch indexing
+    this.searchService.indexProduct(result).catch(e => this.logger.error(`Failed to index product on createFromDiscovery: ${e.message}`));
+
+    return result;
   }
 }
