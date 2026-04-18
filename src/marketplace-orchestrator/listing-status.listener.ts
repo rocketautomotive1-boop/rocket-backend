@@ -10,6 +10,8 @@ import { UserProductivityService } from '../monitoring/user-productivity.service
 import { ProductivityType } from '../monitoring/schemas/user-productivity.schema';
 import { ProductAliasModel } from '../product/schemas/product-alias.schema';
 import { ProductRepository } from '../product/product.repository';
+import { SyncRequest, SyncRequestDocument } from './schemas/sync-request.schema';
+import { SyncQueueService } from './services/sync-queue.service';
 
 @Injectable()
 export class ListingStatusListener {
@@ -19,9 +21,11 @@ export class ListingStatusListener {
         @InjectModel(ListingModel.name) private listingModel: Model<ListingModel>,
         @InjectModel(ProductModel.name) private productModel: Model<ProductDocument>,
         @InjectModel(ProductAliasModel.name) private productAliasModel: Model<ProductAliasModel>,
+        @InjectModel(SyncRequest.name) private syncRequestModel: Model<SyncRequestDocument>,
         private readonly publicationLogService: PublicationLogService,
         private readonly userProductivityService: UserProductivityService,
         private readonly productRepository: ProductRepository,
+        private readonly syncQueueService: SyncQueueService,
     ) { }
 
     @RabbitSubscribe({
@@ -31,6 +35,7 @@ export class ListingStatusListener {
     })
     async handleSyncResult(result: MarketplaceSyncResult) {
         this.logger.log(`Received result for job ${result.jobId}: ${result.success ? 'Success' : 'Failure'}`);
+        const isAsyncPending = result.success && result.action === 'CREATE' && !result.externalId && !!result.metadata?.asyncPending;
 
         const listing = await this.listingModel.findById(result.listingId);
         if (!listing) {
@@ -85,6 +90,18 @@ export class ListingStatusListener {
         }
 
         if (result.success) {
+            if (isAsyncPending) {
+                listing.status = 'pending_creation';
+                listing.synchronized = false;
+                listing.publishingAt = null; // Release in-flight lock for future retries/reconciliation
+                listing.errorMessage = null;
+                listing.lastSyncAt = new Date();
+
+                this.logger.log(
+                    `Listing ${result.listingId} accepted by marketplace in async mode. ` +
+                    `Waiting externalId (importToken=${result.metadata?.importToken || 'N/A'}).`,
+                );
+            } else {
             listing.status = 'active';
             listing.synchronized = true;
             listing.publishingAt = null; // Release in-flight lock
@@ -93,6 +110,7 @@ export class ListingStatusListener {
             }
             listing.errorMessage = null;
             listing.lastSyncAt = new Date();
+            }
 
             // Auto-create ProductAlias so future orders can resolve productId by externalId/sku
             if (result.externalId && listing.productId) {
@@ -191,7 +209,7 @@ export class ListingStatusListener {
         }
 
         // Update Publication Log
-        if (result.attemptId) {
+        if (result.attemptId && !isAsyncPending) {
             const logResult = {
                 marketplaceId: result.marketplaceId,
                 status: result.success ? 'SUCCESS' : 'FAILED',
@@ -205,6 +223,53 @@ export class ListingStatusListener {
 
             // We need to pass an array of results to completeAttempt
             await this.publicationLogService.completeAttempt(result.attemptId, [logResult as any]);
+        }
+
+        if (result.syncRequestId) {
+            const updated = await this.syncRequestModel.findOneAndUpdate(
+                { _id: result.syncRequestId, status: 'dispatched' },
+                {
+                    $push: {
+                        marketplaceResults: {
+                            marketplaceId: result.marketplaceId,
+                            success: result.success,
+                            errorMessage: result.errorMessage,
+                            timestamp: new Date(),
+                        },
+                    },
+                    $inc: { pendingResultCount: -1 },
+                },
+                { new: true },
+            ).lean().exec();
+
+            if (updated && updated.pendingResultCount <= 0) {
+                const allSuccess = updated.marketplaceResults.every(r => r.success);
+                await this.syncRequestModel.findByIdAndUpdate(result.syncRequestId, {
+                    $set: {
+                        status: allSuccess ? 'completed' : 'failed',
+                        completedAt: new Date(),
+                        errorMessage: allSuccess
+                            ? null
+                            : updated.marketplaceResults.filter(r => !r.success).map(r => r.errorMessage).join('; '),
+                    },
+                });
+
+                if (!allSuccess && updated.reason !== 'selective_retry') {
+                    const failedMarketplaceIds = updated.marketplaceResults
+                        .filter(r => !r.success)
+                        .map(r => r.marketplaceId);
+
+                    if (failedMarketplaceIds.length > 0) {
+                        await this.syncQueueService.enqueue({
+                            productId: updated.productId.toString(),
+                            force: false,
+                            reason: 'selective_retry',
+                            targetMarketplaceIds: failedMarketplaceIds,
+                            scheduledAt: new Date(Date.now() + 60_000),
+                        });
+                    }
+                }
+            }
         }
     }
 }

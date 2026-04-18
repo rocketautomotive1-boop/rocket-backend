@@ -14,6 +14,8 @@ export interface EnqueueOptions {
     reason?: string;
     /** Defaults to now. Set a future date for scheduled/backoff retries. */
     scheduledAt?: Date;
+    /** When set, only sync these specific marketplaces (by ID string). Omit to sync all. */
+    targetMarketplaceIds?: string[];
 }
 
 @Injectable()
@@ -55,20 +57,40 @@ export class SyncQueueService {
         if (opts.force) {
             setFields.force = true;
         }
+        if (opts.targetMarketplaceIds?.length) {
+            setFields.targetMarketplaceIds = opts.targetMarketplaceIds;
+        }
+
+        // When targetMarketplaceIds is absent/empty the intent is "sync all".
+        // If a previous enqueue had stored a selective list, we must remove it so
+        // the document correctly reflects the broader intent.
+        const updateDoc: Record<string, any> = {
+            $set: setFields,
+            $setOnInsert: {
+                retryCount: 0,
+                maxRetries: 3,
+                // Schema default (false) handles force for new documents when opts.force
+                // is falsy, so we do NOT include force here to avoid a field-conflict
+                // error when $set also sets force=true on the same upsert-insert.
+            },
+        };
+        if (!opts.targetMarketplaceIds?.length) {
+            updateDoc.$unset = { targetMarketplaceIds: '' };
+        }
+
+        // Selective-retry enqueues must not narrow an existing full-sync pending document.
+        // By adding targetMarketplaceIds: { $exists: true } to the filter when targeting
+        // specific marketplaces, we ensure they only match (and update) other selective
+        // entries — full-sync pending docs remain untouched and a new document is inserted.
+        const filter: Record<string, any> = { productId, marketplaceId, status: 'pending' };
+        if (opts.targetMarketplaceIds?.length) {
+            filter.targetMarketplaceIds = { $exists: true };
+        }
 
         try {
             const doc = await this.syncRequestModel.findOneAndUpdate(
-                { productId, marketplaceId, status: 'pending' },
-                {
-                    $set: setFields,
-                    $setOnInsert: {
-                        retryCount: 0,
-                        maxRetries: 3,
-                        // Schema default (false) handles force for new documents when opts.force
-                        // is falsy, so we do NOT include force here to avoid a field-conflict
-                        // error when $set also sets force=true on the same upsert-insert.
-                    },
-                },
+                filter,
+                updateDoc,
                 { upsert: true, new: true },
             ).exec();
 
