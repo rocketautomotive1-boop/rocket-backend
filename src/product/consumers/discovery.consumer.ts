@@ -98,11 +98,14 @@ export class DiscoveryWorker {
 
         // 1. ML scraper (primary) → Serper (fallback)
         let rawData: RawDiscoveryData;
+        let mlSuggestedImages: string[] = [];
         try {
             rawData = await this.mlScraper.search(msg.query);
+            mlSuggestedImages = rawData.suggestedImages ?? [];
             if (rawData.items.length < 3) {
                 this.logger.log(`ML scraper returned ${rawData.items.length} results — falling back to Serper`);
-                rawData = await this.serpAdapter.search(msg.query);
+                const serpData = await this.serpAdapter.search(msg.query);
+                rawData = { ...serpData, suggestedImages: mlSuggestedImages };
             } else {
                 this.logger.log(`ML scraper: using ${rawData.items.length} results`);
             }
@@ -123,17 +126,35 @@ export class DiscoveryWorker {
             isGenuine: msg.isGenuine,
         });
 
-        // 3. Save result
+        // 3. Save result — transition the pending doc created by startDiscovery to done.
         const brandOid =
             msg.brandId && Types.ObjectId.isValid(msg.brandId) ? new Types.ObjectId(msg.brandId) : undefined;
 
-        const discoveryDoc = await this.discoveryModel.create({
+        const discoveryDoc = await this.discoveryModel.findOneAndUpdate(
+            { batchId: msg.jobId },
+            {
+                $set: {
+                    status: 'done',
+                    data: processedData,
+                    rawItems: rawData.items,
+                    suggestedImages: rawData.suggestedImages ?? [],
+                    partNumberNorm: dedup.partNumberNorm,
+                    brandNorm: dedup.brandNorm,
+                    isGenuine: dedup.isGenuine,
+                    ...(brandOid ? { brandId: brandOid } : {}),
+                },
+            },
+            { new: true },
+        ).exec()
+
+        ?? await this.discoveryModel.create({
             productId: msg.productId ? new Types.ObjectId(msg.productId) : undefined,
             query: msg.query,
             batchId: msg.jobId,
             status: 'done',
             data: processedData,
             rawItems: rawData.items,
+            suggestedImages: rawData.suggestedImages ?? [],
             partNumberNorm: dedup.partNumberNorm,
             brandNorm: dedup.brandNorm,
             isGenuine: dedup.isGenuine,

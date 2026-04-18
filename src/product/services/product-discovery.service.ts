@@ -7,7 +7,7 @@ import { Types } from 'mongoose';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { v4 as uuidv4 } from 'uuid';
 import { GoogleSerpDiscoveryAdapter, WebImageResult } from '../../marketplace/adapters/google/google-serp-discovery.adapter';
-import { computeDiscoveryDedupFields } from '../utils/discovery-dedup.util';
+import { computeDiscoveryDedupFields, normalizePartNumberForDedup } from '../utils/discovery-dedup.util';
 
 @Injectable()
 export class ProductDiscoveryService {
@@ -47,7 +47,7 @@ export class ProductDiscoveryService {
             if (productId) {
                 const existing = await this.discoveryModel.findOne({
                     productId: new Types.ObjectId(productId),
-                    status: { $in: ['done', 'pending', 'processing'] },
+                    status: { $in: ['done', 'pending'] },
                 }).sort({ createdAt: -1 }).lean().exec();
 
                 if (existing?.batchId) {
@@ -74,26 +74,57 @@ export class ProductDiscoveryService {
                 await this.linkProductIdToDiscoveryIfNeeded(existingByKey._id, productId, params.brandId);
                 return existingByKey.batchId;
             }
-
-            // Guard 3: job já pendente/processando na fila (mesma chave)
-            const inflight = await this.queueModel.findOne({
-                type: 'product.discovery',
-                status: { $in: ['pending', 'processing'] },
-                'metadata.partNumberNorm': partNumberNorm,
-                'metadata.brandNorm': brandNorm,
-                'metadata.isGenuine': dedup.isGenuine,
-            }).sort({ createdAt: -1 }).lean().exec();
-
-            if (inflight?.metadata?.jobId) {
-                this.logger.log(
-                    `Discovery skipped — reuse in-flight queue job ${inflight.metadata.jobId} for same PN+brand key`,
-                );
-                return inflight.metadata.jobId as string;
-            }
         }
 
         this.logger.log(`Starting discovery for jobId: ${jobId}, query: ${query}, productId: ${productId}`);
 
+        // Atomic claim: insert the pending discovery document. A concurrent call
+        // for the same key will hit the unique partial index and get DuplicateKey.
+        const brandOidForInsert =
+            params.brandId && Types.ObjectId.isValid(params.brandId)
+                ? new Types.ObjectId(params.brandId)
+                : undefined;
+
+        let pendingDoc: any;
+        try {
+            pendingDoc = await this.discoveryModel.findOneAndUpdate(
+                { partNumberNorm, brandNorm, isGenuine: dedup.isGenuine, status: 'pending' },
+                {
+                    $setOnInsert: {
+                        batchId: jobId,
+                        query,
+                        partNumberNorm,
+                        brandNorm,
+                        isGenuine: dedup.isGenuine,
+                        status: 'pending',
+                        ...(productId ? { productId: new Types.ObjectId(productId) } : {}),
+                        ...(brandOidForInsert ? { brandId: brandOidForInsert } : {}),
+                    },
+                },
+                { upsert: true, new: false },
+            ).lean().exec();
+        } catch (e) {
+            if (e.code === 11000) {
+                // Two concurrent calls collided on the unique index — reuse the winner's job.
+                const existing = await this.discoveryModel
+                    .findOne({ partNumberNorm, brandNorm, isGenuine: dedup.isGenuine, status: 'pending' })
+                    .lean().exec();
+                return existing?.batchId ?? jobId;
+            }
+            throw e;
+        }
+
+        if (pendingDoc) {
+            // findOneAndUpdate returned the pre-existing document (new: false) — another
+            // in-flight job already claimed this key before we got here.
+            this.logger.log(
+                `Discovery skipped — reuse in-flight pending discovery ${pendingDoc._id} (${partNumberNorm} / ${brandNorm || '(genuine)'})`,
+            );
+            await this.linkProductIdToDiscoveryIfNeeded(pendingDoc._id, productId, params.brandId);
+            return pendingDoc.batchId;
+        }
+
+        // New pending doc created — register in the queue and dispatch.
         const record = new this.queueModel({
             type: 'product.discovery',
             status: 'pending',
@@ -250,7 +281,7 @@ export class ProductDiscoveryService {
         partNumber: string,
         brandId?: string,
     ): Promise<ProductDiscoveryModel | null> {
-        const partNumberNorm = partNumber.trim().toUpperCase();
+        const partNumberNorm = normalizePartNumberForDedup(partNumber);
 
         const query: any = {
             partNumberNorm,

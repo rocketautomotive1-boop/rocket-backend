@@ -41,6 +41,9 @@ export class ProductDiscoveryModel {
 
     @Prop({ type: Types.ObjectId, ref: 'BrandModel', required: false, index: true })
     brandId: Types.ObjectId;
+
+    @Prop({ type: [String], default: [] })
+    suggestedImages: string[];
 }
 
 export const ProductDiscoverySchema = SchemaFactory.createForClass(ProductDiscoveryModel);
@@ -52,3 +55,11 @@ ProductDiscoverySchema.index({
     status: 1,
     createdAt: -1,
 });
+
+// Atomic dedup: only one in-flight (pending) job per unique key.
+// The upsert in startDiscovery atomically claims the slot; concurrent
+// requests get a DuplicateKey error and reuse the existing batchId.
+ProductDiscoverySchema.index(
+    { partNumberNorm: 1, brandNorm: 1, isGenuine: 1 },
+    { unique: true, sparse: true, partialFilterExpression: { status: 'pending' } },
+);
