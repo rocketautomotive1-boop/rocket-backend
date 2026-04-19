@@ -39,7 +39,6 @@ export class RembgJobConsumer {
     queue: 'rembg.process',
     queueOptions: { durable: true },
     allowNonJsonMessages: false,
-    prefetchCount: 1,
   })
   async handleRembgJob(msg: RembgJobMsg): Promise<void> {
     this.logger.log(`Processing rembg job ${msg.jobId} for product ${msg.productId}`);
