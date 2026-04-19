@@ -4,6 +4,7 @@ import {
     Get,
     UploadedFile,
     UseInterceptors,
+    UseGuards,
     Body,
     Query,
     Logger,
@@ -12,6 +13,8 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import * as WebSocket from 'ws';
 import { ProcessedImageService } from './processed-image.service';
+import { RembgEnqueueService } from './rembg-enqueue.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @Controller('rembg')
 export class RembgController {
@@ -19,6 +22,7 @@ export class RembgController {
 
     constructor(
         private readonly processedImageService: ProcessedImageService,
+        private readonly rembgEnqueueService: RembgEnqueueService,
     ) { }
 
     private generateBatchCode(): string {
@@ -175,6 +179,34 @@ export class RembgController {
                     safeResolve({ status: 'error', message: 'Service closed connection unexpectedly' });
                 }
             });
+        });
+    }
+
+    @Post('enqueue')
+    @UseGuards(JwtAuthGuard)
+    @UseInterceptors(FileInterceptor('file'))
+    async enqueueJob(
+        @UploadedFile() file: any,
+        @Body('metadata') metadataStr?: string,
+    ): Promise<any> {
+        if (!file) throw new BadRequestException('No file uploaded');
+
+        let metadata: any = {};
+        if (metadataStr) {
+            try { metadata = JSON.parse(metadataStr); } catch {
+                throw new BadRequestException('Invalid metadata JSON');
+            }
+        }
+
+        if (!metadata.product_id) throw new BadRequestException('product_id is required');
+
+        return this.rembgEnqueueService.enqueue({
+            productId: String(metadata.product_id),
+            fileBuffer: file.buffer,
+            originalName: file.originalname || 'upload.jpg',
+            mimeType: file.mimetype || 'image/jpeg',
+            batchCode: metadata.batchCode || undefined,
+            batchNote: metadata.batchNote || undefined,
         });
     }
 }
