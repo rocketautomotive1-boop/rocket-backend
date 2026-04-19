@@ -36,6 +36,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
                             name: 'rocket.notifications.dlq',
                             type: 'topic',
                         },
+                        {
+                            name: 'rocket.rembg',
+                            type: 'topic',
+                        },
                     ],
                     uri: uri,
                     connectionInitOptions: { wait: false },
