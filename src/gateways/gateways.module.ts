@@ -11,6 +11,7 @@ import { RembgJob, RembgJobSchema } from './schemas/rembg-job.schema';
 import { RembgEnqueueService } from './rembg-enqueue.service';
 import { RembgJobConsumer } from './rembg-job.consumer';
 import { S3Module } from '../common/s3/s3.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
     imports: [
@@ -24,6 +25,7 @@ import { S3Module } from '../common/s3/s3.module';
             { name: RembgJob.name, schema: RembgJobSchema },
         ]),
         S3Module,
+        AuthModule,
     ],
     controllers: [RembgController],
     providers: [
