@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Patch, Body, Param, Put, Delete, BadRequestException, UseInterceptors, UploadedFiles, Logger, Query, ClassSerializerInterceptor, HttpStatus, HttpException, Req, Inject, forwardRef } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Put, Delete, BadRequestException, UseInterceptors, UploadedFiles, Logger, Query, ClassSerializerInterceptor, HttpStatus, HttpException, HttpCode, Req, Inject, forwardRef } from '@nestjs/common';
+import { Types } from 'mongoose';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBody, ApiBearerAuth, ApiExtraModels, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { ProductService } from './product.service';
@@ -15,6 +16,7 @@ import { ProductTitle } from './schemas/product.schema';
 
 import { ProductTitleService } from './services/product-title.service';
 import { ProductDiscoveryService } from './services/product-discovery.service';
+import { CreateFromDiscoveryDto } from './dto/create-from-discovery.dto';
 import { SearchService } from '../search/search.service';
 // import { PublishService } from '../publish/publish.service';
 // import { calculatePublishPriority } from '../queue/publish-priority';
@@ -41,6 +43,41 @@ export class ProductController {
     private readonly searchService: SearchService,
     private readonly discoveryService: ProductDiscoveryService,
   ) { }
+
+  @Post('pre-register')
+  @ApiOperation({ summary: 'Pré-cadastro: cria produto draft e dispara discovery' })
+  async preRegister(
+    @Body() body: { partNumber: string; brandId: string },
+    @Req() req: any,
+  ): Promise<{ productId: string; status: string }> {
+    if (!body.partNumber?.trim()) throw new BadRequestException('partNumber is required');
+    if (!body.brandId?.trim()) throw new BadRequestException('brandId is required');
+
+    const brand = await this.productBrandService.findOne(body.brandId);
+    if (!brand) throw new BadRequestException('Brand not found');
+
+    const product = await this.productService.create(
+      {
+        partNumber: body.partNumber.trim(),
+        brand: { id: String((brand as any).id ?? (brand as any)._id), name: (brand as any).name, isGenuine: false },
+      },
+      req?.user?.sub,
+    );
+
+    const productId = String((product as any).id ?? (product as any)._id);
+
+    this.discoveryService.startDiscovery({
+      partNumber: body.partNumber.trim(),
+      brand: (brand as any).name,
+      productId,
+      brandId: body.brandId,
+      isGenuine: false,
+    }).catch(e => {
+      this.logger.warn(`[PreRegister] Discovery failed to start: ${e.message}`);
+    });
+
+    return { productId, status: 'draft' };
+  }
 
   @Post('discovery')
   @ApiOperation({ summary: 'Iniciar processo de descoberta de mercado' })
@@ -94,8 +131,20 @@ export class ProductController {
     @Query('brandId') brandId?: string,
   ) {
     if (!partNumber) throw new BadRequestException('partNumber é obrigatório');
+    if (brandId && !Types.ObjectId.isValid(brandId)) {
+      throw new BadRequestException('brandId inválido');
+    }
     const discovery = await this.discoveryService.findByPartNumberAndBrand(partNumber, brandId);
     return { found: !!discovery, discovery: discovery ?? null };
+  }
+
+  @Post('from-discovery')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Criar produto rascunho a partir de um discovery' })
+  async createFromDiscovery(
+    @Body() dto: CreateFromDiscoveryDto,
+  ): Promise<ProductModel> {
+    return this.productService.createFromDiscovery(dto);
   }
 
   @Get('lookup')
