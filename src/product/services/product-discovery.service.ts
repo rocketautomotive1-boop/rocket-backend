@@ -1,216 +1,171 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { QueueRecordModel, QueueRecordDocument } from '../../queue/schemas/queue-record.schema';
 import { ProductDiscoveryDocument, ProductDiscoveryModel } from '../schemas/product-discovery.schema';
 import { Types } from 'mongoose';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { v4 as uuidv4 } from 'uuid';
-import { GoogleSerpDiscoveryAdapter, WebImageResult } from '../../marketplace/adapters/google/google-serp-discovery.adapter';
 import { computeDiscoveryDedupFields, normalizePartNumberForDedup } from '../utils/discovery-dedup.util';
 
 @Injectable()
-export class ProductDiscoveryService {
+export class ProductDiscoveryService implements OnApplicationBootstrap {
     private readonly logger = new Logger(ProductDiscoveryService.name);
 
     constructor(
-        @InjectModel(QueueRecordModel.name)
-        private readonly queueModel: Model<QueueRecordDocument>,
         @InjectModel('ProductDiscoveryModel')
         private readonly discoveryModel: Model<ProductDiscoveryDocument>,
         @InjectModel('ProductModel')
         private readonly productModel: Model<any>,
         private readonly amqpConnection: AmqpConnection,
-        private readonly serpAdapter: GoogleSerpDiscoveryAdapter,
     ) { }
+
+
+    async onApplicationBootstrap(): Promise<void> {
+        // On startup, recover any jobs left in pending state from before the server went down.
+        // Threshold: 5 minutes — any pending job older than this was orphaned by a crash/restart.
+        const staleThreshold = new Date(Date.now() - 5 * 60 * 1000);
+        const stale = await this.discoveryModel
+            .find({ status: 'pending', createdAt: { $lt: staleThreshold } })
+            .lean()
+            .exec();
+
+        if (stale.length === 0) return;
+
+        this.logger.warn(`Recovery: found ${stale.length} stale pending job(s) — re-publishing to RabbitMQ`);
+
+        for (const job of stale) {
+            const newJobId = uuidv4();
+            try {
+                await this.discoveryModel.updateOne(
+                    { _id: job._id },
+                    { $set: { batchId: newJobId, updatedAt: new Date() } },
+                ).exec();
+
+                await this.amqpConnection.publish('rocket.inventory', 'discovery.scraper.request', {
+                    jobId: newJobId,
+                    query: job.query,
+                    partNumber: job.partNumberNorm,
+                    brand: job.brandNorm,
+                });
+
+                this.logger.log(`Recovery: re-published job ${job.batchId} → ${newJobId} (query="${job.query}")`);
+            } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : String(err);
+                this.logger.error(`Recovery: failed to re-publish job ${job.batchId}: ${message}`);
+                await this.discoveryModel.updateOne(
+                    { _id: job._id },
+                    { $set: { status: 'failed', error: 'RECOVERY_PUBLISH_ERROR' } },
+                ).exec();
+            }
+        }
+    }
 
     async startDiscovery(params: {
         partNumber: string;
         brand?: string;
-        isGenuine?: boolean;
         productId?: string;
-        brandId?: string;
-        userId?: string;
-        force?: boolean;
     }): Promise<string> {
-        const jobId = uuidv4();
-        const { partNumber, brand, isGenuine, productId } = params;
-
-        const dedup = computeDiscoveryDedupFields({ partNumber, brand, isGenuine });
+        const { partNumber, brand, productId } = params;
+        const dedup = computeDiscoveryDedupFields({ partNumber, brand, isGenuine: false });
         const { partNumberNorm, brandNorm } = dedup;
 
-        // Discovery Logic: Se isGenuine for true, busca por partNumber. Caso contrário, partNumber + brand.
-        const query = isGenuine ? partNumber : `${partNumber} ${brand || ''}`.trim();
+        // 1. Check for existing job (Done or Pending)
+        const existing = await this.discoveryModel.findOne({
+            partNumberNorm,
+            brandNorm,
+            isGenuine: false,
+            status: { $in: ['done', 'pending'] }
+        }).sort({ createdAt: -1 }).exec();
 
-        if (!params.force) {
-            // Guard 1: produto já tem discovery por productId
-            if (productId) {
-                const existing = await this.discoveryModel.findOne({
-                    productId: new Types.ObjectId(productId),
-                    status: { $in: ['done', 'pending'] },
-                }).sort({ createdAt: -1 }).lean().exec();
+        if (existing) {
+            const isRecent = existing.status === 'done' && existing.updatedAt > new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const isStuckPending = existing.status === 'pending' && existing.updatedAt < new Date(Date.now() - 2 * 60 * 1000); // 2 min timeout
 
-                if (existing?.batchId) {
-                    this.logger.log(
-                        `Discovery skipped for product ${productId} — already has discovery ${existing._id} (status: ${existing.status})`,
-                    );
-                    await this.linkProductIdToDiscoveryIfNeeded(existing._id, productId, params.brandId);
-                    return existing.batchId;
-                }
+            if ((existing.status === 'pending' && !isStuckPending) || isRecent) {
+                this.logger.log(`Reusing discovery [${existing.status}] ${existing.batchId} for PN=${partNumberNorm}`);
+                if (productId) await this.linkProductIdToDiscoveryIfNeeded(existing._id, productId);
+                return existing.batchId;
             }
-
-            // Guard 2: mesmo PN+marca (dedup) — documento concluído
-            const existingByKey = await this.discoveryModel.findOne({
-                partNumberNorm,
-                brandNorm,
-                isGenuine: dedup.isGenuine,
-                status: 'done',
-            }).sort({ createdAt: -1 }).lean().exec();
-
-            if (existingByKey?.batchId) {
-                this.logger.log(
-                    `Discovery skipped — reuse done discovery ${existingByKey._id} for PN+brand key (${partNumberNorm} / ${brandNorm || '(genuine)'})`,
-                );
-                await this.linkProductIdToDiscoveryIfNeeded(existingByKey._id, productId, params.brandId);
-                return existingByKey.batchId;
+            if (isStuckPending) {
+                this.logger.warn(`Found STUCK pending job ${existing.batchId} for PN=${partNumberNorm}, retrying...`);
             }
         }
 
-        this.logger.log(`Starting discovery for jobId: ${jobId}, query: ${query}, productId: ${productId}`);
+        // 2. Start NEW job
+        const jobId = uuidv4();
+        const query = `${partNumber} ${brand || ''}`.trim();
 
-        // Atomic claim: insert the pending discovery document. A concurrent call
-        // for the same key will hit the unique partial index and get DuplicateKey.
-        const brandOidForInsert =
-            params.brandId && Types.ObjectId.isValid(params.brandId)
-                ? new Types.ObjectId(params.brandId)
-                : undefined;
-
-        let pendingDoc: any;
-        try {
-            pendingDoc = await this.discoveryModel.findOneAndUpdate(
-                { partNumberNorm, brandNorm, isGenuine: dedup.isGenuine, status: 'pending' },
-                {
-                    $setOnInsert: {
-                        batchId: jobId,
-                        query,
-                        partNumberNorm,
-                        brandNorm,
-                        isGenuine: dedup.isGenuine,
-                        status: 'pending',
-                        ...(productId ? { productId: new Types.ObjectId(productId) } : {}),
-                        ...(brandOidForInsert ? { brandId: brandOidForInsert } : {}),
-                    },
+        await this.discoveryModel.findOneAndUpdate(
+            { partNumberNorm, brandNorm, isGenuine: false },
+            {
+                $set: {
+                    batchId: jobId,
+                    status: 'pending',
+                    query,
+                    productId: productId ? new Types.ObjectId(productId) : undefined,
+                    updatedAt: new Date(),
                 },
-                { upsert: true, new: false },
-            ).lean().exec();
-        } catch (e) {
-            if (e.code === 11000) {
-                // Two concurrent calls collided on the unique index — reuse the winner's job.
-                const existing = await this.discoveryModel
-                    .findOne({ partNumberNorm, brandNorm, isGenuine: dedup.isGenuine, status: 'pending' })
-                    .lean().exec();
-                return existing?.batchId ?? jobId;
-            }
-            throw e;
-        }
+                $setOnInsert: { createdAt: new Date() }
+            },
+            { upsert: true, new: true }
+        ).exec();
 
-        if (pendingDoc) {
-            // findOneAndUpdate returned the pre-existing document (new: false) — another
-            // in-flight job already claimed this key before we got here.
-            this.logger.log(
-                `Discovery skipped — reuse in-flight pending discovery ${pendingDoc._id} (${partNumberNorm} / ${brandNorm || '(genuine)'})`,
-            );
-            await this.linkProductIdToDiscoveryIfNeeded(pendingDoc._id, productId, params.brandId);
-            return pendingDoc.batchId;
-        }
+        this.logger.log(`🚀 Dispatching discovery to MS: ${query} (JobId: ${jobId})`);
 
-        // New pending doc created — register in the queue and dispatch.
-        const record = new this.queueModel({
-            type: 'product.discovery',
-            status: 'pending',
-            priority: 1,
-            productId,
-            metadata: {
+        try {
+            const published = await this.amqpConnection.publish('rocket.inventory', 'discovery.scraper.request', {
                 jobId,
                 query,
                 partNumber,
                 brand,
-                isGenuine,
-                partNumberNorm,
-                brandNorm,
-                productId,
-                brandId: params.brandId,
-                userId: params.userId,
-            },
-        });
-
-        await record.save();
-
-        await this.amqpConnection.publish('rocket.inventory', 'product.discovery.request', {
-            jobId,
-            query,
-            queueRecordId: record._id,
-            productId,
-            partNumber,
-            brand,
-            isGenuine,
-            brandId: params.brandId,
-        });
+            });
+            this.logger.log(`📤 Published message to RabbitMQ: ${published ? 'YES' : 'NO'}`);
+        } catch (err) {
+            this.logger.error(`❌ FAILED to publish to RabbitMQ: ${err.message}`);
+            // Update status to failed so it doesn't stay pending
+            await this.discoveryModel.updateOne({ batchId: jobId }, { $set: { status: 'failed', error: 'MQ_PUBLISH_ERROR' } });
+            throw err;
+        }
 
         return jobId;
     }
 
+
     private async linkProductIdToDiscoveryIfNeeded(
         discoveryDocId: Types.ObjectId | string,
         productId: string | undefined,
-        brandId: string | undefined,
     ): Promise<void> {
         if (!productId) return;
         const pid = new Types.ObjectId(productId);
-        const set: Record<string, unknown> = {};
-        const doc = await this.discoveryModel.findById(discoveryDocId).select('productId brandId').lean().exec();
-        if (!doc) return;
-        if (!doc.productId) {
-            set.productId = pid;
-        }
-        if (brandId && Types.ObjectId.isValid(brandId) && !(doc as { brandId?: Types.ObjectId }).brandId) {
-            set.brandId = new Types.ObjectId(brandId);
-        }
-        if (Object.keys(set).length > 0) {
-            await this.discoveryModel.updateOne({ _id: discoveryDocId }, { $set: set }).exec();
-            this.logger.log(`Linked discovery ${discoveryDocId} → product ${productId}`);
-        }
+        const doc = await this.discoveryModel.findById(discoveryDocId).select('productId').lean().exec();
+        if (!doc || doc.productId) return;
+
+        await this.discoveryModel.updateOne({ _id: discoveryDocId }, { $set: { productId: pid } }).exec();
+        this.logger.log(`Linked discovery ${discoveryDocId} → product ${productId}`);
     }
 
     async getStatus(jobId: string) {
-        const record = await this.queueModel.findOne({ 'metadata.jobId': jobId }).exec();
-        if (record) {
-            return {
-                jobId: record.metadata.jobId,
-                status: record.status.toUpperCase(), // PENDING, PROCESSING, COMPLETED, FAILED
-                data: record.result,
-                error: record.error,
-                updatedAt: record.updatedAt,
-            };
-        }
-
         const fromDiscovery = await this.discoveryModel.findOne({ batchId: jobId }).lean().exec();
-        if (fromDiscovery && fromDiscovery.status === 'done' && fromDiscovery.data) {
-            const completedResult = {
-                ...fromDiscovery.data,
-                rawItems: fromDiscovery.rawItems || [],
-                _discoveryId: String(fromDiscovery._id),
-            };
-            return {
-                jobId,
-                status: 'COMPLETED',
-                data: completedResult,
-                error: undefined,
-                updatedAt: (fromDiscovery as { updatedAt?: Date }).updatedAt,
-            };
-        }
+        if (!fromDiscovery) return { status: 'NOT_FOUND' };
 
-        return { status: 'NOT_FOUND' };
+        const statusMap: Record<string, string> = {
+            'pending': 'PENDING',
+            'done': 'COMPLETED',
+            'failed': 'FAILED'
+        };
+
+        const result = {
+            jobId,
+            status: statusMap[fromDiscovery.status] || fromDiscovery.status.toUpperCase(),
+            data: fromDiscovery.status === 'done' ? {
+                ...(fromDiscovery.final || fromDiscovery.data),
+                _discoveryId: String(fromDiscovery._id),
+            } : undefined,
+            error: fromDiscovery.error,
+            updatedAt: (fromDiscovery as { updatedAt?: Date }).updatedAt,
+        };
+
+        return result;
     }
 
     async findByProductId(productId: string) {
@@ -273,14 +228,11 @@ export class ProductDiscoveryService {
         this.logger.log(`Associated discovery ${discoveryId} → product ${productId}`);
     }
 
-    async searchImages(query: string): Promise<WebImageResult[]> {
-        return this.serpAdapter.searchImages(query);
-    }
 
     async findByPartNumberAndBrand(
         partNumber: string,
         brandId?: string,
-    ): Promise<ProductDiscoveryModel | null> {
+    ): Promise<ProductDiscoveryDocument | null> {
         const partNumberNorm = normalizePartNumberForDedup(partNumber);
 
         const query: any = {
