@@ -94,7 +94,7 @@ import { SitemapController } from './controllers/sitemap.controller';
 import { CatalogMigrationService } from './services/catalog-migration.service';
 
 import { ProductDiscoveryService } from './services/product-discovery.service';
-// import { StockWatcherService } from './services/stock-watcher.service';
+import { CategoryResolutionService } from './services/category-resolution.service';
 
 import { ReviewModel, ReviewSchema } from './schemas/review.schema';
 import { ReviewsService } from './services/reviews.service';
@@ -103,7 +103,7 @@ import { ReviewsController } from './controllers/reviews.controller';
 import { ProductAliasModel, ProductAliasSchema } from './schemas/product-alias.schema';
 import { ProductMatcherService } from './services/product-matcher.service';
 import { StockSyncConsumer } from './consumers/stock-sync.consumer';
-import { DiscoveryWorker } from './consumers/discovery.consumer';
+import { DiscoveryMsResponseConsumer } from './consumers/discovery-ms-response.consumer';
 
 
 
@@ -200,11 +200,11 @@ import { DiscoveryWorker } from './consumers/discovery.consumer';
     CrossReferenceService,
     CatalogMigrationService,
 
-    // StockWatcherService, // [DISABLED] Legacy Watcher
     ProductMatcherService,
     StockSyncConsumer, // [NEW] RabbitMQ Consumer
     ProductDiscoveryService,
-    DiscoveryWorker
+    CategoryResolutionService,
+    DiscoveryMsResponseConsumer,
   ],
   exports: [
 
