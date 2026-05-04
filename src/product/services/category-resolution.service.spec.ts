@@ -53,6 +53,12 @@ describe('CategoryResolutionService', () => {
         expect(categoryModel.findOne).not.toHaveBeenCalled();
     });
 
+    it('retorna null quando categoryPath é string vazia ou só espaços', async () => {
+        expect(await service.resolve('')).toBeNull();
+        expect(await service.resolve('   ')).toBeNull();
+        expect(categoryModel.findOne).not.toHaveBeenCalled();
+    });
+
     it('match exato por marketplaceMappings[].path', async () => {
         const cat = makeCategory();
         categoryModel.findOne.mockImplementation((query: any) => {
