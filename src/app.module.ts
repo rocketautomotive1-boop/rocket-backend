@@ -37,6 +37,9 @@ import { FinancialModule } from './financial/financial.module';
 import { ListingModule } from './listing/listing.module'; // Added ListingModule
 import { MarketplaceOrchestratorModule } from './marketplace-orchestrator/marketplace-orchestrator.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
+import { VehicleDiscoveryModule } from './vehicle-discovery/vehicle-discovery.module';
+import { VehicleCompatibilityModule } from './vehicle-compatibility/vehicle-compatibility.module';
+import { InternalModule } from './internal/internal.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
@@ -117,6 +120,9 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
     UserProductivityModule,
     GatewaysModule,
     SchedulerModule,
+    VehicleCompatibilityModule,
+    VehicleDiscoveryModule,
+    InternalModule,
   ],
   controllers: [],
   providers: [
