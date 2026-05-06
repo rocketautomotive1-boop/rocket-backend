@@ -40,6 +40,11 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
                             name: 'rocket.rembg',
                             type: 'topic',
                         },
+                        {
+                            name: 'rocket.orchestrator',
+                            type: 'topic',
+                            options: { durable: true },
+                        },
                     ],
                     uri: uri,
                     connectionInitOptions: { wait: false },

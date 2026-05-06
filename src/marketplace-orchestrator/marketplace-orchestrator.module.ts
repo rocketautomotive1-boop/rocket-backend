@@ -14,15 +14,22 @@ import { SyncQueueWorker } from './workers/sync-queue.worker';
 import { ListingRemovalService } from './services/listing-removal.service';
 import { PayloadBuilderService } from './services/payload-builder.service';
 import { ItemModerationService } from './services/item-moderation.service';
+import { OLXReconciliationService } from './services/olx-reconciliation.service';
+import { SyncIssuePolicyService } from './services/sync-issue-policy.service';
+import { MarketplaceIssuesService } from './services/marketplace-issues.service';
+import { MercadoLivreComplianceService } from './services/mercadolivre-compliance.service';
+import { PostPublishReviewService } from './services/post-publish-review.service';
+import { PublicationFlowService } from './services/publication-flow.service';
+import { PublicationResultService } from './services/publication-result.service';
+import { OperationalIssuesService } from './services/operational-issues.service';
+import { OrchestratorPublisherService } from './orchestrator-publisher.service';
 
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
 import { CategoryModel, CategorySchema } from '../product/schemas/category.schema';
 import { MarketplaceModel, MarketplaceSchema } from '../marketplace/schemas/marketplace.schema';
 import { StockMovementModel, StockMovementSchema } from '../product/schemas/stock-movement.schema';
 import { ListingModel, ListingSchema } from '../listing/schemas/listing.schema';
-import { WatcherToken, WatcherTokenSchema } from './schemas/watcher-token.schema';
 import { SyncRequest, SyncRequestSchema } from './schemas/sync-request.schema';
-import { GlobalWatcherService } from './global-watcher.service';
 
 import { MercadoLivreSyncWorker } from './workers/mercadolivre-sync.worker';
 import { AmazonSyncWorker } from './workers/amazon-sync.worker';
@@ -52,7 +59,6 @@ import { ProductModule } from '../product/product.module';
             { name: ProductModel.name, schema: ProductSchema },
             { name: MarketplaceModel.name, schema: MarketplaceSchema },
             { name: ListingModel.name, schema: ListingSchema },
-            { name: WatcherToken.name, schema: WatcherTokenSchema },
             { name: SyncRequest.name, schema: SyncRequestSchema },
             { name: PublicationAttempt.name, schema: PublicationAttemptSchema },
             { name: CategoryModel.name, schema: CategorySchema },
@@ -69,14 +75,16 @@ import { ProductModule } from '../product/product.module';
         MarketplaceResilienceService,
         PublicationLogService,
         ListingStatusListener,
+        PublicationResultService,
+        PublicationFlowService,
         ShopeeSyncWorker,
         ProductRepository,
         MercadoLivreSyncWorker,
         AmazonSyncWorker,
         TikTokShopSyncWorker,
         OLXSyncWorker,
-        GlobalWatcherService,
         SyncQueueService,
+        PostPublishReviewService,
         SyncQueueWorker,
         // Template engine providers
         TemplateConditionEvaluator,
@@ -87,12 +95,21 @@ import { ProductModule } from '../product/product.module';
         ListingRemovalService,
         PayloadBuilderService,
         ItemModerationService,
+        OLXReconciliationService,
+        SyncIssuePolicyService,
+        MarketplaceIssuesService,
+        OperationalIssuesService,
+        MercadoLivreComplianceService,
+        OrchestratorPublisherService,
     ],
     exports: [
         MarketplaceOrchestratorService,
         SyncQueueService,
         ListingRemovalService,
         ItemModerationService,
+        MarketplaceIssuesService,
+        OperationalIssuesService,
+        MercadoLivreComplianceService,
     ],
 })
 export class MarketplaceOrchestratorModule { }
