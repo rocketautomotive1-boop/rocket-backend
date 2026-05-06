@@ -15,7 +15,6 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { OrderModel, OrderSchema } from './schemas/order.schema';
 import { OrderProcessingService } from './services/order-processing.service';
 import { OrderOrchestrator } from './services/order-orchestrator.service';
-// import { OrderWatcherService } from './order-watcher.service';
 import { OrderSyncController } from './controllers/order-sync.controller';
 import { OrderSyncProcessor } from './processors/order-sync.processor';
 import { OrderMapperService } from './services/order-mapper.service';
@@ -31,6 +30,7 @@ import { MercadoLivrePricingCalculator } from './strategies/mercadolivre-pricing
 import { OrderPricingListener } from './listeners/order-pricing.listener';
 import { OrderFinancialSummaryService } from './services/order-financial-summary.service';
 import { OrderCancellationService } from './services/order-cancellation.service';
+import { OrderSyncFlowService } from './services/order-sync-flow.service';
 
 // Test controller
 import { OrderTestController } from './controllers/order-test.controller';
@@ -53,7 +53,6 @@ import { OrderTestController } from './controllers/order-test.controller';
         OrderRepository,
         OrderProcessingService,
         OrderOrchestrator,
-        // OrderWatcherService, // [DISABLED] Legacy Syncer
         OrderMapperService,
         StockOrchestratorService,
         OrderSyncProcessor,
@@ -77,7 +76,8 @@ import { OrderTestController } from './controllers/order-test.controller';
         OrderPricingService,
         OrderPricingListener,
         OrderFinancialSummaryService,
+        OrderSyncFlowService,
     ],
-    exports: [OrderService, OrderRepository, OrderProcessingService, OrderOrchestrator, StockOrchestratorService, OrderRectifyService, OrderPricingService, PricingCalculatorRegistry, OrderMarketplaceDetailsService, OrderFinancialSummaryService, OrderCancellationService],
+    exports: [OrderService, OrderRepository, OrderProcessingService, OrderOrchestrator, StockOrchestratorService, OrderRectifyService, OrderPricingService, PricingCalculatorRegistry, OrderMarketplaceDetailsService, OrderFinancialSummaryService, OrderCancellationService, OrderSyncFlowService],
 })
 export class OrderModule { }

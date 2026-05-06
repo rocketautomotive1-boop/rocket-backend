@@ -22,9 +22,21 @@ describe('WhatsAppCommandRouter', () => {
     ['ajuda', 'HELP'],
     ['help', 'HELP'],
     ['comandos', 'HELP'],
+    ['buscar produto', 'SEARCH_PRODUCT'],
+    ['buscar produto roda onix', 'SEARCH_PRODUCT'],
+    ['BUSCAR PRODUTO amortecedor', 'SEARCH_PRODUCT'],
     ['boa tarde', 'UNKNOWN'],
     ['ok', 'UNKNOWN'],
   ])('"%s" → %s', (input, expected) => {
     expect(router.route(input)).toBe(expected);
+  });
+
+  it.each([
+    ['buscar produto roda onix', 'roda onix'],
+    ['BUSCAR PRODUTO amortecedor dianteiro', 'amortecedor dianteiro'],
+    ['buscar produto   ', null],
+    ['saldo ml', null],
+  ])('extractSearchTerm("%s") → %s', (input, expected) => {
+    expect(router.extractSearchTerm(input)).toBe(expected);
   });
 });

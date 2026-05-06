@@ -111,6 +111,11 @@ export class WhatsAppNotificationService {
     const orderItems: any[] = order.items ?? order.order_items ?? [];
     const title      = orderItems[0]?.title || pricing.items?.[0]?.title || 'Produto';
     const extraItems = orderItems.length > 1 ? [`(+ ${orderItems.length - 1} item(ns))`] : [];
+    const firstQty = Number(orderItems[0]?.quantity ?? pricing.items?.[0]?.quantity ?? 1);
+    const firstUnitPrice = Number(orderItems[0]?.unitPrice ?? pricing.items?.[0]?.unitPrice ?? 0);
+    const itemsTotal = orderItems.length > 0
+      ? orderItems.reduce((sum, item) => sum + (Number(item?.quantity || 0) * Number(item?.unitPrice || 0)), 0)
+      : Number(pricing.totals?.grossRevenue || f.gross || 0);
 
     const lines = [
       `📦 *NOVA VENDA*`,
@@ -119,11 +124,13 @@ export class WhatsAppNotificationService {
       ``,
       `*${title}*`,
       ...extraItems,
+      `Quantidade vendida: ${firstQty}`,
+      ...(firstUnitPrice > 0 ? [`Preço unitário: ${fmt(firstUnitPrice)}`] : []),
+      `Total itens: ${fmt(itemsTotal)}`,
       ``,
       `💰 *Valor bruto:* ${fmt(f.gross)}`,
       ...(f.saleFee > 0 ? [`  └ Comissão: -${fmt(f.saleFee)}`]         : []),
       ...(f.freight > 0 ? [`  └ Frete (vendedor): -${fmt(f.freight)}`] : []),
-      ...(f.coupon  > 0 ? [`  └ Cupom: -${fmt(f.coupon)}`]             : []),
       ...(f.taxes   > 0 ? [`  └ Impostos: -${fmt(f.taxes)}`]           : []),
       `💵 *Receita líquida:* ${fmt(f.net)}`,
       ...(f.costTotal > 0 ? [`  └ Custo dos produtos: -${fmt(f.costTotal)}`] : []),
@@ -146,8 +153,8 @@ export class WhatsAppNotificationService {
     const saleFee  = Number(p.marketplaceFee || totals.totalCommission || 0);
     const freight  = Number(order.shippingAmount || totals.totalFreight || 0);
     const taxes    = Number(p.taxAmount      || totals.totalTaxes      || 0);
-    const coupon   = Number(p.couponAmount   || 0);
-    const net      = Number(p.netAmount      || Math.max(0, gross - saleFee - freight - taxes - coupon));
+    const coupon   = 0;
+    const net      = Number(p.netAmount      || Math.max(0, gross - saleFee - freight - taxes));
     const costTotal = totals.totalCostOfGoods ?? 0;
     const grossProfit = net - costTotal;
     const marginPct   = gross > 0 ? (grossProfit / gross) * 100 : 0;

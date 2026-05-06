@@ -2,6 +2,7 @@
 export class MarketplaceSyncPayload {
     jobId: string;
     attemptId?: string;
+    syncRequestId?: string;
     marketplaceId: string;
     listingId: string;
     externalId?: string;
@@ -22,6 +23,11 @@ export class MarketplaceSyncPayload {
             [key: string]: any;
         };
         settings: any;
+        requirements?: Array<{
+            fieldName?: string;
+            schemaField?: string;
+            isRequired?: boolean;
+        }>;
     };
 
     payload: {

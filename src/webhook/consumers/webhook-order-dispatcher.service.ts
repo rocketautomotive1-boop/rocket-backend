@@ -49,30 +49,34 @@ export class WebhookOrderDispatcher {
 
     @OnEvent('webhook.received', { async: true })
     async handleWebhook(event: WebhookReceivedEvent): Promise<void> {
-        const { marketplace, topic, payload } = event;
-
         try {
-            // Order dispatch
-            if (ORDER_TOPICS[marketplace]?.has(topic)) {
-                await this.dispatchOrder(marketplace, topic, payload);
-                return;
-            }
-
-            // Question dispatch: trigger sync + notification
-            if (QUESTION_TOPICS[marketplace]?.has(topic)) {
-                this.eventEmitter.emit('question.sync_requested', { marketplace, payload });
-
-                this.emitNotification(
-                    'question',
-                    `Nova Pergunta - ${this.marketplaceLabel(marketplace)}`,
-                    'Toque para visualizar e responder',
-                    { type: 'question', marketplace, actionRoute: '/(drawer)/questions' },
-                );
-            }
+            await this.dispatchWebhookEvent(event);
         } catch (err) {
             this.logger.error(
-                `[Dispatcher] Error handling webhook ${marketplace}/${topic}: ${(err as Error).message}`,
+                `[Dispatcher] Error handling webhook ${event.marketplace}/${event.topic}: ${(err as Error).message}`,
                 (err as Error).stack,
+            );
+        }
+    }
+
+    async dispatchWebhookEvent(event: WebhookReceivedEvent): Promise<void> {
+        const { marketplace, topic, payload } = event;
+
+        // Order dispatch
+        if (ORDER_TOPICS[marketplace]?.has(topic)) {
+            await this.dispatchOrder(marketplace, topic, payload);
+            return;
+        }
+
+        // Question dispatch: trigger sync + notification
+        if (QUESTION_TOPICS[marketplace]?.has(topic)) {
+            this.eventEmitter.emit('question.sync_requested', { marketplace, payload });
+
+            this.emitNotification(
+                'question',
+                `Nova Pergunta - ${this.marketplaceLabel(marketplace)}`,
+                'Toque para visualizar e responder',
+                { type: 'question', marketplace, actionRoute: '/(drawer)/questions' },
             );
         }
     }

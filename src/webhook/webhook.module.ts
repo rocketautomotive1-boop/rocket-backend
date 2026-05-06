@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { MongooseModule } from '@nestjs/mongoose';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { OrderModule } from '../order/order.module';
 import { MarketplaceModule } from '../marketplace/marketplace.module';
@@ -17,6 +18,9 @@ import { YampiWebhookService } from './services/yampi-webhook.service';
 import { OLXWebhookService } from './services/olx-webhook.service';
 import { AliExpressWebhookService } from './services/aliexpress-webhook.service';
 import { TikTokShopWebhookService } from './services/tiktok-shop-webhook.service';
+import { WebhookInboxWorker } from './consumers/webhook-inbox.worker';
+import { WebhookInboxModel, WebhookInboxSchema } from './schemas/webhook-inbox.schema';
+import { WebhookInboxService } from './services/webhook-inbox.service';
 
 @Module({
   imports: [
@@ -24,6 +28,9 @@ import { TikTokShopWebhookService } from './services/tiktok-shop-webhook.service
     NotificationsModule,
     forwardRef(() => OrderModule),
     forwardRef(() => MarketplaceModule),
+    MongooseModule.forFeature([
+      { name: WebhookInboxModel.name, schema: WebhookInboxSchema },
+    ]),
     ClientsModule.registerAsync([
       {
         name: 'MARKETPLACE_SERVICE',
@@ -46,6 +53,8 @@ import { TikTokShopWebhookService } from './services/tiktok-shop-webhook.service
   providers: [
     WebhookService,
     WebhookOrderDispatcher,
+    WebhookInboxService,
+    WebhookInboxWorker,
     MercadoLivreWebhookService,
     ShopeeWebhookService,
     AmazonWebhookService,

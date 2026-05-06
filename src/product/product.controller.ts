@@ -69,9 +69,7 @@ export class ProductController {
     this.discoveryService.startDiscovery({
       partNumber: body.partNumber.trim(),
       brand: (brand as any).name,
-      productId,
-      brandId: body.brandId,
-      isGenuine: false,
+      productId
     }).catch(e => {
       this.logger.warn(`[PreRegister] Discovery failed to start: ${e.message}`);
     });
@@ -94,15 +92,30 @@ export class ProductController {
     const jobId = await this.discoveryService.startDiscovery({
       partNumber: body.partNumber,
       brand: body.brand,
-      isGenuine: body.isGenuine,
-      productId: body.productId,
-      brandId: body.brandId,
-      userId: 'SYSTEM',
-      force: body.force,
+      productId: body.productId
     });
 
     return { jobId };
   }
+
+  @Post('discovery-ms')
+  @ApiOperation({ summary: 'Disparar descoberta via novo Microserviço' })
+  async startDiscoveryMs(
+    @Body() body: {
+      partNumber: string;
+      brand?: string;
+      productId?: string;
+    },
+  ) {
+    const jobId = await this.discoveryService.startDiscovery({
+      partNumber: body.partNumber,
+      brand: body.brand,
+      productId: body.productId,
+    });
+
+    return { jobId };
+  }
+
 
   @Get('discovery/status/:jobId')
   @ApiOperation({ summary: 'Obter status de um job de descoberta' })
@@ -213,14 +226,6 @@ export class ProductController {
     return this.discoveryService.search(term);
   }
 
-  @Get('discovery/images')
-  @ApiOperation({ summary: 'Buscar imagens do produto via Serper Image Search' })
-  @ApiQuery({ name: 'q', required: true, description: 'Termo de busca (ex: "Amortecedor Monroe 12345 Fiat Uno")' })
-  async searchProductImages(@Query('q') query: string) {
-    if (!query) return [];
-    return this.discoveryService.searchImages(query);
-  }
-
   @Patch('discovery/:id/associate')
   @ApiOperation({ summary: 'Associar productId a um discovery existente' })
   async associateDiscovery(
@@ -293,7 +298,7 @@ export class ProductController {
   async create(@Body() createProductDto: CreateProductDto, @Req() req: any): Promise<ProductModel> {
     const userId = req.user?.userId || req.user?.id || 'system';
     const product = await this.productService.create(createProductDto, userId);
-        return product;
+    return product;
   }
   async update(@Param('id') id: string, @Body() updateProductDto: any): Promise<ProductModel> {
     const product = await this.productService.update(id, updateProductDto);

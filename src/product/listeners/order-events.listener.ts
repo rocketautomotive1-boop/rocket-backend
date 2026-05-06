@@ -3,7 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { ORDER_EVENTS, OrderSyncedEvent, OrderProcessedEvent } from '../../order/events/order.events';
 import { ProductService } from '../product.service';
 import { StockOrchestratorService } from '../../order/services/stock-orchestrator.service';
-import { SyncQueueService } from '../../marketplace-orchestrator/services/sync-queue.service';
+import { OrchestratorPublisherService } from '../../marketplace-orchestrator/orchestrator-publisher.service';
 
 @Injectable()
 export class OrderEventsListener {
@@ -13,8 +13,8 @@ export class OrderEventsListener {
         private readonly productService: ProductService,
         @Inject(forwardRef(() => StockOrchestratorService))
         private readonly stockOrchestrator: StockOrchestratorService,
-        @Inject(forwardRef(() => SyncQueueService))
-        private readonly syncQueueService: SyncQueueService,
+        @Inject(forwardRef(() => OrchestratorPublisherService))
+        private readonly orchestratorPublisher: OrchestratorPublisherService,
     ) { }
 
     @OnEvent(ORDER_EVENTS.PROCESSED)
@@ -30,6 +30,15 @@ export class OrderEventsListener {
             `Items: ${event.items.length}, Total: R$ ${event.totalAmount}, Trigger: ${event.triggeredBy}`,
         );
 
+        // Recovery retries are used to re-emit side effects like notifications for
+        // already-processed orders. They must not enqueue new publication syncs.
+        if (event.triggeredBy === 'retry') {
+            this.logger.log(
+                `[OrderProcessed] Skipping publication enqueue for order ${event.externalId} (trigger=retry).`,
+            );
+            return;
+        }
+
         // After stock deduction, enqueue marketplace publish for each affected product
         // so listing stock quantities are updated across all marketplaces.
         const productIds = [...new Set(
@@ -44,7 +53,7 @@ export class OrderEventsListener {
 
         for (const productId of productIds) {
             try {
-                await this.syncQueueService.enqueue({
+                await this.orchestratorPublisher.requestSync({
                     productId,
                     reason: 'stock_deduction',
                 });
@@ -79,4 +88,5 @@ export class OrderEventsListener {
             this.logger.error(`Error in handleOrderSyncedEvent for ${event.externalId}: ${error.message}`);
         }
     }
+
 }

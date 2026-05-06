@@ -281,11 +281,17 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
     return 0;
   }
 
-  private transformAttributes(product: any): any[] {
+  private transformAttributes(product: any, marketplaceId?: any): any[] {
     const attributes = [];
 
     if (product.attributes && Array.isArray(product.attributes)) {
-      product.attributes.forEach(attr => {
+      // Only include attributes that belong to this marketplace (have a matching marketplaceId).
+      // Rocket attributes have no marketplaceId and must not be sent to ML.
+      const relevant = marketplaceId
+        ? product.attributes.filter((a: any) => a.marketplaceId && String(a.marketplaceId) === String(marketplaceId))
+        : product.attributes.filter((a: any) => !!a.marketplaceId);
+
+      relevant.forEach(attr => {
         const attributeId = attr.categoryAttribute?.externalId || attr.code;
 
         if (attributeId && attr.value) {
@@ -294,23 +300,36 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
           };
 
           const strValue = String(attr.value);
-          const isNumeric = /^\d+$/.test(String(attr.value));
 
-          // New logic: Trust the valueType and DB value
-          if (attr.valueType === 'list') {
-            attributeData.value_id = attr.value;
+          // Package dimension attributes require integer + unit format ("30 cm" / "500 g").
+          // Normalise stale values that were stored without units (e.g. "30", "500.5").
+          const DIMENSION_ATTRS: Record<string, string> = {
+            SELLER_PACKAGE_HEIGHT: 'cm',
+            SELLER_PACKAGE_WIDTH: 'cm',
+            SELLER_PACKAGE_LENGTH: 'cm',
+            SELLER_PACKAGE_WEIGHT: 'g',
+          };
+          if (DIMENSION_ATTRS[attributeId]) {
+            const unit = DIMENSION_ATTRS[attributeId];
+            // Strip existing unit suffix (if any) then round to integer
+            const withoutUnit = strValue.replace(new RegExp(`\\s*${unit}$`), '').trim();
+            const num = Math.round(parseFloat(withoutUnit.replace(',', '.')));
+            if (!isNaN(num) && num > 0) {
+              attributeData.value_name = `${num} ${unit}`;
+              attributes.push(attributeData); // only push when value is valid
+            }
+            // If unparseable, skip so ensureMandatoryAttributes.injectDimension can handle it
+            return;
+          }
+
+          // Build value fields based on attribute type
+          if (attr.valueType === 'list' || attr.value_type === 'list') {
+            attributeData.value_id = strValue;
+            if (attr.valueName) attributeData.value_name = String(attr.valueName);
           } else if (attr.valueType === 'boolean') {
-            // Boolean: Send Name/Value (User Request: "value:value do producte não value_id")
-            // Fix: Send "Sim" / "Não" instead of "true" / "false"
-            attributeData.value_name = (String(attr.value) === 'true' || attr.value === true) ? 'Sim' : 'Não';
-          } else if (attr.valueType === 'string') {
-            attributeData.value_name = attr.valueName ? String(attr.valueName) : String(attr.value);
-          } else if (attr.value_type === 'list') {
-            // Fallback for legacy data without valueType property
-            attributeData.value_id = String(attr.value);
+            attributeData.value_name = (strValue === 'true' || attr.value === true) ? 'Sim' : 'Não';
           } else {
-            // Default behavior
-            attributeData.value_name = attr.valueName ? String(attr.valueName) : String(attr.value);
+            attributeData.value_name = attr.valueName ? String(attr.valueName) : strValue;
           }
 
           attributes.push(attributeData);
@@ -335,12 +354,12 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
       }
     }
 
-    // Inject Package Dimensions from product if missing
+    // Inject Package Dimensions from product if missing.
+    // ML requires integer values: "30 cm" / "500 g" — use Math.round().
     const injectDimension = (attrId: string, value: any, unit: string) => {
       if (!attributes.some(a => a.id === attrId)) {
         if (value) {
-          let numStr = String(value).replace(',', '.');
-          const num = parseFloat(numStr);
+          const num = Math.round(parseFloat(String(value).replace(',', '.')));
           if (!isNaN(num) && num > 0) {
             attributes.push({ id: attrId, value_name: `${num} ${unit}` });
           }
@@ -585,7 +604,7 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
       condition: 'new',
       pictures: product.productImages?.map(img => ({ source: img.url })) || [],
       seller_custom_field: product.id?.toString(),
-      attributes: this.ensureMandatoryAttributes(this.transformAttributes(product), product)
+      attributes: this.ensureMandatoryAttributes(this.transformAttributes(product, title.marketplaceId), product)
     };
   }
 
@@ -604,7 +623,7 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
       condition: 'new',
       pictures: product.productImages?.map(img => ({ source: img.url })) || [],
       seller_custom_field: product.id?.toString(),
-      attributes: this.ensureMandatoryAttributes(this.transformAttributes(product), product)
+      attributes: this.ensureMandatoryAttributes(this.transformAttributes(product, title.marketplaceId), product)
     };
 
     return updateData;

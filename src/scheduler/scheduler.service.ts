@@ -1,10 +1,9 @@
 import { Injectable, Logger, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { QueueService } from '../queue/queue.service';
-import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
 import { MarketplaceAuthService } from '../marketplace/auth/services/marketplace-auth.service';
 import { QuestionsService } from '../questions/questions.service';
-import { ItemModerationService } from '../marketplace-orchestrator/services/item-moderation.service';
+import { OrderSyncFlowService } from '../order/services/order-sync-flow.service';
 
 @Injectable()
 export class SchedulerService implements OnModuleInit {
@@ -12,12 +11,12 @@ export class SchedulerService implements OnModuleInit {
 
     constructor(
         private readonly queueService: QueueService,
-        private readonly marketplaceRegistry: MarketplaceRegistryService,
         @Inject(forwardRef(() => MarketplaceAuthService))
         private readonly marketplaceAuthService: MarketplaceAuthService,
         @Inject(forwardRef(() => QuestionsService))
         private readonly questionsService: QuestionsService,
-        private readonly itemModerationService: ItemModerationService,
+        @Inject(forwardRef(() => OrderSyncFlowService))
+        private readonly orderSyncFlowService: OrderSyncFlowService,
     ) { }
 
     // On startup: immediately reconcile orders that may have arrived while offline
@@ -53,28 +52,13 @@ export class SchedulerService implements OnModuleInit {
         this.logger.log('Starting Hourly Orders Sync Job...');
 
         try {
-            // Create a background job for syncing orders from all marketplaces
-            // We push a 'orders-sync' job to the queue to avoid blocking the scheduler
-            const marketplaces = await this.marketplaceRegistry.findAll();
-            const activeMarketplaces = marketplaces.filter(mp => mp.enabled);
-
-            if (activeMarketplaces.length === 0) {
-                this.logger.log('No active marketplaces to sync.');
-                return;
-            }
-
-            for (const mp of activeMarketplaces) {
-                await this.queueService.addToQueue({
-                    type: 'orders-sync',
-                    marketplaceId: String(mp._id),
-                    priority: 0, // Low priority
-                    metadata: {
-                        reason: 'hourly_schedule',
-                        batchSize: 50 // Sync last 50 orders
-                    }
-                });
-                this.logger.log(`Queued orders-sync for Marketplace ${mp.name}`);
-            }
+            const result = await this.orderSyncFlowService.queueScheduledOrdersSync({
+                reason: 'hourly_schedule',
+                batchSize: 50,
+            });
+            this.logger.log(
+                `Hourly orders sync queued=${result.queued} skipped=${result.skipped.length}`,
+            );
         } catch (error) {
             this.logger.error('Error in Hourly Orders Sync:', error);
         }
@@ -104,15 +88,9 @@ export class SchedulerService implements OnModuleInit {
         }
     }
 
-    // Every 30 Minutes: Check for ML items closed due to wrong category
+    // Every 30 Minutes: ML compliance checks — migrated to orchestrator-ms
     @Cron('0 */30 * * * *')
     async handleItemModerationCheck() {
-        this.logger.log('Starting Item Moderation Check...');
-        try {
-            await this.itemModerationService.checkWrongCategoryItems();
-            this.logger.log('Item Moderation Check completed.');
-        } catch (error) {
-            this.logger.error('Error in Item Moderation Check:', error);
-        }
+        this.logger.log('Item Moderation/Compliance Check delegated to orchestrator-ms — skipping.');
     }
 }

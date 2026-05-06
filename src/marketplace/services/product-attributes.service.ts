@@ -13,8 +13,6 @@ import { MercadoLivreAuthAdapter } from '../adapters/mercado-livre/mercado-livre
 import { QueueService } from '../../queue/queue.service';
 import { MarketplaceCategoryService } from './marketplace-category.service';
 import { ProductCategoryService } from '../../product/services/product-category.service';
-import { MarketplaceOrchestratorService } from '../../marketplace-orchestrator/marketplace-orchestrator.service';
-
 @Injectable()
 export class ProductAttributesService {
   private readonly logger = new Logger(ProductAttributesService.name);
@@ -34,7 +32,6 @@ export class ProductAttributesService {
     private readonly marketplaceCategoryService: MarketplaceCategoryService,
     @Inject(forwardRef(() => ProductCategoryService))
     private readonly productCategoryService: ProductCategoryService,
-    private readonly marketplaceOrchestratorService: MarketplaceOrchestratorService,
   ) { }
 
   async saveProductAttributes(
@@ -231,7 +228,7 @@ export class ProductAttributesService {
       product.markModified('attributes');
       await product.save();
 
-      // Sycnchronization is handled by GlobalWatcherService (debounced)
+      // Synchronization is handled explicitly by publication flow enqueue.
       // await this.marketplaceOrchestratorService.syncProductToAllMarketplaces(product.id, marketplace._id.toString());
 
     } catch (error) {

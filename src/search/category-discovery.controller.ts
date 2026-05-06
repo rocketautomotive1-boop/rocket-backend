@@ -3,7 +3,7 @@ import { CategoryDiscoveryService } from './category-discovery.service';
 
 @Controller('discovery/categories')
 export class CategoryDiscoveryController {
-    constructor(private readonly discoveryService: CategoryDiscoveryService) { }
+    constructor(private readonly discoveryService: CategoryDiscoveryService) {}
 
     @Get()
     async discover(@Query('q') query: string) {
@@ -13,12 +13,6 @@ export class CategoryDiscoveryController {
 
     @Post('sync')
     async sync() {
-        await this.discoveryService.indexAllCategories();
-        return { message: 'Synchronization started' };
-    }
-
-    @Post('recreate')
-    async recreate() {
-        return await this.discoveryService.recreateIndex();
+        return await this.discoveryService.syncBreadcrumbs();
     }
 }

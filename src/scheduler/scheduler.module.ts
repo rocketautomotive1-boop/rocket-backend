@@ -6,6 +6,7 @@ import { MarketplaceModule } from '../marketplace/marketplace.module';
 import { MarketplaceAuthModule } from '../marketplace/auth/marketplace-auth.module';
 import { QuestionsModule } from '../questions/questions.module';
 import { MarketplaceOrchestratorModule } from '../marketplace-orchestrator/marketplace-orchestrator.module';
+import { OrderModule } from '../order/order.module';
 
 @Module({
     imports: [
@@ -15,6 +16,7 @@ import { MarketplaceOrchestratorModule } from '../marketplace-orchestrator/marke
         MarketplaceAuthModule,
         forwardRef(() => QuestionsModule),
         MarketplaceOrchestratorModule,
+        forwardRef(() => OrderModule),
     ],
     providers: [SchedulerService],
 })

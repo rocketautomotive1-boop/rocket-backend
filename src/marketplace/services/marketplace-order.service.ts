@@ -296,6 +296,10 @@ export class MarketplaceOrderService {
         return this.processOrdersSync(orders, marketplace, params?.batchSize);
     }
 
+    hasOrderAdapter(marketplaceName: string): boolean {
+        return this.adapterRegistry.hasOrderAdapter(marketplaceName);
+    }
+
     private async processOrdersSync(orders: any[], marketplace: any, batchSizeParam?: number) {
         const results: any[] = [];
         let movementsCreated = 0;

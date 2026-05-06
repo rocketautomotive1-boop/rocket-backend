@@ -8,6 +8,7 @@ export type CommandIntent =
   | 'SALES_WEEK'
   | 'ORDERS_PENDING'
   | 'MOVEMENTS_ML'
+  | 'SEARCH_PRODUCT'
   | 'HELP'
   | 'UNKNOWN';
 
@@ -30,8 +31,18 @@ export class WhatsAppCommandRouter {
     if (t.includes('pedidos') && (t.includes('pendente') || t.includes('envio') || t.includes('aguardando'))) {
       return 'ORDERS_PENDING';
     }
+    if (t.includes('buscar produto')) return 'SEARCH_PRODUCT';
     if (t.includes('ajuda') || t.includes('help') || t.includes('comandos')) return 'HELP';
     return 'UNKNOWN';
+  }
+
+  extractSearchTerm(body: string): string | null {
+    const normalized = this.normalize(body);
+    const match = normalized.match(/\bbuscar produto\b(.*)$/);
+    if (!match) return null;
+
+    const term = match[1].trim();
+    return term.length ? term : null;
   }
 
   private normalize(text: string): string {

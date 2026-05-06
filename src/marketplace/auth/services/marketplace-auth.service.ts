@@ -137,6 +137,10 @@ export class MarketplaceAuthService implements OnModuleInit {
         // Estratégias sem DB (aws_sigv4, none) não precisam de refresh
         if (!resolved.fromDatabase) return resolved;
 
+        // Alguns providers OAuth2 (ex.: OLX) podem não retornar refresh_token.
+        // Nesses casos evitamos refresh automático para não derrubar o fluxo.
+        if (!resolved.refreshToken) return resolved;
+
         // Token ainda válido
         if (!this.tokenManager.isTokenExpiringSoon(resolved)) return resolved;
 
@@ -197,6 +201,14 @@ export class MarketplaceAuthService implements OnModuleInit {
 
                 const adapter = this.getAdapter(marketplace.tag || marketplace.name);
                 this.logger.debug(`Refreshing token for ${marketplace.name}...`);
+
+                // Some providers can issue access tokens without refresh token (ex.: OLX flows).
+                // In this case we must fail fast and require manual re-authentication.
+                if (!token?.refreshToken) {
+                    throw new Error(
+                        `Marketplace ${marketplace.name} não possui refreshToken ativo. Reautenticação manual necessária.`,
+                    );
+                }
 
                 const newTokenData = await adapter.refreshToken(token);
 

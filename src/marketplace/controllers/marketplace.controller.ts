@@ -20,7 +20,7 @@ import { CategoryService } from '../services/category.service';
 
 import { MarketplaceAdapterRegistry } from '../registries/marketplace-adapter.registry';
 import { MarketplaceIntegrationService } from '../services/marketplace-integration.service';
-import { MarketplaceOrchestratorService } from '../../marketplace-orchestrator/marketplace-orchestrator.service';
+import { OrchestratorPublisherService } from '../../marketplace-orchestrator/orchestrator-publisher.service';
 
 @ApiTags('marketplaces')
 @Controller('marketplaces')
@@ -45,8 +45,8 @@ export class MarketplaceController {
 
     // REPLACED: MarketplacePublicationService with Integration & Orchestrator
     private readonly marketplaceIntegrationService: MarketplaceIntegrationService,
-    @Inject(forwardRef(() => MarketplaceOrchestratorService))
-    private readonly marketplaceOrchestratorService: MarketplaceOrchestratorService,
+    @Inject(forwardRef(() => OrchestratorPublisherService))
+    private readonly orchestratorPublisherService: OrchestratorPublisherService,
   ) { }
 
   @Get()
@@ -349,7 +349,7 @@ export class MarketplaceController {
     const user = (req as any).user;
     const userId = user?.sub || user?.userId || user?.id;
     // Forward to Orchestrator with User Context
-    this.marketplaceOrchestratorService.syncProductToAllMarketplaces(String(productId), undefined, userId);
+    this.orchestratorPublisherService.requestSync({ productId: String(productId), reason: 'user_publish', force: true, requesterId: userId });
     return { success: true, message: 'Publicação iniciada via Orchestrator (Async)' };
   }
 

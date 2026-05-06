@@ -86,7 +86,8 @@ export class OrderSyncPipeline {
             }
 
             // Mesmo status — verifica se notificação WhatsApp foi perdida
-            if (existing?.financialSnapshot?.whatsappSentAt) {
+            const whatsappStatus = (existing as any)?.notificationStatus?.whatsapp?.status;
+            if (['sent', 'skipped_old', 'manual_required'].includes(String(whatsappStatus || '').toLowerCase())) {
                 this.logger.log(`[Pipeline] Order ${externalId} already deducted and notified. Skipping.`);
                 return;
             }

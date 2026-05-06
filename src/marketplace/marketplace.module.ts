@@ -4,8 +4,6 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { MarketplaceController } from './controllers/marketplace.controller';
 import { MarketplaceService } from './services/marketplace.service';
 import { MercadoLivreAdapter } from './adapters/mercado-livre/mercado-livre.adapter';
-import { GoogleSerpDiscoveryAdapter } from './adapters/google/google-serp-discovery.adapter';
-import { MercadoLivreScraperAdapter } from './adapters/mercado-livre/mercado-livre-scraper.adapter';
 import { ShopeeAdapter } from './adapters/shopee/shopee.adapter';
 import { CategoryController } from './controllers/category.controller';
 import { CategoryService } from './services/category.service';
@@ -16,9 +14,7 @@ import { ListingModule } from '../listing/listing.module'; // [NEW]
 import { AiModule } from '../ai/ai.module';
 import { MercadoLivreProductAdapter } from './adapters/mercado-livre/mercado-livre-product.adapter';
 import { MercadoLivreController } from './controllers/mercado-livre.controller';
-// import { PublicationPipelineService } from './services/publication-pipeline.service'; // REMOVED
-import { PublicationLogService } from './services/publication-log.service'; // Keep for Orchestrator
-// import { GenericPublishingStrategy } from './strategies/generic-publishing.strategy'; // REMOVED
+import { PublicationLogService } from './services/publication-log.service';
 import { MarketplaceToken, MarketplaceTokenSchema } from './schemas/marketplace-token.schema';
 
 import { MercadoLivreOrderAdapter } from './adapters/mercado-livre/mercado-livre-order.adapter';
@@ -39,11 +35,8 @@ import { TemplateConditionEvaluator } from './services/template-condition.evalua
 import { MarketplaceAdapterRegistry } from './registries/marketplace-adapter.registry';
 import { MarketplaceCategoryService } from './services/marketplace-category.service';
 
-
 import { MarketplaceRegistryService } from './services/marketplace-registry.service';
 import { MarketplaceOrderService } from './services/marketplace-order.service';
-// import { MarketplacePublicationService } from './services/marketplace-publication.service'; // REMOVED
-// import { ProductPublicationOrchestratorService } from './services/product-publication-orchestrator.service'; // REMOVED
 import { MercadoLivreService } from './services/mercado-livre.service';
 import { ShopeeService } from './services/shopee.service';
 import { AmericanasService } from './services/americanas.service';
@@ -69,14 +62,12 @@ import { AmazonAdapter } from './adapters/amazon/amazon.adapter';
 import { AmazonService } from './services/amazon.service';
 import { AmazonProductAdapter } from './adapters/amazon/amazon-product.adapter';
 
-// import { PublishModule } from '../publish/publish.module';
 import { QueueModule } from '../queue/queue.module';
 import { MongooseModule } from '@nestjs/mongoose';
 import { QueueRecordModel, QueueRecordSchema } from '../queue/schemas/queue-record.schema';
 import { MarketplaceModel, MarketplaceSchema } from './schemas/marketplace.schema';
 import { IgnoredOrderModel, IgnoredOrderSchema } from './schemas/ignored-order.schema';
 import { MarketplaceCategoryModel, MarketplaceCategorySchema } from './schemas/marketplace-category.schema';
-// import { CategoryMappingModel, CategoryMappingSchema } from './schemas/category-mapping.schema';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
 import { StockMovementModel, StockMovementSchema } from '../product/schemas/stock-movement.schema';
 import { MarketplaceRegistryModule } from './marketplace-registry.module';
@@ -117,10 +108,9 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     ViaVarejoModule,
     YampiModule,
     MagaluModule,
-    // PublishModule removed
     forwardRef(() => QueueModule),
     forwardRef(() => OrderModule),
-    ListingModule, // [NEW]
+    ListingModule,
     MongooseModule.forFeature([
       { name: MarketplaceModel.name, schema: MarketplaceSchema },
       { name: IgnoredOrderModel.name, schema: IgnoredOrderSchema },
@@ -137,7 +127,7 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     MarketplaceRegistryModule,
     MarketplaceAuthModule,
     forwardRef(() => SearchModule),
-    forwardRef(() => MarketplaceOrchestratorModule), // [NEW] Forward Ref for Orchestrator
+    forwardRef(() => MarketplaceOrchestratorModule),
   ],
   controllers: [MarketplaceController, MercadoLivreController, CategoryController, ShopeeController, TikTokShopController],
 
@@ -156,12 +146,6 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     MercadoLivreCategoryAdapter,
     MercadoLivreListingAdapter,
     MercadoLivreCompatibilityAdapter,
-    GoogleSerpDiscoveryAdapter,
-    MercadoLivreScraperAdapter,
-    ShopeeProductAdapter,
-
-    ShopeeOrderAdapter,
-    ShopeeCategoryAdapter,
     MarketplaceIntegrationService,
     MarketplaceIntegrationHelperService,
     MarketplaceIntegrationResultService,
@@ -171,22 +155,21 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     MarketplaceTemplateRepository,
     MarketplaceDescriptionService,
     MarketplaceOrderService,
-    // MarketplacePublicationService, // REMOVED
-    // PublicationPipelineService, // REMOVED
     PublicationLogService,
     MarketplaceCategoryService,
-    // GenericPublishingStrategy, // REMOVED
-    // ProductPublicationOrchestratorService, // REMOVED
     MercadoLivreService,
     MercadoLivreAttributesService,
     ShopeeService,
+    ShopeeAuthAdapter,
+    ShopeeProductAdapter,
+    ShopeeOrderAdapter,
+    ShopeeCategoryAdapter,
     AmericanasService,
     AmazonAdapter,
     AmazonService,
     AmazonProductAdapter,
     ProductAttributesService,
     OLXProductAdapter,
-
     OLXImportService,
     OLXCatalogService,
     OLXHighlightsService,
@@ -208,16 +191,11 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     CategoryMappingService,
     CategoryAttributesService,
     MarketplaceOrderService,
-    // MarketplacePublicationService, // REMOVED
-    // PublicationPipelineService, // REMOVED
-    // ProductPublicationOrchestratorService, // REMOVED
     CategorySuggestionService,
     MercadoLivreAdapter,
-
     MercadoLivreCategoryAdapter,
     MercadoLivreCompatibilityAdapter,
     ShopeeAdapter,
-
     MarketplaceIntegrationService,
     MarketplaceIntegrationHelperService,
     MarketplaceTemplateRepository,
@@ -236,13 +214,10 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     AmazonProductAdapter,
     ProductAttributesService,
     OLXProductAdapter,
-
     OLXImportService,
     OLXCatalogService,
     OLXHighlightsService,
     OLXWebhookService,
-    GoogleSerpDiscoveryAdapter,
-    MercadoLivreScraperAdapter,
     MarketplaceRegistryModule,
     MarketplaceAuthModule,
     RocketProductAdapter,

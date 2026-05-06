@@ -34,8 +34,12 @@ import { BalanceMlQuery }            from './bot/queries/balance-ml.query';
 import { SalesQuery }                from './bot/queries/sales.query';
 import { PendingOrdersQuery }        from './bot/queries/pending-orders.query';
 import { MovementsMlQuery }          from './bot/queries/movements-ml.query';
+import { ProductSearchQuery } from './bot/queries/product-search.query';
+import { WhatsAppCommandSession } from './bot/whatsapp-command.session';
 import { NotificationReconcilerService } from './services/notification-reconciler.service';
 import { DailyReportService } from './services/daily-report.service';
+import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
+import { StockMovementModel, StockMovementSchema } from '../product/schemas/stock-movement.schema';
 
 @Module({
   imports: [
@@ -46,6 +50,8 @@ import { DailyReportService } from './services/daily-report.service';
       { name: OrderModel.name, schema: OrderSchema },
       { name: PartnerModel.name, schema: PartnerSchema },
       { name: NotificationLogModel.name, schema: NotificationLogSchema },
+      { name: ProductModel.name, schema: ProductSchema },
+      { name: StockMovementModel.name, schema: StockMovementSchema },
     ]),
     AuthModule,
     OrderModule,
@@ -80,11 +86,13 @@ import { DailyReportService } from './services/daily-report.service';
     // Bot providers
     WhatsAppCommandRouter,
     WhatsAppCommandDispatcher,
+    WhatsAppCommandSession,
     WhatsAppCommandListener,
     BalanceMlQuery,
     SalesQuery,
     PendingOrdersQuery,
     MovementsMlQuery,
+    ProductSearchQuery,
     NotificationReconcilerService,
     DailyReportService,
   ],

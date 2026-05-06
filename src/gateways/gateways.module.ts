@@ -12,6 +12,7 @@ import { RembgEnqueueService } from './rembg-enqueue.service';
 import { RembgJobConsumer } from './rembg-job.consumer';
 import { S3Module } from '../common/s3/s3.module';
 import { AuthModule } from '../auth/auth.module';
+import { ProductDiscoveryModel, ProductDiscoverySchema } from '../product/schemas/product-discovery.schema';
 
 @Module({
     imports: [
@@ -23,6 +24,7 @@ import { AuthModule } from '../auth/auth.module';
         MongooseModule.forFeature([
             { name: ProcessedImage.name, schema: ProcessedImageSchema },
             { name: RembgJob.name, schema: RembgJobSchema },
+            { name: ProductDiscoveryModel.name, schema: ProductDiscoverySchema },
         ]),
         S3Module,
         AuthModule,

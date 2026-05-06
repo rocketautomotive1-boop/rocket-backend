@@ -76,14 +76,56 @@ export class OrderFinancialSummaryService {
       this.logger.warn(`[FinancialSummary] getMlBillingDetails failed for ${orderId}: ${err.message}`);
     }
 
+    const isMercadoLivre = String(pricing.marketplace ?? '').toLowerCase().includes('mercado');
+
     // ── Merge: billing > marketplaceDetails > order.payment > pricing ────────
-    const gross   = mfGross   || Number(p.grossAmount    || totals.grossRevenue    || order.totalAmount || 0);
-    const saleFee = bdSaleFee || mfSaleFee || Number(p.marketplaceFee || totals.totalCommission || 0);
+    const grossFromPayment = Number(p.grossAmount || 0);
+    const grossFromPricing = Number(totals.grossRevenue || order.totalAmount || 0);
+    const originalGross = mfGross || grossFromPayment || grossFromPricing;
+
+    let gross = originalGross;
+    let saleFee = bdSaleFee || mfSaleFee || Number(p.marketplaceFee || totals.totalCommission || 0);
     const freight = mfFreight || Number(order.shippingAmount || totals.totalFreight || 0);
-    const coupon  = mfCoupon  || Number(p.couponAmount   || 0);
+    let coupon  = mfCoupon  || Number(p.couponAmount   || 0);
     const taxes   = mfTaxes   || Number(p.taxAmount      || totals.totalTaxes || 0);
-    const net     = mfNet     || Number(p.netAmount      || Math.max(0, gross - saleFee - freight - coupon - taxes));
+    let net     = mfNet     || Number(p.netAmount      || Math.max(0, gross - saleFee - freight - coupon - taxes));
     const costTotal = totals.totalCostOfGoods ?? 0;
+
+    // Legacy ML payloads can persist sale_fee as unitary value (single item) instead of total.
+    // If quantity scaling matches pricing.totalCommission, promote it to the total fee.
+    const totalQty = (order.items ?? []).reduce((sum: number, item: any) => sum + Number(item?.quantity || 0), 0);
+    const pricingCommission = Number(totals.totalCommission || 0);
+    if (
+      isMercadoLivre &&
+      !bdSaleFee &&
+      saleFee > 0 &&
+      totalQty > 1 &&
+      pricingCommission > 0 &&
+      Math.abs((saleFee * totalQty) - pricingCommission) < 0.01
+    ) {
+      saleFee = pricingCommission;
+      net = Math.max(0, gross - saleFee - freight - coupon - taxes);
+    }
+
+    // ML coupon can come as buyer discount (marketplace-funded), not seller deduction.
+    // In this case pricing gross is full product price and details may bring "total paid" only.
+    if (
+      isMercadoLivre &&
+      coupon > 0 &&
+      grossFromPricing > 0 &&
+      grossFromPricing > gross &&
+      Math.abs((gross + coupon) - grossFromPricing) < 0.01
+    ) {
+      gross = grossFromPricing;
+      const baselineNet = Math.max(0, gross - saleFee - freight - taxes);
+      const netGap = baselineNet - net;
+
+      // Bug pattern: gross reduced by coupon and net reduced by coupon again.
+      if (Math.abs(netGap - coupon * 2) < 0.01) {
+        net = baselineNet;
+        coupon = 0;
+      }
+    }
 
     const grossProfit = net - costTotal;
     const marginPct   = gross > 0 ? (grossProfit / gross) * 100 : 0;

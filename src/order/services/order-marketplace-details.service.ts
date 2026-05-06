@@ -389,7 +389,7 @@ export class OrderMarketplaceDetailsService {
 
             // sale_fee from order_items (sum all items)
             const itemSaleFee: number = (raw.order_items || []).reduce(
-                (acc: number, i: any) => acc + Number(i.sale_fee ?? 0),
+                (acc: number, i: any) => acc + (Number(i.sale_fee ?? 0) * Number(i.quantity ?? 1)),
                 0,
             );
 
@@ -497,11 +497,13 @@ export class OrderMarketplaceDetailsService {
             const baseCost = Number(shipmentDetails.base_cost ?? 0);
 
             // Financial summary
-            const grossAmount = Number(payment.total_paid_amount || raw.total_amount || 0);
+            // For ML, raw.total_amount is the product total and should be used as gross revenue.
+            // payment.total_paid_amount may come discounted by marketplace-funded coupons.
+            const grossAmount = Number(raw.total_amount || payment.total_paid_amount || 0);
             const saleFee = itemSaleFee || Number(payment.marketplace_fee || 0);
             const couponAmount = Number(payment.coupon_amount || 0);
             const taxesAmount = Number(payment.taxes_amount || 0);
-            const netAmount = Math.max(0, grossAmount - saleFee - listCost - couponAmount - taxesAmount);
+            const netAmount = Math.max(0, grossAmount - saleFee - listCost - taxesAmount);
 
             const financial: MarketplaceFinancialSummary = {
                 grossAmount,

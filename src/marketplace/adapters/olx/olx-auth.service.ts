@@ -12,6 +12,7 @@ import { IMarketplaceAuthAdapter } from '../../interfaces/marketplace-auth-adapt
 export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
   private readonly logger = new Logger(OLXAuthService.name);
   private readonly baseUrl = 'https://auth.olx.com.br';
+  private readonly tokenUrl = `${this.baseUrl}/oauth/token`;
   readonly name = 'OLX';
   readonly tag = 'olx';
 
@@ -69,24 +70,18 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
         throw new InternalServerErrorException('Credenciais da OLX não configuradas');
       }
 
-      const tokenResponse = await firstValueFrom(
-        this.httpService.post(`${this.baseUrl}/oauth/token`, {
-          code,
-          client_id: clientId,
-          client_secret: clientSecret,
-          redirect_uri: redirectUri,
-          grant_type: 'authorization_code'
-        }, {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          }
-        })
-      );
+      const tokenResponse = await this.requestToken({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      });
 
       return {
         accessToken: tokenResponse.data.access_token,
         refreshToken: tokenResponse.data.refresh_token,
-        expiresAt: new Date(Date.now() + (tokenResponse.data.expires_in || 3600) * 1000),
+        expiresAt: this.resolveExpiresAt(tokenResponse.data.expires_in),
         tokenType: tokenResponse.data.token_type,
         additionalData: {
           clientId,
@@ -101,9 +96,22 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
   }
 
   async refreshToken(token: any): Promise<any> {
+    if (!token?.refreshToken) {
+      throw new Error(`Refresh token ausente para ${this.name}. Reautenticação necessária.`);
+    }
+
     // Adapting generic token to OLX specific refresh
     const clientId = token.additionalData?.clientId || this.configService.get('OLX_CLIENT_ID');
-    const clientSecret = this.configService.get(`OLX_CLIENT_SECRET_${clientId}`);
+    const clientSecret = token.additionalData?.clientSecret
+      || this.configService.get(`OLX_CLIENT_SECRET_${clientId}`)
+      || this.configService.get('OLX_CLIENT_SECRET');
+
+    if (!clientId || !clientSecret) {
+      throw new InternalServerErrorException(
+        `Credenciais da ${this.name} não configuradas para renovação do token.`,
+      );
+    }
+
     return this.refreshTokenInternal(clientId, clientSecret, token.refreshToken);
   }
 
@@ -139,23 +147,20 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
       try {
         this.logger.log(`Tentando client credentials flow diretamente...`);
 
-        const directTokenResponse = await firstValueFrom(
-          this.httpService.post(`${this.baseUrl}/oauth/token`, {
+        const directTokenResponse = await this.requestToken(
+          {
             grant_type: 'client_credentials',
             client_id: clientId,
             client_secret: clientSecret,
-            scope: 'autoupload basic_user_info'
-          }, {
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-              'Accept': 'application/json, text/plain, */*',
-              'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
-              'Accept-Encoding': 'gzip, deflate, br',
-              'Connection': 'keep-alive',
-              'Cache-Control': 'no-cache'
-            }
-          })
+            scope: 'autoupload basic_user_info',
+          },
+          {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Cache-Control': 'no-cache',
+          },
         );
 
         if (directTokenResponse.data.access_token) {
@@ -164,7 +169,7 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
           return this.authService.saveToken(marketplace._id, {
             accessToken: directTokenResponse.data.access_token,
             refreshToken: directTokenResponse.data.refresh_token || null,
-            expiresAt: new Date(Date.now() + (directTokenResponse.data.expires_in || 3600) * 1000),
+            expiresAt: this.resolveExpiresAt(directTokenResponse.data.expires_in),
             tokenType: directTokenResponse.data.token_type || 'Bearer',
             additionalData: {
               clientId,
@@ -187,30 +192,27 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
       }
 
       // Trocar authorization code por access token
-      const tokenResponse = await firstValueFrom(
-        this.httpService.post(`${this.baseUrl}/oauth/token`, {
+      const tokenResponse = await this.requestToken(
+        {
           grant_type: 'authorization_code',
           client_id: clientId,
           client_secret: clientSecret,
           redirect_uri: this.configService.get('OLX_REDIRECT_URI') || 'http://localhost:3000/oauth/callback',
-          code: authCode
-        }, {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Cache-Control': 'no-cache'
-          }
-        })
+          code: authCode,
+        },
+        {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Cache-Control': 'no-cache',
+        },
       );
 
       return this.authService.saveToken(marketplace._id, {
         accessToken: tokenResponse.data.access_token,
         refreshToken: tokenResponse.data.refresh_token || null,
-        expiresAt: new Date(Date.now() + (tokenResponse.data.expires_in || 3600) * 1000),
+        expiresAt: this.resolveExpiresAt(tokenResponse.data.expires_in),
         tokenType: tokenResponse.data.token_type || 'Bearer',
         additionalData: {
           clientId,
@@ -339,33 +341,59 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
     try {
       this.logger.log(`Renovando token de acesso com ${this.name}`);
 
-      const tokenResponse = await firstValueFrom(
-        this.httpService.post(`${this.baseUrl}/oauth/token`, {
-          grant_type: 'refresh_token',
-          client_id: clientId,
-          client_secret: clientSecret,
-          refresh_token: refreshToken
-        }, {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          }
-        })
-      );
+      const tokenResponse = await this.requestToken({
+        grant_type: 'refresh_token',
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+      });
 
       this.logger.log(`Token renovado com sucesso para ${this.name}`);
 
       return {
         accessToken: tokenResponse.data.access_token,
-        refreshToken: tokenResponse.data.refresh_token,
-        expiresAt: new Date(Date.now() + (tokenResponse.data.expires_in || 3600) * 1000), // Adjusted logic
+        refreshToken: tokenResponse.data.refresh_token || refreshToken,
+        expiresAt: this.resolveExpiresAt(tokenResponse.data.expires_in), // Keep undefined when provider omits expiration
         tokenType: tokenResponse.data.token_type,
         additionalData: { // Added to match expectation
           clientId,
+          clientSecret,
         }
       };
     } catch (error) {
-      this.logger.error(`Erro ao renovar token com ${this.name}:`, error);
+      this.logger.error(`Erro ao renovar token com ${this.name}: ${error.message}`, error.response?.data);
       throw new Error(`Falha ao renovar token com ${this.name}: ${error.message}`);
     }
+  }
+
+  private async requestToken(
+    payload: Record<string, string>,
+    extraHeaders?: Record<string, string>,
+  ): Promise<any> {
+    const formData = new URLSearchParams();
+    Object.entries(payload).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        formData.append(key, value);
+      }
+    });
+
+    return firstValueFrom(
+      this.httpService.post(this.tokenUrl, formData.toString(), {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json',
+          ...extraHeaders,
+        },
+      }),
+    );
+  }
+
+  private resolveExpiresAt(expiresIn: unknown): Date | undefined {
+    const seconds = Number(expiresIn);
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return undefined;
+    }
+
+    return new Date(Date.now() + seconds * 1000);
   }
 }

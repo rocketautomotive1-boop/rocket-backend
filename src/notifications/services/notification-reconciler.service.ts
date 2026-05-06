@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ConfigService } from '@nestjs/config';
 import { OrderModel } from '../../order/schemas/order.schema';
 import { ORDER_EVENTS, OrderPricingCalculatedEvent } from '../../order/events/order.events';
 
@@ -14,9 +15,12 @@ export class NotificationReconcilerService implements OnModuleInit {
   constructor(
     @InjectModel('OrderModel') private readonly orderModel: Model<OrderModel>,
     private readonly eventEmitter: EventEmitter2,
+    private readonly configService: ConfigService,
   ) {}
 
   async onModuleInit(): Promise<void> {
+    await this.backfillLegacyWhatsappSentStatus();
+
     // Aguarda 20s para o app estabilizar antes da reconciliação de startup
     setTimeout(() => {
       this.reconcile().catch(err =>
@@ -49,8 +53,18 @@ export class NotificationReconcilerService implements OnModuleInit {
       return { ok: false, message: `Order ${order.externalId} has no pricing data yet` };
     }
 
-    // Limpa whatsappSentAt para garantir que o listener processa
-    await this.orderModel.updateOne(query, { $unset: { 'financialSnapshot.whatsappSentAt': 1 } });
+    // Limpa flags para garantir reprocessamento manual
+    await this.orderModel.updateOne(query, {
+      $unset: {
+        'notificationStatus.whatsapp.sentAt': 1,
+        'notificationStatus.whatsapp.error': 1,
+      },
+      $set: {
+        'notificationStatus.whatsapp.status': 'pending',
+        'notificationStatus.whatsapp.reason': 'manual_resend',
+        'notificationStatus.whatsapp.nextRetryAt': new Date(),
+      },
+    });
 
     const event = new OrderPricingCalculatedEvent(
       String(order._id),
@@ -67,15 +81,26 @@ export class NotificationReconcilerService implements OnModuleInit {
   }
 
   private async reconcile(): Promise<void> {
+    const maxAutoAgeHours = this.getNumberEnv('WHATSAPP_NOTIFICATION_MAX_AUTO_AGE_HOURS', 24);
     const since = new Date();
     since.setDate(since.getDate() - this.LOOKBACK_DAYS);
+    const oldestForAuto = new Date(
+      Math.max(
+        since.getTime(),
+        Date.now() - maxAutoAgeHours * 60 * 60 * 1000,
+      ),
+    );
 
     const orders = await this.orderModel
       .find({
         logisticsStatus: 'deducted',
         pricing: { $exists: true },
-        'financialSnapshot.whatsappSentAt': { $exists: false },
-        createdAt: { $gte: since },
+        createdAt: { $gte: oldestForAuto, $lte: new Date() },
+        $or: [
+          { 'notificationStatus.whatsapp.status': { $exists: false } },
+          { 'notificationStatus.whatsapp.status': { $in: ['pending', 'failed'] } },
+        ],
+        'notificationStatus.whatsapp.status': { $nin: ['sent', 'skipped_old', 'manual_required'] },
       })
       .lean()
       .exec();
@@ -86,6 +111,11 @@ export class NotificationReconcilerService implements OnModuleInit {
 
     for (const order of orders) {
       try {
+        await this.orderModel.findByIdAndUpdate(order._id, {
+          'notificationStatus.whatsapp.status': 'queued',
+          'notificationStatus.whatsapp.lastAttemptAt': new Date(),
+          $inc: { 'notificationStatus.whatsapp.attempts': 1 },
+        });
         const event = new OrderPricingCalculatedEvent(
           String(order._id),
           order.externalId,
@@ -96,8 +126,43 @@ export class NotificationReconcilerService implements OnModuleInit {
         this.eventEmitter.emit(ORDER_EVENTS.PRICING_CALCULATED, event);
         this.logger.log(`Reconciler: re-emitted PRICING_CALCULATED for order ${order.externalId}`);
       } catch (err) {
+        await this.orderModel.findByIdAndUpdate(order._id, {
+          'notificationStatus.whatsapp.status': 'failed',
+          'notificationStatus.whatsapp.error': err.message,
+          'notificationStatus.whatsapp.lastAttemptAt': new Date(),
+        });
         this.logger.error(`Reconciler: failed for order ${order.externalId}: ${err.message}`);
       }
+    }
+  }
+
+  private getNumberEnv(key: string, defaultValue: number): number {
+    const raw = this.configService.get<string | number | undefined>(key);
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue;
+  }
+
+  private async backfillLegacyWhatsappSentStatus(): Promise<void> {
+    const result = await this.orderModel.updateMany(
+      {
+        'financialSnapshot.whatsappSentAt': { $exists: true },
+        $or: [
+          { 'notificationStatus.whatsapp.status': { $exists: false } },
+          { 'notificationStatus.whatsapp.status': { $ne: 'sent' } },
+        ],
+      },
+      {
+        $set: {
+          'notificationStatus.whatsapp.status': 'sent',
+          'notificationStatus.whatsapp.reason': 'legacy_migration',
+          'notificationStatus.whatsapp.lastAttemptAt': new Date(),
+        },
+      },
+    );
+
+    const modified = (result as any).modifiedCount ?? 0;
+    if (modified > 0) {
+      this.logger.log(`Reconciler backfill: migrated ${modified} legacy whatsappSentAt records to notificationStatus.`);
     }
   }
 }

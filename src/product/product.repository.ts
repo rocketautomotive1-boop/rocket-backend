@@ -267,7 +267,15 @@ export class ProductRepository {
         const latest = await this.findLatestMovementWithPrice(productId);
         if (latest && latest.price) {
             const price = parseFloat(latest.price.toString());
-            await this.updatePrice(productId, price, session);
+            const current = await this.productModel
+                .findById(productId)
+                .select('price')
+                .lean()
+                .exec();
+            const currentPrice = current?.price != null ? Number(current.price.toString()) : 0;
+            if (Math.abs(currentPrice - price) > 0.0001) {
+                await this.updatePrice(productId, price, session);
+            }
             return price;
         }
         return 0;

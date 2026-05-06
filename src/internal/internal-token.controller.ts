@@ -26,6 +26,6 @@ export class InternalTokenController {
         const resolved = await this.authService.ensureValidToken(marketplace._id.toString());
         if (!resolved?.accessToken) throw new NotFoundException(`No active token for marketplace: ${tag}`);
 
-        return { token: resolved.accessToken };
+        return { token: resolved };
     }
 }

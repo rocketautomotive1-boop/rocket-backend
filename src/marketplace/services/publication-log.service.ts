@@ -85,6 +85,14 @@ export class PublicationLogService {
         return this.attemptModel.findById(id).exec();
     }
 
+    async findPendingByJobId(jobId: string): Promise<PublicationAttemptDocument | null> {
+        if (!jobId) return null;
+        return this.attemptModel.findOne({
+            status: PublicationStatus.PENDING,
+            'metadata.jobId': jobId,
+        }).exec();
+    }
+
     async findPending(): Promise<PublicationAttemptDocument[]> {
         return this.attemptModel.find({ status: PublicationStatus.PENDING }).exec();
     }

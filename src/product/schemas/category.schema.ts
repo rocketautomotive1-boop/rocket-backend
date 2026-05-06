@@ -59,6 +59,9 @@ export class CategoryModel {
     @Prop()
     aiReason: string; // Reason why AI selected/created this category
 
+    @Prop()
+    breadcrumbs?: string; // Pre-computed path string, e.g. "Freios > Discos e Pastilhas > Pastilha de Freio"
+
     @Prop({ type: [String] })
     attributes: string[]; // Relevant attributes for this category
 

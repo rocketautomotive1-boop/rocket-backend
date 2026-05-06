@@ -184,7 +184,19 @@ export class OrderModel {
         grossProfit: number; // Lucro bruto (net - custo)
         marginPct: number;   // Margem % (grossProfit / gross * 100)
         resolvedAt: Date;    // Quando foi resolvido
-        whatsappSentAt?: Date; // Quando a notificação WhatsApp foi disparada
+    };
+
+    @Prop({ type: Object })
+    notificationStatus?: {
+        whatsapp?: {
+            status: 'pending' | 'queued' | 'sent' | 'failed' | 'skipped_old' | 'manual_required';
+            attempts?: number;
+            lastAttemptAt?: Date;
+            nextRetryAt?: Date;
+            sentAt?: Date;
+            error?: string;
+            reason?: string;
+        };
     };
 
     fiscalDocuments?: any[];

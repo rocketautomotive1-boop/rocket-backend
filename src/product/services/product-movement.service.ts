@@ -107,8 +107,10 @@ export class ProductMovementService {
 
     let product;
 
-    if (typeof createMovementDto.productId === 'string' && Types.ObjectId.isValid(createMovementDto.productId)) {
-      product = await this.productRepository.findById(createMovementDto.productId);
+    // Accept both string IDs and Mongoose ObjectId objects (the route handler passes product._id directly)
+    const pidStr = createMovementDto.productId?.toString?.() ?? String(createMovementDto.productId ?? '');
+    if (pidStr && Types.ObjectId.isValid(pidStr)) {
+      product = await this.productRepository.findById(pidStr);
     }
 
     if (!product) {

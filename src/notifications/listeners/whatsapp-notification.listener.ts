@@ -23,21 +23,34 @@ export class WhatsAppNotificationListener {
 
   @OnEvent(ORDER_EVENTS.PRICING_CALCULATED, { async: true })
   async handlePricingCalculated(event: OrderPricingCalculatedEvent): Promise<void> {
-    const { orderId, externalId, pricing, triggeredBy } = event;
-
-    // Só notifica vendas que chegaram via webhook em tempo real ou reenvio manual explícito.
-    // Sincronizações retroativas (cron, sync, retry) não devem disparar notificação de "nova venda".
-    if (triggeredBy !== 'webhook' && triggeredBy !== 'manual') {
-      this.logger.debug(`Skipping WhatsApp notification for order ${externalId} (triggeredBy=${triggeredBy})`);
-      return;
-    }
+    const { orderId, externalId, pricing, triggeredBy = 'sync' } = event;
 
     try {
-      this.logger.debug(`Sending WhatsApp notification for order ${externalId}`);
-
       const order = await this.orderModel.findById(orderId).exec();
       if (!order) {
         this.logger.warn(`Order ${orderId} not found for notification`);
+        return;
+      }
+
+      // Já foi notificado — só reenvio manual (triggeredBy='manual') pode forçar de novo
+      const alreadySent = order.notificationStatus?.whatsapp?.status === 'sent';
+      if (alreadySent && triggeredBy !== 'manual') {
+        this.logger.debug(`Order ${externalId} already notified — skipping`);
+        return;
+      }
+
+      // Pedidos antigos (> 24h) só são notificados em reenvio manual explícito.
+      // Isso evita spam de importações históricas em lote.
+      const AGE_LIMIT_MS = 24 * 60 * 60 * 1000;
+      const orderAge = Date.now() - new Date((order as any).createdAt ?? 0).getTime();
+      if (orderAge > AGE_LIMIT_MS && triggeredBy !== 'manual') {
+        await this.orderModel.findByIdAndUpdate(orderId, {
+          'notificationStatus.whatsapp.status': 'skipped_old',
+          'notificationStatus.whatsapp.reason': `order_age_gt_${Math.round(AGE_LIMIT_MS / 3600000)}h`,
+          'notificationStatus.whatsapp.lastAttemptAt': new Date(),
+          $inc: { 'notificationStatus.whatsapp.attempts': 1 },
+        });
+        this.logger.debug(`Order ${externalId} is too old (${Math.round(orderAge / 3600000)}h) — skipping`);
         return;
       }
 
@@ -64,11 +77,22 @@ export class WhatsAppNotificationListener {
 
       // Marca que a notificação foi disparada — usado pelo reconciliador
       await this.orderModel.findByIdAndUpdate(orderId, {
-        'financialSnapshot.whatsappSentAt': new Date(),
+        'notificationStatus.whatsapp.status': 'sent',
+        'notificationStatus.whatsapp.sentAt': new Date(),
+        'notificationStatus.whatsapp.lastAttemptAt': new Date(),
+        'notificationStatus.whatsapp.error': null,
+        'notificationStatus.whatsapp.reason': null,
+        $inc: { 'notificationStatus.whatsapp.attempts': 1 },
       });
 
       this.logger.debug(`WhatsApp notification queued for order ${externalId}`);
     } catch (error) {
+      await this.orderModel.findByIdAndUpdate(orderId, {
+        'notificationStatus.whatsapp.status': 'failed',
+        'notificationStatus.whatsapp.error': error.message,
+        'notificationStatus.whatsapp.lastAttemptAt': new Date(),
+        $inc: { 'notificationStatus.whatsapp.attempts': 1 },
+      });
       this.logger.error(
         `Error sending WhatsApp notification for order ${externalId}: ${error.message}`,
         error.stack

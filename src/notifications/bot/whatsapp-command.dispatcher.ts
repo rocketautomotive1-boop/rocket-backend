@@ -4,6 +4,7 @@ import { BalanceMlQuery } from './queries/balance-ml.query';
 import { SalesQuery } from './queries/sales.query';
 import { PendingOrdersQuery } from './queries/pending-orders.query';
 import { MovementsMlQuery } from './queries/movements-ml.query';
+import { ProductSearchQuery } from './queries/product-search.query';
 
 const HELP_TEXT = [
   `🤖 *Comandos disponíveis:*`,
@@ -12,6 +13,7 @@ const HELP_TEXT = [
   `• vendas hoje / semana — Relatório de vendas`,
   `• pedidos pendentes — Aguardando envio`,
   `• movimentações hoje — Extrato do Mercado Pago`,
+  `• buscar produto [termo] — Consulta produto e estoque`,
 ].join('\n');
 
 @Injectable()
@@ -21,9 +23,13 @@ export class WhatsAppCommandDispatcher {
     private readonly sales: SalesQuery,
     private readonly pendingOrders: PendingOrdersQuery,
     private readonly movementsMl: MovementsMlQuery,
+    private readonly productSearch: ProductSearchQuery,
   ) {}
 
-  async execute(intent: CommandIntent): Promise<string | null> {
+  async execute(
+    intent: CommandIntent,
+    options?: { searchTerm?: string },
+  ): Promise<string | null> {
     switch (intent) {
       case 'BALANCE_ML':      return this.balanceMl.execute();
       case 'BALANCE_SHOPEE':  return `🔜 Saldo Shopee ainda não disponível.`;
@@ -32,6 +38,11 @@ export class WhatsAppCommandDispatcher {
       case 'SALES_WEEK':      return this.sales.execute('week');
       case 'ORDERS_PENDING':  return this.pendingOrders.execute();
       case 'MOVEMENTS_ML':    return this.movementsMl.execute();
+      case 'SEARCH_PRODUCT':
+        if (!options?.searchTerm?.trim()) {
+          return `🔎 Informe a busca do produto.\nEx.: *Roda Onix*`;
+        }
+        return this.productSearch.execute(options.searchTerm);
       case 'HELP':            return HELP_TEXT;
       case 'UNKNOWN':         return null;
     }

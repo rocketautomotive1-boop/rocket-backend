@@ -135,6 +135,18 @@ export class ProductService {
     const H = parseNum(dim.height);
     const dimensionsComplete = w > 0 && L > 0 && Wd > 0 && H > 0;
 
+    const allRequired =
+      dataComplete &&
+      imagesComplete &&
+      titlesComplete &&
+      dimensionsComplete &&
+      categoryComplete &&
+      inventoryComplete;
+
+    if (allRequired !== !!(product as any).readyToPublish) {
+      await this.productRepository.update(id, { $set: { readyToPublish: allRequired } });
+    }
+
     return {
       data: dataComplete,
       images: imagesComplete,
@@ -143,6 +155,7 @@ export class ProductService {
       inventory: inventoryComplete,
       compatibilities: compatibilitiesComplete,
       dimensions: dimensionsComplete,
+      readyToPublish: allRequired,
     };
   }
 

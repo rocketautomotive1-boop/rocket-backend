@@ -1,66 +1,17 @@
-import { Injectable, NotFoundException, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { BrandModel, BrandDocument } from '../schemas/brand.schema';
-import { ProductModel, ProductDocument } from '../schemas/product.schema';
 import { CreateProductBrandDto } from '../dto/create-product-brand.dto';
 import { UpdateProductBrandDto } from '../dto/update-product-brand.dto';
 
 @Injectable()
-export class ProductBrandService implements OnModuleInit {
-  private readonly logger = new Logger(ProductBrandService.name);
+export class ProductBrandService {
 
   constructor(
     @InjectModel(BrandModel.name)
     private readonly brandModel: Model<BrandDocument>,
-    @InjectModel(ProductModel.name)
-    private readonly productModel: Model<ProductDocument>,
   ) { }
-
-  onModuleInit() {
-    this.watchBrands();
-  }
-
-  private watchBrands() {
-    const changeStream = this.brandModel.watch();
-    changeStream.on('change', async (change) => {
-      try {
-        if (change.operationType === 'update' || change.operationType === 'replace') {
-          const documentKey = (change as any).documentKey;
-          const updatedFields = (change as any).updateDescription?.updatedFields || {};
-          const brandId = documentKey._id;
-
-          // Check if relevant fields changed
-          const relevantFields = ['name', 'logoUrl', 'isGenuine', 'shortName', 'fullName', 'amazonName', 'active'];
-          const shouldSync = Object.keys(updatedFields).some(field => relevantFields.includes(field));
-
-          if (shouldSync) {
-            this.logger.log(`Brand ${brandId} updated. Syncing products...`);
-            const fullBrand = await this.brandModel.findById(brandId).lean();
-            if (fullBrand) {
-              await this.productModel.updateMany(
-                { 'brand._id': brandId },
-                {
-                  $set: {
-                    'brand.name': fullBrand.name,
-                    'brand.logoUrl': fullBrand.logoUrl,
-                    'brand.isGenuine': fullBrand.isGenuine,
-                    'brand.shortName': fullBrand.shortName,
-                    'brand.fullName': fullBrand.fullName,
-                    'brand.amazonName': fullBrand.amazonName,
-                    // If brand becomes inactive, maybe products should too, but that's a business rule.
-                    // For now, only syncing brand data.
-                  }
-                }
-              );
-            }
-          }
-        }
-      } catch (error) {
-        this.logger.error('Error syncing brand changes', error);
-      }
-    });
-  }
 
   async findAll(isGenuineOnly?: boolean): Promise<BrandModel[]> {
     const filter: any = { active: true };

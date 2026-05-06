@@ -1,0 +1,16 @@
+{
+  "mappings": {
+    "dynamic": false,
+    "fields": {
+      "normalized.make": { "type": "string" },
+      "normalized.model": { "type": "string" },
+      "normalized.version": { "type": "string" },
+      "aliases": { "type": "string" },
+      "tags": { "type": "string" },
+      "searchText": { "type": "string" },
+      "active": { "type": "boolean" },
+      "years": { "type": "number" },
+      "market": { "type": "string" }
+    }
+  }
+}

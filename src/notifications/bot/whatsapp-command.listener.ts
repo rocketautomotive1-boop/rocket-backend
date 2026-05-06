@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { BaileysWhatsAppProvider } from '../providers/baileys-whatsapp.provider';
 import { WhatsAppCommandRouter } from './whatsapp-command.router';
 import { WhatsAppCommandDispatcher } from './whatsapp-command.dispatcher';
+import { WhatsAppCommandSession } from './whatsapp-command.session';
 
 interface WhatsAppMessageEvent {
   from: string;
@@ -19,6 +20,7 @@ export class WhatsAppCommandListener {
   constructor(
     private readonly router: WhatsAppCommandRouter,
     private readonly dispatcher: WhatsAppCommandDispatcher,
+    private readonly session: WhatsAppCommandSession,
     private readonly baileys: BaileysWhatsAppProvider,
     private readonly configService: ConfigService,
   ) {
@@ -34,9 +36,26 @@ export class WhatsAppCommandListener {
     const senderNumber = from.split('@')[0];
     if (this.ignoreNumbers.includes(senderNumber)) return;
 
-    const intent = this.router.route(body);
+    const pendingTerm = this.session.consumePendingProductSearch(senderNumber, body);
+    let reply: string | null = null;
 
-    const reply = await this.dispatcher.execute(intent);
+    if (pendingTerm !== null) {
+      reply = await this.dispatcher.execute('SEARCH_PRODUCT', { searchTerm: pendingTerm });
+    } else {
+      const intent = this.router.route(body);
+      if (intent === 'SEARCH_PRODUCT') {
+        const inlineTerm = this.router.extractSearchTerm(body);
+        if (inlineTerm) {
+          reply = await this.dispatcher.execute(intent, { searchTerm: inlineTerm });
+        } else {
+          this.session.beginProductSearch(senderNumber);
+          reply = await this.dispatcher.execute(intent);
+        }
+      } else {
+        reply = await this.dispatcher.execute(intent);
+      }
+    }
+
     if (!reply) return; // UNKNOWN → silencioso
 
     try {

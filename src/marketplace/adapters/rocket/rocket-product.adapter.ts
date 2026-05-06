@@ -20,8 +20,9 @@ export class RocketProductAdapter implements IMarketplaceProductAdapter, OnModul
 
     async publishProduct(product: ProductDocument, marketplace: MarketplaceDocument, externalId?: string): Promise<any> {
         try {
-            // Predict Category
-            const predictedCategory = await this.categoryDiscoveryService.discover(product.name);
+            // Predict Category (best match = first result)
+            const discoveryResults = await this.categoryDiscoveryService.discover(product.name);
+            const predictedCategory = discoveryResults?.[0] ?? null;
             const predictedCategoryId = predictedCategory ? predictedCategory.id : 'UNCATEGORIZED';
             const predictedCategoryName = predictedCategory ? predictedCategory.name : 'Uncategorized';
 

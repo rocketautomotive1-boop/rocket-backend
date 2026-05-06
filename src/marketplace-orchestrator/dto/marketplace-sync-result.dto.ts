@@ -1,6 +1,7 @@
 export class MarketplaceSyncResult {
     jobId: string;
     attemptId?: string;
+    syncRequestId?: string;
     marketplaceId: string;
     listingId: string;
     success: boolean;

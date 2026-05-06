@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { ProductDraftModel, ProductDraftDocument } from '../product/product-types';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI } from '@google/genai';
+import { CanonicalProfile } from '../shared/dto/discovery-response.dto';
 
 type BatchItemInput = { url?: string; base64?: string; mimeType?: string; filename?: string; text?: string };
 
@@ -291,6 +292,79 @@ RETORNE APENAS UM ÚNICO VALOR EM UMA LINHA:
     }
   }
 
+  /**
+   * Builds a canonical keyword profile from collected titles.
+   * No external search tool — derives profile only from the provided titles.
+   */
+  async buildCanonicalProfile(
+    query: string,
+    partNumber: string,
+    titles: string[],
+  ): Promise<CanonicalProfile> {
+    const fallback: CanonicalProfile = {
+      canonicalTitle: query,
+      productType: '',
+      canonicalPartNumber: partNumber,
+      requiredKeywords: [],
+      strongKeywords: [],
+      optionalKeywords: [],
+      negativeKeywords: [],
+      vehicleHints: [],
+    };
+
+    if (!this.ai || titles.length === 0) return fallback;
+
+    const titlesList = titles.slice(0, 30).map((t, i) => `${i + 1}. ${t}`).join('\n');
+    const pnHint = partNumber ? `\nPart Number alvo: "${partNumber}"` : '';
+
+    const prompt = `Você é um especialista em catálogo automotivo.
+Query de busca: "${query}"${pnHint}
+
+Títulos coletados de listagens:
+${titlesList}
+
+Com base EXCLUSIVAMENTE nos títulos acima, crie um perfil de filtro para identificar listagens corretas e rejeitar as erradas.
+
+Retorne JSON estrito:
+{
+  "canonicalTitle": "título mais representativo do produto",
+  "productType": "tipo do produto em português (ex: Amortecedor Dianteiro)",
+  "requiredKeywords": ["termos que qualquer listagem correta DEVE conter (3 a 6 tokens simples)"],
+  "strongKeywords": ["termos que os melhores matches têm em comum (2 a 4 tokens)"],
+  "optionalKeywords": ["termos secundários que podem aparecer"],
+  "negativeKeywords": ["termos que indicam produto ERRADO: PN diferente, lado errado, categoria diferente"],
+  "vehicleHints": ["modelos e marcas de veículos mencionados"]
+}
+
+Regras:
+- Use tokens simples (uma palavra por item) em requiredKeywords e negativeKeywords
+- Não inclua "${partNumber}" em nenhuma lista (já tratado separadamente)
+- Se os títulos forem insuficientes para determinar, retorne listas vazias`;
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model: this.modelName,
+        contents: { parts: [{ text: prompt }] },
+      });
+      const candidateText = (response as any)?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const rawText = (response as any)?.text ?? candidateText ?? '';
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
+      return {
+        canonicalTitle: parsed.canonicalTitle ?? query,
+        productType: parsed.productType ?? '',
+        canonicalPartNumber: partNumber,
+        requiredKeywords: parsed.requiredKeywords ?? [],
+        strongKeywords: parsed.strongKeywords ?? [],
+        optionalKeywords: parsed.optionalKeywords ?? [],
+        negativeKeywords: parsed.negativeKeywords ?? [],
+        vehicleHints: parsed.vehicleHints ?? [],
+      };
+    } catch {
+      return fallback;
+    }
+  }
+
   async sanitizeDiscoveryData(query: string, rawItems: any[]) {
     if (!this.ai) throw new Error('Gemini API key not configured');
 
@@ -345,26 +419,28 @@ RETORNE APENAS UM ÚNICO VALOR EM UMA LINHA:
 
       REQUISITOS DE SAÍDA (JSON ESTRITO):
       1. prices: { min: number, max: number, avg: number } (Apenas peça nova, ignore usados).
-      2. titles: [string] (Top 5 títulos mais frequentes/limpos).
-      3. vehicles: [{ model: string, startYear: number, endYear: number }] (Quebre aplicações como "Fiat Strada 2020 a 2024").
+      2. titles: [string] (Máximo 5 títulos padronizados no formato "[TipoPeça] [Posição] [Abrev.Lado] [Modelo] [AnoInicial]-[AnoFinal se disponível]". Regras OBRIGATÓRIAS: (a) NÃO inclua marca/montadora (GM, Chevrolet, Fiat, etc.); (b) NÃO inclua o part number; (c) NÃO inclua "Novo", "Usado", "Original", "Genuíno", "Lado Esquerdo", "Lado Direito" no título; (d) Remova hífens de palavras compostas: "Parachoque" não "Para-choque", "Parabrisas" não "Para-brisa"; (e) Inclua a faixa de anos se disponível; (f) Lado deve vir ANTES do modelo como abreviação: use "Esq." para esquerdo e "Dir." para direito — nunca a forma completa. Exemplos corretos: "Parachoque Dianteiro Equinox 2018-2021", "Amortecedor Dianteiro Esq. Corolla 2019-2023", "Paralama Dianteiro Dir. Vectra 2006-2012". Exemplos ERRADOS: "Para-choque Dianteiro GM Equinox 84385252 Novo", "Amortecedor Dianteiro Lado Esquerdo Chevrolet", "Amortecedor Dianteiro Esquerdo Corolla").
+      3. vehicles: [{ brand: string, model: string, startYear: number, endYear: number }] (Separe montadora de modelo. brand = apenas a montadora ("Chevrolet", "Fiat", "Toyota"). model = apenas o nome do modelo ("Equinox", "Strada", "Corolla"). Quebre faixas: "2018 a 2021" → startYear: 2018, endYear: 2021. Não inclua motorização no model.).
       4. fiscal: { ncm: string, origin: string } (Extraia se mencionado).
       5. dimensions: { weight: number, length: number, width: number, height: number } (Capture "X kg", "X mm", etc).
       6. attributes: [{ key: string, value: string }] (Atributos técnicos do produto: material, posição de montagem, tipo, diâmetro, lado, cor, acabamento, etc. Extraia do contexto dos snippets. Máximo 15 atributos relevantes. NÃO inclua atributos que já são campos dedicados do produto: marca/brand, condição/condition, número da peça/part number, garantia/warranty, peso/weight, dimensões/dimensions, NCM, origem/origin, preço/price, título/title, descrição/description.).
       7. description: string (Descrição completa do produto em português brasileiro, adequada para anúncios em marketplaces. Mínimo 3 frases, máximo 8 frases. Destaque compatibilidade, material e benefícios.).
       8. details: string (Detalhes técnicos adicionais em português, como especificações de instalação, observações de uso, informações de garantia, se disponíveis nos snippets. Máximo 3 frases.).
       9. oemCodes: [string] (Códigos OEM, cross-reference e part numbers alternativos encontrados nos snippets. Extraia números de peça de outros fabricantes, códigos equivalentes, referências originais. NÃO inclua o part number principal da query. Máximo 10 códigos.).
+      10. categoryPath: string (Caminho de categoria mais adequado para esta peça em um catálogo de autopeças brasileiro. Use o formato "Nível 1 > Nível 2 > Nível 3". Exemplos: "Freios > Pastilhas de Freio", "Suspensão > Amortecedores", "Motor > Filtros > Filtro de Óleo", "Elétrica > Baterias". Seja específico e use terminologia técnica do setor automotivo.).
 
       FORMATO JSON:
       {
         "prices": { "min": 0, "max": 0, "avg": 0 },
         "titles": [],
-        "vehicles": [],
+        "vehicles": [{ "brand": "", "model": "", "startYear": 0, "endYear": 0 }],
         "fiscal": { "ncm": "", "origin": "" },
         "dimensions": { "weight": 0, "length": 0, "width": 0, "height": 0 },
         "attributes": [],
         "description": "",
         "details": "",
-        "oemCodes": []
+        "oemCodes": [],
+        "categoryPath": ""
       }
     `;
 
@@ -409,9 +485,47 @@ RETORNE APENAS UM ÚNICO VALOR EM UMA LINHA:
         attributes: [],
         description: "",
         details: "",
-        oemCodes: []
+        oemCodes: [],
+        categoryPath: "",
       };
     }
+  }
+
+  /**
+   * Returns the IDs (or permalinks) of items that pass the same side/PN relevance
+   * filters used inside sanitizeDiscoveryData. Items that are side-mismatched or
+   * have a conflicting part-number pattern are excluded. Use this to correlate
+   * which scraper results are trustworthy before using their assets (e.g. images).
+   */
+  filterItemsByRelevance(query: string, rawItems: any[]): string[] {
+    const targetSide = this.identifySide(query);
+    const queryPnMatch = query.match(/[A-Z0-9]{5,}/i);
+    const targetPn = queryPnMatch ? queryPnMatch[0].toUpperCase() : '';
+
+    return rawItems
+      .filter(item => {
+        const text = `${item.title ?? ''} ${item.snippet ?? ''}`;
+
+        // Drop side-mismatched items
+        const itemSide = this.identifySide(text);
+        if (targetSide !== 'neutral' && itemSide !== 'neutral' && itemSide !== targetSide) {
+          return false;
+        }
+
+        // Drop items with a conflicting (similar but different) part number
+        if (targetPn) {
+          const otherPns: string[] = text.match(/[A-Z0-9]{5,}/gi) ?? [];
+          const hasMismatch = otherPns.some(pn => {
+            const clean = pn.toUpperCase();
+            return clean !== targetPn && this.isSimilarPnPattern(clean, targetPn) && !this.isCommonNoise(clean);
+          });
+          if (hasMismatch) return false;
+        }
+
+        return true;
+      })
+      .map(item => (item.id ?? item.permalink ?? '') as string)
+      .filter(Boolean);
   }
 
   private identifySide(text: string): 'left' | 'right' | 'neutral' {

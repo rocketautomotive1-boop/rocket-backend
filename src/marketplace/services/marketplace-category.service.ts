@@ -85,11 +85,14 @@ export class MarketplaceCategoryService {
                     await category.save();
                     this.logger.log(`Created new marketplace category: ${name} (${externalId})`);
                 } else if (pathFromRoot.length > 0 && (!category.path_from_root || category.path_from_root.length === 0)) {
-                    // Update Existing
-                    category.path_from_root = pathFromRoot;
-                    category.path = path; // Update string path too to match
-                    category.name = name;
-                    await category.save();
+                    // Use findOneAndUpdate to avoid Mongoose optimistic-locking VersionError
+                    // when concurrent requests try to update the same document simultaneously.
+                    const updated = await this.marketplaceCategoryModel.findOneAndUpdate(
+                        { _id: category._id },
+                        { $set: { path_from_root: pathFromRoot, path, name } },
+                        { new: true },
+                    ).exec();
+                    if (updated) category = updated;
                     this.logger.log(`Updated existing marketplace category structure: ${name}`);
                 }
             }

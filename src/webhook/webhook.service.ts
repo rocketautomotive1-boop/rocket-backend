@@ -12,6 +12,7 @@ import { YampiWebhookService } from './services/yampi-webhook.service';
 import { OLXWebhookService } from './services/olx-webhook.service';
 import { AliExpressWebhookService } from './services/aliexpress-webhook.service';
 import { TikTokShopWebhookService } from './services/tiktok-shop-webhook.service';
+import { WebhookInboxService } from './services/webhook-inbox.service';
 
 @Injectable()
 export class WebhookService {
@@ -32,6 +33,7 @@ export class WebhookService {
     private olxWebhookService: OLXWebhookService,
     private aliExpressWebhookService: AliExpressWebhookService,
     private tiktokShopWebhookService: TikTokShopWebhookService,
+    private webhookInboxService: WebhookInboxService,
   ) {}
 
   /**
@@ -39,6 +41,19 @@ export class WebhookService {
    */
   async processMercadoLivreWebhook(topic: string, payload: any, signature: string): Promise<any> {
     const result = await this.mercadoLivreWebhookService.processWebhook(topic, payload, signature);
+
+    if (this.shouldUseInboxForMl(topic, payload)) {
+      const { record, isNew } = await this.webhookInboxService.store({
+        marketplace: 'mercadolivre',
+        topic,
+        payload,
+      });
+      this.logger.debug(
+        `[WebhookService] ML webhook stored in inbox id=${record._id} topic=${topic} isNew=${isNew}`,
+      );
+      return result;
+    }
+
     this.eventEmitter.emit('webhook.received', { marketplace: 'mercadolivre', topic, payload });
     return result;
   }
@@ -122,5 +137,15 @@ export class WebhookService {
     const result = await this.tiktokShopWebhookService.processWebhook(topic, payload, signature);
     this.eventEmitter.emit('webhook.received', { marketplace: 'tiktokshop', topic, payload });
     return result;
+  }
+
+  private shouldUseInboxForMl(topic: string, payload: any): boolean {
+    if (!this.webhookInboxService.isEnabledForMarketplace('mercadolivre')) return false;
+
+    const normalizedTopic = String(topic || '').toLowerCase();
+    if (normalizedTopic === 'orders_v2') return true;
+
+    const resource = String(payload?.resource || '');
+    return resource.startsWith('/orders/') || resource.startsWith('/packs/');
   }
 }

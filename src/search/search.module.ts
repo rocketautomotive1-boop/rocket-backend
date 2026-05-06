@@ -8,8 +8,9 @@ import { CategoryDiscoveryService } from './category-discovery.service';
 import { CategoryDiscoveryController } from './category-discovery.controller';
 import { MongooseModule } from '@nestjs/mongoose';
 import { CategoryModel, CategorySchema } from '../product/schemas/category.schema';
-// import { CategoryMappingModel, CategoryMappingSchema } from '../marketplace/schemas/category-mapping.schema';
-import { ListingModule } from '../listing/listing.module'; // [FIX]
+import { ListingModule } from '../listing/listing.module';
+// ElasticsearchModule is kept only for SearchService (product search).
+// CategoryDiscoveryService and CategorySearchService use MongoDB Atlas Search ($search aggregation).
 
 @Module({
     imports: [
