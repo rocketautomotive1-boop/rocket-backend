@@ -89,6 +89,32 @@ class ProductAllocationSnapshot {
 
 
 
+export type ProductWarningType = 'WRONG_CATEGORY' | 'MISSING_COMPATIBILITIES';
+
+@Schema({ _id: false })
+export class ProductWarning {
+    @Prop({ required: true })
+    type: ProductWarningType;
+
+    @Prop({ required: true })
+    message: string;
+
+    @Prop({ required: true })
+    marketplaceTag: string;
+
+    @Prop()
+    externalId?: string;
+
+    @Prop()
+    originalCategoryId?: string;
+
+    @Prop({ type: [String], default: [] })
+    suggestedCategoryIds?: string[];
+
+    @Prop({ required: true })
+    createdAt: Date;
+}
+
 @Schema()
 export class ProductTax {
     @Prop() ncm: string;
@@ -278,6 +304,12 @@ export class ProductModel {
 
     @Prop({ type: Object })
     draftData: any; // Data from AI Drafts or NFe Imports
+
+    @Prop({ type: Boolean, default: false })
+    readyToPublish: boolean;
+
+    @Prop({ type: [SchemaFactory.createForClass(ProductWarning)], default: [] })
+    warnings: ProductWarning[];
 }
 
 export const ProductSchema = SchemaFactory.createForClass(ProductModel);
