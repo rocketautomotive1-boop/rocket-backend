@@ -94,7 +94,7 @@ export class ProductFieldMapper {
   private getRocketAttributes(product: any): Array<{ name: string; value: string }> {
     if (!product.attributes?.length) return [];
     return product.attributes
-      .filter((a: any) => a.name && a.value && (!a.code || a.code === ''))
+      .filter((a: any) => a.name && a.value && !a.marketplaceId)
       .map((a: any) => ({ name: a.name, value: a.valueName || String(a.value) }));
   }
 
