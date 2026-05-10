@@ -119,10 +119,11 @@ export class MarketplaceTemplateRepository {
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   private async findMarketplaceByName(name: string): Promise<MarketplaceDocument | null> {
-    // Busca exata primeiro, depois case-insensitive
+    // Try exact name, then case-insensitive name, then tag field
     return (
       (await this.marketplaceModel.findOne({ name })) ??
-      (await this.marketplaceModel.findOne({ name: { $regex: new RegExp(`^${name}$`, 'i') } }))
+      (await this.marketplaceModel.findOne({ name: { $regex: new RegExp(`^${name}$`, 'i') } })) ??
+      (await this.marketplaceModel.findOne({ tag: name }))
     );
   }
 }
