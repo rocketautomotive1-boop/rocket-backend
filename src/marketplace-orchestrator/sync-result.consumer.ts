@@ -52,6 +52,18 @@ export class SyncResultConsumer {
                     'marketplaceData.syncIssue': null,
                     'marketplaceData.recreateRequired': false,
                 },
+                $unset: {
+                    'marketplaceData.closedReason': '',
+                    'marketplaceData.closedExternalId': '',
+                    'marketplaceData.closedAt': '',
+                    'marketplaceData.moderationInfractionId': '',
+                    'marketplaceData.moderationFilterSubgroup': '',
+                    'marketplaceData.moderationReason': '',
+                    'marketplaceData.moderationRemedy': '',
+                    'marketplaceData.moderationSuggestedCategories': '',
+                    'marketplaceData.moderationAutoClose': '',
+                    'marketplaceData.wrongCategoryOriginalCategoryId': '',
+                },
             });
 
             this.syncGateway.emitSyncCompleted({
