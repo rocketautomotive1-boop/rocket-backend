@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { DiscoveryGateway } from './discovery.gateway';
 import { OrderGateway } from './order.gateway';
 import { RembgGateway } from './rembg.gateway';
+import { SyncGateway } from './sync.gateway';
 import { RembgController } from './rembg.controller';
 import { ProcessedImage, ProcessedImageSchema } from './schemas/processed-image.schema';
 import { ProcessedImageService } from './processed-image.service';
@@ -34,10 +35,11 @@ import { ProductDiscoveryModel, ProductDiscoverySchema } from '../product/schema
         DiscoveryGateway,
         OrderGateway,
         RembgGateway,
+        SyncGateway,
         ProcessedImageService,
         RembgEnqueueService,
         RembgJobConsumer,
     ],
-    exports: [DiscoveryGateway, OrderGateway, RembgGateway, ProcessedImageService, RembgEnqueueService],
+    exports: [DiscoveryGateway, OrderGateway, RembgGateway, SyncGateway, ProcessedImageService, RembgEnqueueService],
 })
 export class GatewaysModule { }
