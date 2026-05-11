@@ -1,10 +1,12 @@
-import { Controller, Get, Param, Patch, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Patch, Body, UseGuards, Query } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { InternalKeyGuard } from './internal-key.guard';
 import { ProductModel } from '../product/schemas/product.schema';
 import { ListingModel } from '../listing/schemas/listing.schema';
 import { MarketplaceModel } from '../marketplace/schemas/marketplace.schema';
+import { StockMovementModel } from '../product/schemas/stock-movement.schema';
+import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 
 @UseGuards(InternalKeyGuard)
 @Controller('internal/products')
@@ -13,6 +15,8 @@ export class InternalProductController {
         @InjectModel(ProductModel.name) private readonly productModel: Model<ProductModel>,
         @InjectModel(ListingModel.name) private readonly listingModel: Model<ListingModel>,
         @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceModel>,
+        @InjectModel(StockMovementModel.name) private readonly stockMovementModel: Model<StockMovementModel>,
+        private readonly descriptionService: MarketplaceDescriptionService,
     ) {}
 
     @Get(':id')
@@ -23,17 +27,64 @@ export class InternalProductController {
             .lean()
             .exec();
         if (!doc) return null;
-        return this.normalizeDecimals(doc);
+        const normalized = this.normalizeBson(doc);
+
+        // Compute stock and effective price from stock_movements — product schema has no stockQuantity field
+        const [stockResult, priceResult] = await Promise.all([
+            this.stockMovementModel.aggregate([
+                { $match: { productId: new Types.ObjectId(id) } },
+                {
+                    $group: {
+                        _id: null,
+                        total: {
+                            $sum: {
+                                $switch: {
+                                    branches: [
+                                        { case: { $in: ['$type', ['inbound', 'purchase_return']] }, then: '$quantity' },
+                                        { case: { $in: ['$type', ['outbound', 'sale', 'transfer']] }, then: { $multiply: ['$quantity', -1] } },
+                                        { case: { $eq: ['$type', 'adjustment'] }, then: '$quantity' },
+                                    ],
+                                    default: 0,
+                                },
+                            },
+                        },
+                    },
+                },
+            ]).exec(),
+            // Most recent inbound price as effective selling price
+            (this.stockMovementModel as any)
+                .findOne({ productId: new Types.ObjectId(id), type: 'inbound', price: { $exists: true, $ne: null } })
+                .sort({ date: -1 })
+                .select('price')
+                .lean()
+                .exec(),
+        ]);
+
+        normalized.stockQuantity = stockResult[0]?.total ?? 0;
+
+        // Use movement price only if product has no price set
+        if (!normalized.price && priceResult?.price) {
+            normalized.price = parseFloat(priceResult.price.toString());
+        }
+
+        return normalized;
     }
 
-    private normalizeDecimals(obj: any): any {
+    private normalizeBson(obj: any): any {
         if (obj === null || obj === undefined) return obj;
+        // Decimal128 — has _bsontype or toString that returns the decimal string
+        if (obj._bsontype === 'Decimal128' || (obj.bytes && obj._bsontype)) {
+            return parseFloat(obj.toString());
+        }
+        // ObjectId — convert to hex string
+        if (obj._bsontype === 'ObjectId' || obj._bsontype === 'ObjectID') {
+            return obj.toHexString ? obj.toHexString() : String(obj);
+        }
+        if (Array.isArray(obj)) return obj.map((item) => this.normalizeBson(item));
         if (typeof obj !== 'object') return obj;
-        if (obj.$numberDecimal !== undefined) return parseFloat(obj.$numberDecimal);
-        if (Array.isArray(obj)) return obj.map((item) => this.normalizeDecimals(item));
         const out: any = {};
         for (const key of Object.keys(obj)) {
-            out[key] = this.normalizeDecimals(obj[key]);
+            out[key] = this.normalizeBson(obj[key]);
         }
         return out;
     }
@@ -57,6 +108,30 @@ export class InternalProductController {
             ...l,
             marketplaceTag: tagMap.get(String(l.marketplaceId)) ?? '',
         }));
+    }
+
+    @Get(':id/description/:marketplaceTag')
+    async getDescription(
+        @Param('id') id: string,
+        @Param('marketplaceTag') marketplaceTag: string,
+        @Query('listingTitle') listingTitle?: string,
+    ) {
+        const product = await this.productModel
+            .findById(id)
+            .populate('category', '_id name mlCategoryId')
+            .exec();
+        if (!product) return { description: '' };
+        try {
+            const description = await this.descriptionService.generateDescription(
+                product as any,
+                marketplaceTag,
+                undefined,
+                listingTitle,
+            );
+            return { description };
+        } catch {
+            return { description: (product as any).description ?? (product as any).details ?? '' };
+        }
     }
 
     @Patch(':id/warnings/resolve')
