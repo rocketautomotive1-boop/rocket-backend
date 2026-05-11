@@ -184,7 +184,6 @@ export class ProductAttributesService {
 
       if (missingNames && marketplace.name === 'Mercado Livre') {
         try {
-          // We can fetch from API or maybe we stored it in marketplaceCategory attributes
           const categoryAttributes = await this.mercadoLivreCategoryAdapter.getCategoryAttributes(categoryId);
           categoryAttributesMap = new Map(categoryAttributes.map(attr => [attr.id, attr]));
         } catch (e) {
@@ -193,40 +192,37 @@ export class ProductAttributesService {
       }
 
       this.logger.log(`[saveProductAttributes] Received attributes payload: ${JSON.stringify(attributes)}`);
-      // Filter: Allow "false" strings, but ensure value is present
       const validAttributes = attributes.filter(attr => attr.value !== null && attr.value !== undefined && String(attr.value).trim() !== '');
 
-      // Update product.attributes array:
-      // STRATEGY: Remove all attributes for the current marketplace and replace with the new payload.
-      if (product.attributes) {
-        product.attributes = product.attributes.filter(a => String(a.marketplaceId) !== String(marketplace._id));
-      } else {
-        product.attributes = [];
-      }
-
-      for (const attr of validAttributes) {
+      // Build the new ML attributes list from the payload
+      const newMlAttributes: ProductAttribute[] = validAttributes.map(attr => {
         const def = categoryAttributesMap.get(attr.id);
         const name = attr.name || def?.name || attr.id;
-
-        // FIX: Use attribute's own marketplaceId if provided, otherwise default to the target marketplace
         const attrMarketplaceId = (attr as any).marketplaceId || marketplace._id;
-
-        const existingIdx = product.attributes.findIndex(a => a.code === attr.id && String(a.marketplaceId) === String(attrMarketplaceId));
-
-        const attributeData = {
+        return {
           code: attr.id,
-          value: String(attr.value), // Force String
-          name: name,
+          value: String(attr.value),
+          name,
           marketplaceId: attrMarketplaceId as any,
           valueName: (attr as any).valueName,
-          valueType: (attr as any).valueType
-        };
+          valueType: (attr as any).valueType,
+        } as ProductAttribute;
+      });
 
-        product.attributes.push(attributeData);
-      }
+      // Use findOneAndUpdate to atomically replace ML attributes for this marketplace.
+      // Avoids Mongoose VersionError when saveCategory and saveMLAttributes run in close
+      // succession and both try to call product.save() on the same __v snapshot.
+      const existingDoc = await this.productModel.findById(product._id).lean().exec();
+      const keptAttributes = (existingDoc?.attributes ?? []).filter(
+        (a: any) => String(a.marketplaceId) !== String(marketplace._id),
+      );
+      const mergedAttributes = [...keptAttributes, ...newMlAttributes];
 
-      product.markModified('attributes');
-      await product.save();
+      await this.productModel.findByIdAndUpdate(
+        product._id,
+        { $set: { attributes: mergedAttributes } },
+        { new: true },
+      );
 
       // Synchronization is handled explicitly by publication flow enqueue.
       // await this.marketplaceOrchestratorService.syncProductToAllMarketplaces(product.id, marketplace._id.toString());
