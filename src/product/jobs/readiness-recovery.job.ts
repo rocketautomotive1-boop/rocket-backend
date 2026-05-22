@@ -10,7 +10,11 @@ import { ListingService } from '../../listing/listing.service';
 export class ReadinessRecoveryJob {
   private readonly logger = new Logger(ReadinessRecoveryJob.name);
 
+  private static readonly RECOVERY_MIN_AGE_MS = 10 * 60 * 1000;  // 10 minutes
+  private static readonly RECOVERY_MAX_AGE_MS = 60 * 60 * 1000;  // 1 hour
+
   constructor(
+    // Direct model used intentionally — ProductRepository doesn't expose this compound completion query
     @InjectModel(ProductModel.name) private readonly productModel: Model<ProductDocument>,
     private readonly orchestratorPublisher: OrchestratorPublisherService,
     private readonly listingService: ListingService,
@@ -18,13 +22,13 @@ export class ReadinessRecoveryJob {
 
   @Cron(CronExpression.EVERY_HOUR)
   async recover(): Promise<void> {
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const minAgo = new Date(Date.now() - ReadinessRecoveryJob.RECOVERY_MIN_AGE_MS);
+    const maxAgo = new Date(Date.now() - ReadinessRecoveryJob.RECOVERY_MAX_AGE_MS);
 
     const candidates = await this.productModel
       .find({
         'completion.readyToPublish': true,
-        'completion.completedAt': { $gte: oneHourAgo, $lte: tenMinutesAgo },
+        'completion.completedAt': { $gte: maxAgo, $lte: minAgo },
       })
       .select('_id')
       .lean()

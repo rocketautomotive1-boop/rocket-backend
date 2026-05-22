@@ -56,16 +56,16 @@ export class ProductReadinessService {
     await this.recalculate(event.productId);
   }
 
+  private parseNum(v: unknown): number {
+    if (v === null || v === undefined || v === '') return 0;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
   async recalculate(productId: string): Promise<void> {
     try {
       const product = await this.productRepository.findByIdClean(productId);
       if (!product) return;
-
-      const parseNum = (v: any): number => {
-        if (v === null || v === undefined || v === '') return 0;
-        const n = Number(v);
-        return Number.isFinite(n) ? n : 0;
-      };
 
       const brandObj = (product as any).brand || (product as any).brands;
       const hasBrand = !!brandObj?.name || !!brandObj?.shortName;
@@ -82,18 +82,21 @@ export class ProductReadinessService {
       const priceRaw = (product as any).price ? Number((product as any).price) : 0;
       const inventory = stockQty > 0 && priceRaw > 0;
 
-      const w = parseNum((product as any).weight);
+      const w = this.parseNum((product as any).weight);
       const dim = (product as any).dimensions || {};
-      const dimensions = w > 0 && parseNum(dim.length) > 0 && parseNum(dim.width) > 0 && parseNum(dim.height) > 0;
+      const dimensions = w > 0 && this.parseNum(dim.length) > 0 && this.parseNum(dim.width) > 0 && this.parseNum(dim.height) > 0;
 
       const readyToPublish = data && images && titlesOk && category && inventory && dimensions;
 
       const previousReady = !!(product as any).completion?.readyToPublish;
       const alreadyCompletedAt = (product as any).completion?.completedAt ?? null;
 
-      const completedAt = readyToPublish && !previousReady && !alreadyCompletedAt
-        ? new Date()
-        : alreadyCompletedAt;
+      let completedAt: Date | null;
+      if (readyToPublish) {
+        completedAt = alreadyCompletedAt ?? new Date();
+      } else {
+        completedAt = null;
+      }
 
       await this.productRepository.update(productId, {
         $set: {
@@ -102,7 +105,7 @@ export class ProductReadinessService {
         },
       });
 
-      if (readyToPublish && !previousReady && !alreadyCompletedAt) {
+      if (readyToPublish && !previousReady) {
         this.logger.log(`Product ${productId} became ready — emitting ProductBecameReadyEvent`);
         this.eventEmitter.emit(
           PRODUCT_SECTION_EVENTS.BECAME_READY,
