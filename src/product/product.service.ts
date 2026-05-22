@@ -27,6 +27,13 @@ import { ProductivityType } from '../monitoring/schemas/user-productivity.schema
 import { MercadoLivreCompatibilityAdapter } from '../marketplace/adapters/mercado-livre/mercado-livre-compatibility.adapter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PRODUCT_EVENTS, ProductUpdatedEvent } from './events/product.events';
+import {
+  PRODUCT_SECTION_EVENTS,
+  ProductDimensionsSavedEvent,
+  ProductImagesSavedEvent,
+  ProductCategorySavedEvent,
+  ProductDataSavedEvent,
+} from './events/product-section-saved.event';
 
 /** Evita exceção em `Decimal128.fromString` quando o cliente envia "" ou valor inválido. */
 function detailsDecimal128(value: unknown): Types.Decimal128 | undefined {
@@ -541,6 +548,10 @@ export class ProductService {
       // Update Category Counts (Async)
       this.productCategoryService.updateProductCounts().catch(e => this.logger.error(`Failed to update product counts on create: ${e.message}`));
 
+      try {
+        this.eventEmitter.emit(PRODUCT_SECTION_EVENTS.DATA_SAVED, new ProductDataSavedEvent(savedProduct.id || savedProduct._id.toString()));
+      } catch {}
+
       return newProductClean;
 
     } catch (error) {
@@ -586,7 +597,9 @@ export class ProductService {
     const updatedProduct = await this.productRepository.findByIdClean(id);
     this.searchService.indexProduct(updatedProduct).catch(e => this.logger.error(`Failed to index product on updateDetails: ${e.message}`));
 
-    // REMOVED: Manual Publication Trigger (Handled by ProductWatcherService)
+    try {
+      this.eventEmitter.emit(PRODUCT_SECTION_EVENTS.DIMENSIONS_SAVED, new ProductDimensionsSavedEvent(id));
+    } catch {}
   }
 
   @ValidateMongoId()
@@ -669,6 +682,10 @@ export class ProductService {
         );
       }
 
+      try {
+        this.eventEmitter.emit(PRODUCT_SECTION_EVENTS.DATA_SAVED, new ProductDataSavedEvent(id));
+      } catch {}
+
       return clean;
     } catch (error) {
       this.logger.error('Erro ao atualizar produto:', error);
@@ -703,7 +720,9 @@ export class ProductService {
 
       this.logger.log(`[DEBUG] ProductService.updateImages: Save complete for ${id}. ID: ${updatedProduct._id}`);
 
-      // REMOVED: Manual Publication Trigger (Handled by ProductWatcherService)
+      try {
+        this.eventEmitter.emit(PRODUCT_SECTION_EVENTS.IMAGES_SAVED, new ProductImagesSavedEvent(id));
+      } catch {}
 
       return this.productRepository.findByIdClean(updatedProduct.id);
     } catch (error) {
@@ -765,6 +784,10 @@ export class ProductService {
 
     // Update Category Counts
     this.productCategoryService.updateProductCounts().catch(e => this.logger.error(`Failed to update product counts on updateCategory: ${e.message}`));
+
+    try {
+      this.eventEmitter.emit(PRODUCT_SECTION_EVENTS.CATEGORY_SAVED, new ProductCategorySavedEvent(id));
+    } catch {}
 
     return this.productRepository.findByIdClean(saved.id);
   }
