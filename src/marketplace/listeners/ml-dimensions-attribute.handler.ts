@@ -36,6 +36,15 @@ export class MlDimensionsAttributeHandler {
     if (!event.snapshot.dimensions || event.snapshot.weight == null) return;
 
     try {
+      // 1. Check product exists before any other query
+      const product = await this.productModel
+        .findById(event.productId, { attributes: 1 })
+        .lean()
+        .exec();
+
+      if (!product) return;
+
+      // 2. Resolve ML marketplace
       const mlMarketplace = await this.marketplaceModel
         .findOne({ name: 'Mercado Livre' })
         .lean()
@@ -48,13 +57,6 @@ export class MlDimensionsAttributeHandler {
         event.snapshot.dimensions,
         event.snapshot.weight,
       );
-
-      const product = await this.productModel
-        .findById(event.productId, { attributes: 1 })
-        .lean()
-        .exec();
-
-      if (!product) return;
 
       const existingAttrs: any[] = product.attributes ?? [];
 
