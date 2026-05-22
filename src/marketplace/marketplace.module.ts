@@ -83,6 +83,8 @@ import { TikTokShopOrderAdapter } from './adapters/tiktok-shop/tiktok-shop-order
 import { TikTokShopCategoryAdapter } from './adapters/tiktok-shop/tiktok-shop-category.adapter';
 import { TikTokShopService } from './services/tiktok-shop.service';
 import { TikTokShopController } from './controllers/tiktok-shop.controller';
+import { MlDimensionsCalculatorService } from './services/ml-dimensions-calculator.service';
+import { MlDimensionsAttributeHandler } from './listeners/ml-dimensions-attribute.handler';
 
 @Module({
   imports: [
@@ -182,6 +184,8 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     TikTokShopOrderAdapter,
     TikTokShopCategoryAdapter,
     TikTokShopService,
+    MlDimensionsCalculatorService,
+    MlDimensionsAttributeHandler,
   ],
   exports: [
     MarketplaceService,
