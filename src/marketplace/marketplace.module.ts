@@ -44,6 +44,8 @@ import { CategoryAttributesService } from './services/category-attributes.servic
 import { CategorySuggestionService } from './services/category-suggestion.service';
 import { ProductAttributesService } from './services/product-attributes.service';
 import { MercadoLivreAttributesService } from './services/mercado-livre-attributes.service';
+import { MlDimensionsCalculatorService } from './services/ml-dimensions-calculator.service';
+import { MlDimensionsAttributeHandler } from './listeners/ml-dimensions-attribute.handler';
 import { AttributesModule } from './attributes/attributes.module';
 import { MercadoLivreListingAdapter } from './adapters/mercado-livre/mercado-livre-listing.adapter';
 import { MercadoLivreCompatibilityAdapter } from './adapters/mercado-livre/mercado-livre-compatibility.adapter';
@@ -83,8 +85,6 @@ import { TikTokShopOrderAdapter } from './adapters/tiktok-shop/tiktok-shop-order
 import { TikTokShopCategoryAdapter } from './adapters/tiktok-shop/tiktok-shop-category.adapter';
 import { TikTokShopService } from './services/tiktok-shop.service';
 import { TikTokShopController } from './controllers/tiktok-shop.controller';
-import { MlDimensionsCalculatorService } from './services/ml-dimensions-calculator.service';
-import { MlDimensionsAttributeHandler } from './listeners/ml-dimensions-attribute.handler';
 
 @Module({
   imports: [
