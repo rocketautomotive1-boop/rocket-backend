@@ -5,6 +5,8 @@ import { CreateProductMovementDto } from '../dto/create-product-movement.dto';
 import { UpdateProductMovementDto } from '../dto/update-product-movement.dto';
 import { QueueService } from '../../queue/queue.service';
 import { BoxService } from './box.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PRODUCT_SECTION_EVENTS, ProductInventorySavedEvent } from '../events/product-section-saved.event';
 
 export function resolveMovementCondition(
   condition?: 'new' | 'used' | 'refurbished',
@@ -32,6 +34,7 @@ export class ProductMovementService {
     private readonly queueService: QueueService,
     @Inject(forwardRef(() => BoxService))
     private readonly boxService: BoxService,
+    private readonly eventEmitter: EventEmitter2,
   ) { }
 
   async findAll(
@@ -88,7 +91,7 @@ export class ProductMovementService {
    * Última entrada de estoque: condição e situação para templates de descrição / regras de anúncio.
    * Não usa o campo `condition` do cadastro do produto.
    */
-  async getListingStockSnapshot(productId: string): Promise<{ condition: string; situation: string } | null> {
+  async getListingStockSnapshot(productId: string): Promise<{ condition: string; situation: string; observation: string } | null> {
     if (!Types.ObjectId.isValid(productId)) return null;
     const latest = await this.productRepository.findLatestInboundMovement(new Types.ObjectId(productId));
     if (!latest) return null;
@@ -97,6 +100,7 @@ export class ProductMovementService {
     return {
       condition,
       situation: raw.situation || 'normal',
+      observation: raw.observation || '',
     };
   }
 
@@ -196,7 +200,16 @@ export class ProductMovementService {
       if (!externalSession) await session.commitTransaction();
 
 
-      return this.mapMovement(savedMovement);
+      const mapped = this.mapMovement(savedMovement);
+
+      try {
+        this.eventEmitter.emit(
+          PRODUCT_SECTION_EVENTS.INVENTORY_SAVED,
+          new ProductInventorySavedEvent(product._id.toString()),
+        );
+      } catch {}
+
+      return mapped;
     } catch (error) {
       if (!externalSession) await session.abortTransaction();
       this.logger.error(`Error creating movement for product ${createMovementDto.productId}: ${error.message}`);
@@ -251,7 +264,16 @@ export class ProductMovementService {
       }
 
       await session.commitTransaction();
-      return this.mapMovement(saved);
+      const mappedUpdate = this.mapMovement(saved);
+
+      try {
+        this.eventEmitter.emit(
+          PRODUCT_SECTION_EVENTS.INVENTORY_SAVED,
+          new ProductInventorySavedEvent((movement.productId as any).toString()),
+        );
+      } catch {}
+
+      return mappedUpdate;
     } catch (error) {
       await session.abortTransaction();
       this.logger.error(`Error updating movement ${id}: ${error.message}`);
@@ -285,6 +307,13 @@ export class ProductMovementService {
       }
 
       await session.commitTransaction();
+
+      try {
+        this.eventEmitter.emit(
+          PRODUCT_SECTION_EVENTS.INVENTORY_SAVED,
+          new ProductInventorySavedEvent((productId as any).toString()),
+        );
+      } catch {}
     } catch (error) {
       await session.abortTransaction();
       this.logger.error(`Error removing movement ${id}: ${error.message}`);
