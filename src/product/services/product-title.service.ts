@@ -4,6 +4,8 @@ import { Model, Types } from 'mongoose';
 import { ProductModel, ProductDocument, ProductTitle } from '../schemas/product.schema';
 import { ListingService } from '../../listing/listing.service';
 import { ListingDocument } from '../../listing/schemas/listing.schema';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PRODUCT_SECTION_EVENTS, ProductTitlesSavedEvent } from '../events/product-section-saved.event';
 
 @Injectable()
 export class ProductTitleService {
@@ -12,6 +14,7 @@ export class ProductTitleService {
   constructor(
     @InjectModel(ProductModel.name) private productModel: Model<ProductDocument>,
     private readonly listingService: ListingService,
+    private readonly eventEmitter: EventEmitter2,
   ) { }
 
   private toDto(listing: ListingDocument | any): any {
@@ -205,7 +208,13 @@ export class ProductTitleService {
       }
     }
 
-    return resultTitles.map(t => this.toDto(t));
+    const result = resultTitles.map(t => this.toDto(t));
+
+    try {
+      this.eventEmitter.emit(PRODUCT_SECTION_EVENTS.TITLES_SAVED, new ProductTitlesSavedEvent(pId));
+    } catch {}
+
+    return result;
   }
 
   async updateMarketplaceStatus(
