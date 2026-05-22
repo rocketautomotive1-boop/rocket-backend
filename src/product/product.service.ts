@@ -27,6 +27,7 @@ import { ProductivityType } from '../monitoring/schemas/user-productivity.schema
 import { MercadoLivreCompatibilityAdapter } from '../marketplace/adapters/mercado-livre/mercado-livre-compatibility.adapter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PRODUCT_EVENTS, ProductUpdatedEvent } from './events/product.events';
+import { ProductReadinessService } from './services/product-readiness.service';
 import {
   PRODUCT_SECTION_EVENTS,
   ProductDimensionsSavedEvent,
@@ -73,6 +74,8 @@ export class ProductService {
     @InjectModel(BrandModel.name) private readonly brandModel: Model<BrandDocument>,
     @InjectModel(ProductDiscoveryModel.name) private readonly productDiscoveryModel: Model<ProductDiscoveryDocument>,
     private readonly eventEmitter: EventEmitter2,
+    @Inject(forwardRef(() => ProductReadinessService))
+    private readonly productReadinessService: ProductReadinessService,
   ) { }
 
   @ValidateMongoId()
@@ -116,56 +119,35 @@ export class ProductService {
     const product = await this.productRepository.findByIdClean(id);
     if (!product) throw new NotFoundException('Produto não encontrado');
 
-    const brandObj = product.brand || (product as any).brands;
-    const hasBrand = !!brandObj?.name || !!brandObj?.shortName;
-    const dataComplete = !!(product.partNumber && hasBrand);
-
-    const imagesComplete = Array.isArray(product.images) && product.images.length > 0;
-
-    const titles = await this.productTitleService.findByProductId(id);
-    const titlesComplete = Array.isArray(titles) && titles.length > 0;
-
-    const categoryComplete = !!product.category;
-
-    const stockQty = await this.productRepository.calculateStock(id);
-    const priceRaw = product.price ? Number(product.price) : 0;
-    const inventoryComplete = stockQty > 0 && priceRaw > 0;
-
+    const completion = (product as any).completion ?? {};
     const compatibilitiesComplete = await this.productRepository.existsCompatibility({ product: id });
 
-    const parseNum = (v: any): number => {
-      if (v === null || v === undefined || v === '') return 0;
-      const n = Number(v);
-      return Number.isFinite(n) ? n : 0;
-    };
-    const w = parseNum((product as any).weight);
-    const dim = (product as any).dimensions || {};
-    const L = parseNum(dim.length);
-    const Wd = parseNum(dim.width);
-    const H = parseNum(dim.height);
-    const dimensionsComplete = w > 0 && L > 0 && Wd > 0 && H > 0;
-
-    const allRequired =
-      dataComplete &&
-      imagesComplete &&
-      titlesComplete &&
-      dimensionsComplete &&
-      categoryComplete &&
-      inventoryComplete;
-
-    if (allRequired !== !!(product as any).readyToPublish) {
-      await this.productRepository.update(id, { $set: { readyToPublish: allRequired } });
+    // If completion subdocument is empty (product predates this feature), trigger a recalculation
+    if (completion.readyToPublish === undefined) {
+      await this.productReadinessService.recalculate(id);
+      const refreshed = await this.productRepository.findByIdClean(id);
+      const c = (refreshed as any).completion ?? {};
+      return {
+        data: c.data ?? false,
+        images: c.images ?? false,
+        titles: c.titles ?? false,
+        category: c.category ?? false,
+        inventory: c.inventory ?? false,
+        compatibilities: compatibilitiesComplete,
+        dimensions: c.dimensions ?? false,
+        readyToPublish: c.readyToPublish ?? false,
+      };
     }
 
     return {
-      data: dataComplete,
-      images: imagesComplete,
-      titles: titlesComplete,
-      category: categoryComplete,
-      inventory: inventoryComplete,
+      data: completion.data ?? false,
+      images: completion.images ?? false,
+      titles: completion.titles ?? false,
+      category: completion.category ?? false,
+      inventory: completion.inventory ?? false,
       compatibilities: compatibilitiesComplete,
-      dimensions: dimensionsComplete,
-      readyToPublish: allRequired,
+      dimensions: completion.dimensions ?? false,
+      readyToPublish: completion.readyToPublish ?? false,
     };
   }
 
