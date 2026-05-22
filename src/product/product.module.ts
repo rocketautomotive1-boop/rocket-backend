@@ -104,6 +104,9 @@ import { ProductAliasModel, ProductAliasSchema } from './schemas/product-alias.s
 import { ProductMatcherService } from './services/product-matcher.service';
 import { StockSyncConsumer } from './consumers/stock-sync.consumer';
 import { DiscoveryMsResponseConsumer } from './consumers/discovery-ms-response.consumer';
+import { ProductReadinessService } from './services/product-readiness.service';
+import { PublicationTriggerListener } from './listeners/publication-trigger.listener';
+import { ReadinessRecoveryJob } from './jobs/readiness-recovery.job';
 
 
 
@@ -205,6 +208,9 @@ import { DiscoveryMsResponseConsumer } from './consumers/discovery-ms-response.c
     ProductDiscoveryService,
     CategoryResolutionService,
     DiscoveryMsResponseConsumer,
+    ProductReadinessService,
+    PublicationTriggerListener,
+    ReadinessRecoveryJob,
   ],
   exports: [
 
