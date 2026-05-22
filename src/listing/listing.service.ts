@@ -69,4 +69,12 @@ export class ListingService {
             lastSyncAt: new Date()
         });
     }
+
+    async existsActiveForProduct(productId: string): Promise<boolean> {
+        const count = await this.listingModel.countDocuments({
+            productId: new Types.ObjectId(productId),
+            status: 'active',
+        }).exec();
+        return count > 0;
+    }
 }
