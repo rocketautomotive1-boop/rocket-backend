@@ -25,6 +25,8 @@ import { ProductCategoryService } from './services/product-category.service';
 import { UserProductivityService } from '../monitoring/user-productivity.service';
 import { ProductivityType } from '../monitoring/schemas/user-productivity.schema';
 import { MercadoLivreCompatibilityAdapter } from '../marketplace/adapters/mercado-livre/mercado-livre-compatibility.adapter';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PRODUCT_EVENTS, ProductUpdatedEvent } from './events/product.events';
 
 /** Evita exceção em `Decimal128.fromString` quando o cliente envia "" ou valor inválido. */
 function detailsDecimal128(value: unknown): Types.Decimal128 | undefined {
@@ -63,6 +65,7 @@ export class ProductService {
     private readonly mercadoLivreCompatibilityAdapter: MercadoLivreCompatibilityAdapter,
     @InjectModel(BrandModel.name) private readonly brandModel: Model<BrandDocument>,
     @InjectModel(ProductDiscoveryModel.name) private readonly productDiscoveryModel: Model<ProductDiscoveryDocument>,
+    private readonly eventEmitter: EventEmitter2,
   ) { }
 
   @ValidateMongoId()
@@ -601,6 +604,7 @@ export class ProductService {
       if (data.details) product.details = data.details;
       if (data.active !== undefined) product.active = data.active;
 
+      if (data.barcode !== undefined) product.barcode = data.barcode;
       if (data.oemCodes) product.oemCodes = data.oemCodes;
       if (data.applicationSummary) product.applicationSummary = data.applicationSummary;
 
@@ -642,7 +646,30 @@ export class ProductService {
         this.productCategoryService.updateProductCounts().catch(e => this.logger.error(`Failed to update product counts on update: ${e.message}`));
       }
 
-      return this.productRepository.findByIdClean(updatedProduct.id);
+      const clean = await this.productRepository.findByIdClean(updatedProduct.id);
+
+      // Emit product.updated so async listeners can react to field changes
+      const changedFields: string[] = [];
+      if (data.weight !== undefined) changedFields.push('weight');
+      if (data.dimensions !== undefined) changedFields.push('dimensions');
+
+      if (changedFields.length > 0) {
+        this.eventEmitter.emit(
+          PRODUCT_EVENTS.UPDATED,
+          new ProductUpdatedEvent(id, changedFields, {
+            weight: data.weight !== undefined ? Number(data.weight) : undefined,
+            dimensions: data.dimensions
+              ? {
+                  height: Number(data.dimensions.height),
+                  width:  Number(data.dimensions.width),
+                  length: Number(data.dimensions.length),
+                }
+              : undefined,
+          }),
+        );
+      }
+
+      return clean;
     } catch (error) {
       this.logger.error('Erro ao atualizar produto:', error);
       throw error;
