@@ -308,6 +308,30 @@ export class ProductModel {
     @Prop({ type: Boolean, default: false })
     readyToPublish: boolean;
 
+    @Prop({
+      type: {
+        data: { type: Boolean, default: false },
+        images: { type: Boolean, default: false },
+        titles: { type: Boolean, default: false },
+        category: { type: Boolean, default: false },
+        inventory: { type: Boolean, default: false },
+        dimensions: { type: Boolean, default: false },
+        readyToPublish: { type: Boolean, default: false },
+        completedAt: { type: Date, default: null },
+      },
+      default: {},
+    })
+    completion: {
+      data: boolean;
+      images: boolean;
+      titles: boolean;
+      category: boolean;
+      inventory: boolean;
+      dimensions: boolean;
+      readyToPublish: boolean;
+      completedAt: Date | null;
+    };
+
     @Prop({ type: [SchemaFactory.createForClass(ProductWarning)], default: [] })
     warnings: ProductWarning[];
 }
