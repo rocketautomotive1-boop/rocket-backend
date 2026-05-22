@@ -33,18 +33,15 @@ export class MlDimensionsAttributeHandler {
       event.changedFields.includes('dimensions');
 
     if (!dimensionsChanged) return;
-    if (!event.snapshot.dimensions || event.snapshot.weight == null) return;
 
     try {
-      // 1. Check product exists before any other query
       const product = await this.productModel
-        .findById(event.productId, { attributes: 1 })
+        .findById(event.productId, { attributes: 1, weight: 1, dimensions: 1 })
         .lean()
         .exec();
 
       if (!product) return;
 
-      // 2. Resolve ML marketplace
       const mlMarketplace = await this.marketplaceModel
         .findOne({ name: 'Mercado Livre' })
         .lean()
@@ -53,10 +50,21 @@ export class MlDimensionsAttributeHandler {
       if (!mlMarketplace) return;
 
       const mpId = mlMarketplace._id as Types.ObjectId;
-      const calculated = this.calculator.calculate(
-        event.snapshot.dimensions,
-        event.snapshot.weight,
-      );
+
+      const weightKg =
+        event.snapshot.weight != null
+          ? event.snapshot.weight
+          : parseFloat(String(product.weight ?? '0'));
+
+      const dims = event.snapshot.dimensions ?? {
+        height: parseFloat(String((product.dimensions as any)?.height ?? '0')),
+        width:  parseFloat(String((product.dimensions as any)?.width  ?? '0')),
+        length: parseFloat(String((product.dimensions as any)?.length ?? '0')),
+      };
+
+      if (!weightKg || !dims.height || !dims.width || !dims.length) return;
+
+      const calculated = this.calculator.calculate(dims, weightKg);
 
       const existingAttrs: any[] = product.attributes ?? [];
 
