@@ -4,6 +4,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CategoryResolutionService } from '../services/category-resolution.service';
+import { DiscoveryRealtimeEvent, DiscoveryRealtimeStatus } from '../types/discovery-realtime-event';
 
 @Injectable()
 export class DiscoveryMsResponseConsumer {
@@ -29,6 +30,22 @@ export class DiscoveryMsResponseConsumer {
     async handleResponse(msg: any) {
         const { jobId, status, results, error, scrapedAt } = msg;
         this.logger.log(`Received discovery response: jobId=${jobId} status=${status}`);
+
+        const discoveryDoc = await this.discoveryModel
+            .findOne({ batchId: jobId })
+            .select('isActiveIntent status')
+            .lean()
+            .exec();
+
+        if (!discoveryDoc) {
+            this.logger.warn(`Ignoring discovery response for unknown jobId=${jobId}`);
+            return;
+        }
+
+        if (discoveryDoc.isActiveIntent === false || discoveryDoc.status === 'superseded') {
+            this.logger.warn(`Ignoring stale discovery response: jobId=${jobId}`);
+            return;
+        }
 
         const updateData: any = {
             updatedAt: new Date(scrapedAt || Date.now()),
@@ -125,7 +142,10 @@ export class DiscoveryMsResponseConsumer {
             }
 
             // Remove legacy data field if it exists
-            await this.discoveryModel.updateOne({ batchId: jobId }, { $unset: { data: '' } }).exec();
+            await this.discoveryModel.updateOne(
+                { batchId: jobId, isActiveIntent: true, status: { $ne: 'superseded' } },
+                { $unset: { data: '' } },
+            ).exec();
 
             this.logger.log(`Discovery job ${jobId} → DONE (ml=${results?.mercadolivre?.items?.length ?? 0} serp=${results?.serp?.items?.length ?? 0} attrs=${attributes.length})`);
         } else {
@@ -135,16 +155,28 @@ export class DiscoveryMsResponseConsumer {
         }
 
         await this.discoveryModel.updateOne(
-            { batchId: jobId },
+            { batchId: jobId, isActiveIntent: true, status: { $ne: 'superseded' } },
             { $set: updateData },
         ).exec();
 
-        this.eventEmitter.emit('queue.job.update', {
+        const realtimeStatus: DiscoveryRealtimeStatus = status === 'completed' ? 'COMPLETED' : 'FAILED';
+
+        const eventResult = realtimeStatus === 'COMPLETED'
+            ? {
+                ...updateData.final,
+                // Attach rawItems so frontend can populate inventory without a REST fetch
+                rawItems: updateData.sources?.mercadolivre?.items ?? [],
+                resolvedCategoryId: updateData.resolvedCategoryId ?? null,
+              }
+            : undefined;
+
+        const event: DiscoveryRealtimeEvent = {
             jobId,
-            status: status === 'completed' ? 'COMPLETED' : 'FAILED',
-            result: updateData.final,
+            status: realtimeStatus,
+            result: eventResult,
             error: updateData.error,
-        });
+        };
+        this.eventEmitter.emit('queue.job.update', event);
     }
 
     @RabbitSubscribe({
@@ -157,11 +189,19 @@ export class DiscoveryMsResponseConsumer {
         const { jobId, step, message } = msg;
         this.logger.debug(`Discovery progress: jobId=${jobId} step=${step} msg=${message}`);
 
-        this.eventEmitter.emit('queue.job.update', {
+        const discoveryDoc = await this.discoveryModel
+            .findOne({ batchId: jobId })
+            .select('isActiveIntent status')
+            .lean()
+            .exec();
+        if (!discoveryDoc || discoveryDoc.isActiveIntent === false || discoveryDoc.status === 'superseded') return;
+
+        const event: DiscoveryRealtimeEvent = {
             jobId,
-            status: 'processing',
+            status: 'PROCESSING',
             step,
             message,
-        });
+        };
+        this.eventEmitter.emit('queue.job.update', event);
     }
 }
