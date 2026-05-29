@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RabbitSubscribe } from '@golevelup/nestjs-rabbitmq';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CategoryResolutionService } from '../services/category-resolution.service';
 import { DiscoveryRealtimeEvent, DiscoveryRealtimeStatus } from '../types/discovery-realtime-event';
@@ -13,8 +13,6 @@ export class DiscoveryMsResponseConsumer {
     constructor(
         @InjectModel('ProductDiscoveryModel')
         private readonly discoveryModel: Model<any>,
-        @InjectModel('ProductModel')
-        private readonly productModel: Model<any>,
         private readonly eventEmitter: EventEmitter2,
         private readonly categoryResolution: CategoryResolutionService,
     ) {
@@ -121,20 +119,6 @@ export class DiscoveryMsResponseConsumer {
                 if (categoryId) {
                     updateData.resolvedCategoryId = categoryId;
                     this.logger.log(`Category resolved for job ${jobId}: ${categoryId}`);
-
-                    // Apply category directly to the product if it has no category yet.
-                    // This avoids requiring the frontend to re-apply on every screen open.
-                    const discovery = await this.discoveryModel.findOne({ batchId: jobId }).select('productId').lean().exec();
-                    if (discovery?.productId) {
-                        const updated = await this.productModel.findOneAndUpdate(
-                            { _id: new Types.ObjectId(String(discovery.productId)), category: { $in: [null, undefined] } },
-                            { $set: { category: new Types.ObjectId(String(categoryId)) } },
-                            { new: false },
-                        ).exec();
-                        if (updated) {
-                            this.logger.log(`Auto-applied category ${categoryId} to product ${discovery.productId}`);
-                        }
-                    }
                 }
             } catch (err: unknown) {
                 const message = err instanceof Error ? err.message : String(err);
