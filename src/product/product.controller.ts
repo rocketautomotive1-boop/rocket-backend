@@ -5,6 +5,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBody, ApiBearerAuth
 import { ProductService } from './product.service';
 import { ProductModel } from './schemas/product.schema';
 import { S3Service } from '../common/s3/s3.service';
+import { detectImageMimeType } from '../common/utils/image-mime.util';
 import 'multer';
 import { UpdateProductCategoryDto } from './dto/update-product-category.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -16,6 +17,7 @@ import { ProductTitle } from './schemas/product.schema';
 
 import { ProductTitleService } from './services/product-title.service';
 import { ProductDiscoveryService } from './services/product-discovery.service';
+import { CategorySnapshotService } from './services/category-snapshot.service';
 import { CreateFromDiscoveryDto } from './dto/create-from-discovery.dto';
 import { SearchService } from '../search/search.service';
 // import { PublishService } from '../publish/publish.service';
@@ -42,6 +44,7 @@ export class ProductController {
     private readonly boxService: BoxService,
     private readonly searchService: SearchService,
     private readonly discoveryService: ProductDiscoveryService,
+    private readonly categorySnapshotService: CategorySnapshotService,
   ) { }
 
   @Post('pre-register')
@@ -49,7 +52,7 @@ export class ProductController {
   async preRegister(
     @Body() body: { partNumber: string; brandId: string },
     @Req() req: any,
-  ): Promise<{ productId: string; status: string }> {
+  ): Promise<{ productId: string; status: string; jobId: string | null }> {
     if (!body.partNumber?.trim()) throw new BadRequestException('partNumber is required');
     if (!body.brandId?.trim()) throw new BadRequestException('brandId is required');
 
@@ -66,15 +69,18 @@ export class ProductController {
 
     const productId = String((product as any).id ?? (product as any)._id);
 
-    this.discoveryService.startDiscovery({
-      partNumber: body.partNumber.trim(),
-      brand: (brand as any).name,
-      productId
-    }).catch(e => {
+    let jobId: string | null = null;
+    try {
+      jobId = await this.discoveryService.startDiscovery({
+        partNumber: body.partNumber.trim(),
+        brand: (brand as any).name,
+        productId,
+      });
+    } catch (e: any) {
       this.logger.warn(`[PreRegister] Discovery failed to start: ${e.message}`);
-    });
+    }
 
-    return { productId, status: 'draft' };
+    return { productId, status: 'draft', jobId };
   }
 
   @Post('discovery')
@@ -1112,8 +1118,6 @@ export class ProductController {
     // Processar imagens mantidas para recuperar chaves perdidas (legacy)
     const processedKeptImages = keptImages.map(img => {
       if (!img.key && img.url) {
-        // Tenta recuperar a chave da URL se ela seguir o padrão esperado
-        // Padrão: .../products/{id}/{filename}
         const match = img.url.match(/(products\/[^/]+\/.+)/);
         if (match && match[1]) {
           this.logger.log(`Recuperada chave S3 da URL para imagem: ${match[1]}`);
@@ -1123,40 +1127,56 @@ export class ProductController {
       return img;
     });
 
-    // Array para armazenar todos os dados das imagens (mantidas + novas)
-    const allImagesList = [...processedKeptImages];
-
     // Chaves das imagens que devem ser mantidas no S3
     const keptKeys = processedKeptImages.map(img => img.key).filter(k => !!k);
     const newKeys: string[] = [];
+    const uploadedFiles: any[] = [];
 
-    // Fazer upload de cada nova imagem para o S3
+    // Fazer upload de cada nova imagem para o S3.
+    // Detecta MIME real pelos magic bytes do buffer — ignora originalname/mimetype enviados pelo cliente
+    // (mobile força 'image.png'/'image/png' mesmo para JPEG vindo de suggestedImages do Discovery).
     if (files && files.length > 0) {
       for (const file of files) {
-        const key = `products/${id}/${Date.now()}-${file.originalname}`;
+        const detected = detectImageMimeType(file.buffer);
+        if (detected.mime === 'application/octet-stream') {
+          throw new BadRequestException(`Formato de imagem não suportado (não é JPEG/PNG/WEBP/GIF): ${file.originalname}`);
+        }
+        const baseName = (file.originalname || `image-${Date.now()}`).replace(/\.[^.]+$/, '');
+        const filename = `${baseName}.${detected.ext}`;
+        const key = `products/${id}/${Date.now()}-${filename}`;
         const url = await this.s3Service.uploadFile(
           file.buffer,
           key,
-          file.mimetype,
-          true // Usar chave exata
+          detected.mime,
+          true
         );
-
-        // Adicionar dados da imagem ao array
-        allImagesList.push({
-          url: url,
-          key: key,
-          filename: file.originalname,
-          mimeType: file.mimetype
-        });
-
+        uploadedFiles.push({ url, key, filename, mimeType: detected.mime });
         newKeys.push(key);
       }
     }
 
-    // Sincronizar pasta do S3 (remove apenas o que não estiver na lista de mantidos ou novos)
-    // Isso garante que só excluímos as imagens antigas APÓS o upload das novas ter sucesso
+    // The frontend only knows about images that were loaded when the screen opened.
+    // Images added by other async flows (e.g. rembg commitBatch) after the screen loaded
+    // are unknown to the frontend and must not be dropped.
+    //
+    // Strategy: build the final list by honouring the frontend's explicit ordering of the
+    // keys it knows about, then appending any server-side images whose keys were NOT in the
+    // frontend's payload (they arrived after the screen opened).
+    const sentKeys = new Set([...keptKeys, ...newKeys]);
+    const serverImages: any[] = (product as any).images ?? [];
+    const serverOnlyImages = serverImages.filter(
+      (img: any) => img.key && !sentKeys.has(img.key),
+    );
+
+    // Final list: frontend-ordered kept + new uploads + any server-only images the
+    // frontend didn't see.
+    const allImagesList = [...processedKeptImages, ...uploadedFiles, ...serverOnlyImages];
+
+    // Sincronizar pasta do S3 — only clean up keys under the products/ prefix that were
+    // explicitly removed by the frontend (i.e. in the server set but not in sentKeys and
+    // not in serverOnlyImages).  We pass all keys we want to keep so syncFolder preserves them.
     const folderPrefix = `products/${id}`;
-    const allKeysToKeep = [...keptKeys, ...newKeys];
+    const allKeysToKeep = [...keptKeys, ...newKeys, ...serverOnlyImages.map((img: any) => img.key).filter(Boolean)];
     await this.s3Service.syncFolder(folderPrefix, allKeysToKeep);
 
     // Atualizar o produto com a lista completa de imagens
@@ -1324,6 +1344,12 @@ export class ProductController {
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  @Get(':id/category-snapshot')
+  @ApiOperation({ summary: 'Snapshot consolidado de categoria + atributos ML para um produto' })
+  async getCategorySnapshot(@Param('id') id: string) {
+    return this.categorySnapshotService.buildForProduct(id);
   }
 
   @Get(':id/titles')
