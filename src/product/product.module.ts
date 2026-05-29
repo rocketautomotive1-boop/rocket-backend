@@ -107,6 +107,7 @@ import { DiscoveryMsResponseConsumer } from './consumers/discovery-ms-response.c
 import { ProductReadinessService } from './services/product-readiness.service';
 import { PublicationTriggerListener } from './listeners/publication-trigger.listener';
 import { ReadinessRecoveryJob } from './jobs/readiness-recovery.job';
+import { CategorySnapshotService } from './services/category-snapshot.service';
 
 
 
@@ -211,6 +212,7 @@ import { ReadinessRecoveryJob } from './jobs/readiness-recovery.job';
     ProductReadinessService,
     PublicationTriggerListener,
     ReadinessRecoveryJob,
+    CategorySnapshotService,
   ],
   exports: [
 
