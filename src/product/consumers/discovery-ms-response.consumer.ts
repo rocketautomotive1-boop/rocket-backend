@@ -107,7 +107,7 @@ export class DiscoveryMsResponseConsumer {
                 attributes,
                 oemCodes: results?.oemCodes ?? results?.ai?.oemCodes ?? [],
                 vehicles: results?.vehicles ?? results?.ai?.vehicles ?? [],
-                categoryPath: results?.categoryPath ?? results?.ai?.categoryPath ?? null,
+                categoryPath: results?.categoryPath ?? null,
                 breadcrumb: results?.mercadolivre?.breadcrumb ?? null,
                 timing: results?.timing ?? null,
                 confidence: preferredSource === 'mercadolivre' ? 'high' : 'medium',
@@ -119,6 +119,20 @@ export class DiscoveryMsResponseConsumer {
                 if (categoryId) {
                     updateData.resolvedCategoryId = categoryId;
                     this.logger.log(`Category resolved for job ${jobId}: ${categoryId}`);
+
+                    // Notify the gateway (and any other listener) that this product's
+                    // category snapshot is now stale. The gateway translates this into a
+                    // WebSocket message so the frontend invalidates its React Query cache.
+                    const discoveryForProduct = await this.discoveryModel
+                      .findOne({ batchId: jobId })
+                      .select('productId')
+                      .lean()
+                      .exec();
+                    if (discoveryForProduct?.productId) {
+                        this.eventEmitter.emit('category-snapshot.invalidate', {
+                            productId: String(discoveryForProduct.productId),
+                        });
+                    }
                 }
             } catch (err: unknown) {
                 const message = err instanceof Error ? err.message : String(err);
