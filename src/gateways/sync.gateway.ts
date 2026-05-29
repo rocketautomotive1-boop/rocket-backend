@@ -8,6 +8,7 @@ import {
     OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Injectable, Logger } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { Namespace, Socket } from 'socket.io';
 
 export interface SyncCompletedEvent {
@@ -72,5 +73,15 @@ export class SyncGateway implements OnGatewayConnection, OnGatewayDisconnect {
         if (size === 0) return;
         this.logger.warn(`Emitting sync.failed for product ${event.productId} (${size} subscribers)`);
         this.server.to(room).emit('sync.failed', event);
+    }
+
+    @OnEvent('category-snapshot.invalidate')
+    handleCategorySnapshotInvalidate(payload: { productId: string }) {
+        if (!payload?.productId) return;
+        const room = `product_${payload.productId}`;
+        const size = this.server.adapter?.rooms?.get(room)?.size ?? 0;
+        if (size === 0) return;
+        this.logger.log(`Emitting category-snapshot.invalidate for product ${payload.productId} (${size} subscribers)`);
+        this.server.to(room).emit('category-snapshot.invalidate', { productId: payload.productId });
     }
 }
