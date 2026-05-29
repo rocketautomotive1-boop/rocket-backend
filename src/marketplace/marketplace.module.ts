@@ -47,6 +47,7 @@ import { MercadoLivreAttributesService } from './services/mercado-livre-attribut
 import { MlDimensionsCalculatorService } from './services/ml-dimensions-calculator.service';
 import { MlDimensionsAttributeHandler } from './listeners/ml-dimensions-attribute.handler';
 import { AttributesModule } from './attributes/attributes.module';
+import { MlAttributeHydrationService } from './services/ml-attribute-hydration.service';
 import { MercadoLivreListingAdapter } from './adapters/mercado-livre/mercado-livre-listing.adapter';
 import { MercadoLivreCompatibilityAdapter } from './adapters/mercado-livre/mercado-livre-compatibility.adapter';
 import { OLXProductAdapter } from './adapters/olx/olx-product.adapter';
@@ -186,6 +187,7 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     TikTokShopService,
     MlDimensionsCalculatorService,
     MlDimensionsAttributeHandler,
+    MlAttributeHydrationService,
   ],
   exports: [
     MarketplaceService,
@@ -232,6 +234,7 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     TikTokShopOrderAdapter,
     TikTokShopCategoryAdapter,
     TikTokShopService,
+    MlAttributeHydrationService,
   ],
 })
 export class MarketplaceModule { }
