@@ -48,6 +48,11 @@ function detailsDecimal128(value: unknown): Types.Decimal128 | undefined {
   }
 }
 
+function toOptionalObjectId(value?: string): Types.ObjectId | undefined {
+  if (!value || value === 'system' || value === 'SYSTEM') return undefined;
+  return Types.ObjectId.isValid(value) ? new Types.ObjectId(value) : undefined;
+}
+
 @Injectable()
 export class ProductService {
   private readonly logger = new Logger(ProductService.name);
@@ -116,38 +121,18 @@ export class ProductService {
 
   @ValidateMongoId()
   async getProductCompletion(id: string) {
-    const product = await this.productRepository.findByIdClean(id);
-    if (!product) throw new NotFoundException('Produto não encontrado');
+    // Source of truth: always compute on read. Persisted `completion.*` fields
+    // were a cache that drifted whenever product data was mutated through a
+    // path that didn't emit a section-saved event (imports, discovery direct
+    // writes, scripts). The compute is cheap (~5ms) and idempotent.
+    const computed = await this.productReadinessService.compute(id);
+    if (!computed) throw new NotFoundException('Produto não encontrado');
 
-    const completion = (product as any).completion ?? {};
     const compatibilitiesComplete = await this.productRepository.existsCompatibility({ product: id });
 
-    // If completion subdocument is empty (product predates this feature), trigger a recalculation
-    if (completion.readyToPublish === undefined) {
-      await this.productReadinessService.recalculate(id);
-      const refreshed = await this.productRepository.findByIdClean(id);
-      const c = (refreshed as any).completion ?? {};
-      return {
-        data: c.data ?? false,
-        images: c.images ?? false,
-        titles: c.titles ?? false,
-        category: c.category ?? false,
-        inventory: c.inventory ?? false,
-        compatibilities: compatibilitiesComplete,
-        dimensions: c.dimensions ?? false,
-        readyToPublish: c.readyToPublish ?? false,
-      };
-    }
-
     return {
-      data: completion.data ?? false,
-      images: completion.images ?? false,
-      titles: completion.titles ?? false,
-      category: completion.category ?? false,
-      inventory: completion.inventory ?? false,
+      ...computed,
       compatibilities: compatibilitiesComplete,
-      dimensions: completion.dimensions ?? false,
-      readyToPublish: completion.readyToPublish ?? false,
     };
   }
 
@@ -447,6 +432,7 @@ export class ProductService {
       const newProductData = {
         name: data.name || data.partNumber,
         partNumber: data.partNumber,
+        createdByUserId: toOptionalObjectId(userId),
         slug: slugBase,
         description: data.description,
         tax: {
@@ -1201,7 +1187,7 @@ export class ProductService {
     return this.productRepository.count(query);
   }
 
-  async createFromDiscovery(dto: CreateFromDiscoveryDto): Promise<ProductModel> {
+  async createFromDiscovery(dto: CreateFromDiscoveryDto, userId?: string): Promise<ProductModel> {
     // 1. Busca a marca
     const brand = await this.brandModel.findById(dto.brandId).lean().exec();
     if (!brand) throw new BadRequestException('Marca não encontrada');
@@ -1229,6 +1215,7 @@ export class ProductService {
       name: discoveryData.name || dto.partNumber,
       slug: slugBase,
       partNumber: dto.partNumber,
+      createdByUserId: toOptionalObjectId(userId),
       barcode: dto.barcode,
       brand: {
         _id: brand._id,
