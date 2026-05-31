@@ -56,6 +56,19 @@ export class MarketplaceAccountRepository {
     return created.toObject();
   }
 
+  /** Busca uma conta por id. */
+  async findById(accountId: string | Types.ObjectId): Promise<MarketplaceAccountModel | null> {
+    return this.model.findOne({ _id: this.toObjectId(accountId) } as any).lean().exec();
+  }
+
+  /** Persiste (substitui) o token OAuth de uma conta. Idempotente via $set. */
+  async updateToken(accountId: string | Types.ObjectId, token: Record<string, any>): Promise<void> {
+    await this.model.updateOne(
+      { _id: this.toObjectId(accountId) } as any,
+      { $set: { token } } as any,
+    ).exec();
+  }
+
   /** Normaliza para ObjectId no boundary; lança erro claro se inválido. */
   private toObjectId(id: string | Types.ObjectId): Types.ObjectId {
     if (id instanceof Types.ObjectId) return id;

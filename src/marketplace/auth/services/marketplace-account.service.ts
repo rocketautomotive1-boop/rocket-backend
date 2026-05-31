@@ -2,7 +2,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { MarketplaceAccountRepository } from './marketplace-account.repository';
 import { MarketplaceAccountModel } from '../schemas/marketplace-account.schema';
-import { encrypt } from './credentials-crypto.helper';
+import { encrypt, decrypt, isEncrypted } from './credentials-crypto.helper';
+import { MercadoLivreAuthAdapter } from '../../adapters/mercado-livre/mercado-livre-auth.adapter';
 
 interface RegisterAccountInput {
   marketplaceId: string;
@@ -12,13 +13,19 @@ interface RegisterAccountInput {
 }
 
 /**
- * Resolução e cadastro de contas de marketplace (multi-client).
+ * Resolução, cadastro e ciclo OAuth por conta (multi-client).
  * accountFor: conta do domínio → fallback à default. registerAccount: criptografa
- * credentials antes de persistir. NÃO faz refresh OAuth (Fatia 3).
+ * credentials. saveAccountToken/refreshAccountToken: token POR CONTA, caminho
+ * paralelo ao legado (autopeças). Lock de refresh por accountId.
  */
 @Injectable()
 export class MarketplaceAccountService {
-  constructor(private readonly repo: MarketplaceAccountRepository) {}
+  private readonly refreshLocks = new Map<string, Promise<void>>();
+
+  constructor(
+    private readonly repo: MarketplaceAccountRepository,
+    private readonly mlAdapter: MercadoLivreAuthAdapter,
+  ) {}
 
   async accountFor(marketplaceId: string, domain: string): Promise<MarketplaceAccountModel | null> {
     const byDomain = await this.repo.findByDomain(marketplaceId, domain);
@@ -37,6 +44,38 @@ export class MarketplaceAccountService {
       domains: input.domains,
       credentials,
     });
+  }
+
+  /** Persiste o token OAuth de uma conta (idempotente). */
+  async saveAccountToken(accountId: string, tokenData: Record<string, any>): Promise<void> {
+    await this.repo.updateToken(accountId, { ...tokenData, isActive: true });
+  }
+
+  /** Renova o token de uma conta usando as credenciais dela. Lock por accountId. */
+  async refreshAccountToken(accountId: string): Promise<void> {
+    const inFlight = this.refreshLocks.get(accountId);
+    if (inFlight) return inFlight;
+
+    const promise = this.doRefreshAccountToken(accountId).finally(() => this.refreshLocks.delete(accountId));
+    this.refreshLocks.set(accountId, promise);
+    return promise;
+  }
+
+  private async doRefreshAccountToken(accountId: string): Promise<void> {
+    const account = await this.repo.findById(accountId);
+    if (!account?.token?.refreshToken) {
+      throw new BadRequestException(`Conta ${accountId} não possui refreshToken ativo.`);
+    }
+    const clientId = this.readCredential(account.credentials, 'clientId');
+    const clientSecret = this.readCredential(account.credentials, 'clientSecret');
+    const newToken = await this.mlAdapter.refreshTokenForAccount(account.token, clientId, clientSecret);
+    await this.saveAccountToken(accountId, newToken);
+  }
+
+  private readCredential(creds: Record<string, string> | undefined, key: string): string {
+    const v = creds?.[key];
+    if (!v) throw new BadRequestException(`Credencial '${key}' ausente na conta.`);
+    return isEncrypted(v) ? decrypt(v) : v;
   }
 
   private encryptCredentials(raw: Record<string, string>): Record<string, string> {
