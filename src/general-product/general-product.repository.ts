@@ -26,6 +26,19 @@ export class GeneralProductRepository {
     return this.toDto(doc);
   }
 
+  /**
+   * Grava (ou cria) o rascunho de discovery para um barcode. Idempotente:
+   * `$set` apenas em draftData; `$setOnInsert` garante o barcode ao criar.
+   * Não sobrescreve campos definidos pelo usuário (name/price/etc).
+   */
+  async upsertDraftByBarcode(barcode: string, draftData: Record<string, any>): Promise<void> {
+    await this.model.updateOne(
+      { barcode },
+      { $set: { draftData }, $setOnInsert: { barcode } },
+      { upsert: true },
+    ).exec();
+  }
+
   private toDto(doc: any): GeneralProductModel | null {
     if (!doc) return null;
     const obj = typeof doc.toObject === 'function' ? doc.toObject() : doc;

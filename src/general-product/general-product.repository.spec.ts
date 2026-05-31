@@ -47,4 +47,26 @@ describe('GeneralProductRepository', () => {
       repo.create({ barcode: '7891000100103', name: 'B', ncm: '18069000' }),
     ).rejects.toMatchObject({ code: 11000 });
   });
+
+  it('upsertDraftByBarcode creates a product when the barcode is new', async () => {
+    await repo.upsertDraftByBarcode('7891000100103', { titles: ['Nescau 400g'] });
+    const found = await repo.findByBarcode('7891000100103');
+    expect(found).not.toBeNull();
+    expect(found?.draftData).toEqual({ titles: ['Nescau 400g'] });
+  });
+
+  it('upsertDraftByBarcode updates only draftData on an existing product', async () => {
+    await repo.create({ barcode: '7891000100103', name: 'Nescau Existente', ncm: '18069000' });
+    await repo.upsertDraftByBarcode('7891000100103', { titles: ['Sugestão IA'] });
+    const found = await repo.findByBarcode('7891000100103');
+    expect(found?.name).toBe('Nescau Existente'); // user data preserved
+    expect(found?.draftData).toEqual({ titles: ['Sugestão IA'] });
+  });
+
+  it('upsertDraftByBarcode is idempotent (two calls → one document)', async () => {
+    await repo.upsertDraftByBarcode('7891000100103', { titles: ['A'] });
+    await repo.upsertDraftByBarcode('7891000100103', { titles: ['A'] });
+    const all = await (repo as any).model.find({ barcode: '7891000100103' }).lean().exec();
+    expect(all).toHaveLength(1);
+  });
 });
