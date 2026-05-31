@@ -127,6 +127,9 @@ export class GeneralProductModel {
   @Prop({ type: ProductSpecifications, default: {} })
   specifications: ProductSpecifications;
 
+  @Prop({ type: Object })
+  draftData?: Record<string, any>;
+
   @Prop({ default: 'general', enum: ['general'] })
   domain: string;
 }
