@@ -40,6 +40,7 @@ import { SchedulerModule } from './scheduler/scheduler.module';
 import { VehicleDiscoveryModule } from './vehicle-discovery/vehicle-discovery.module';
 import { VehicleCompatibilityModule } from './vehicle-compatibility/vehicle-compatibility.module';
 import { InternalModule } from './internal/internal.module';
+import { GeneralDatabaseModule } from './database/general-database.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
@@ -99,7 +100,7 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
       ttl: 60000,
       limit: 100,
     }]),
-    // MongoDB Connection
+    // MongoDB Connection (default — autopeças)
     MongooseModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -107,6 +108,8 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
         uri: configService.get<string>('MONGO_URI'),
       }),
     }),
+    // MongoDB Connection (general — itens gerais, banco físico separado)
+    GeneralDatabaseModule,
     // ElasticSearch Connection
     // Search Module
     SearchModule,
