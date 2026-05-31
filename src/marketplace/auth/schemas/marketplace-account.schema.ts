@@ -51,3 +51,6 @@ MarketplaceAccountSchema.index(
   { marketplaceId: 1, isDefault: 1 },
   { unique: true, partialFilterExpression: { isDefault: true } },
 );
+
+// Evita duas contas com o mesmo label no mesmo marketplace.
+MarketplaceAccountSchema.index({ marketplaceId: 1, label: 1 }, { unique: true });

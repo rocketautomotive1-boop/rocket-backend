@@ -38,6 +38,24 @@ export class MarketplaceAccountRepository {
     return created.toObject();
   }
 
+  /** Primeira conta ativa do marketplace cujo `domains` inclui o domínio. */
+  async findByDomain(
+    marketplaceId: string | Types.ObjectId,
+    domain: string,
+  ): Promise<MarketplaceAccountModel | null> {
+    return this.model
+      .findOne({ marketplaceId: this.toObjectId(marketplaceId), domains: domain })
+      .sort({ createdAt: 1 })
+      .lean()
+      .exec();
+  }
+
+  /** Cria uma conta não-default (ex: 2ª conta ML/Shopee do domínio geral). */
+  async createAccount(data: Partial<MarketplaceAccountModel>): Promise<MarketplaceAccountModel> {
+    const created = await this.model.create({ ...data, isDefault: false });
+    return created.toObject();
+  }
+
   /** Normaliza para ObjectId no boundary; lança erro claro se inválido. */
   private toObjectId(id: string | Types.ObjectId): Types.ObjectId {
     if (id instanceof Types.ObjectId) return id;

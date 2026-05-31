@@ -52,4 +52,31 @@ describe('MarketplaceAccountRepository', () => {
       model.create({ marketplaceId: mpId, label: 'B', isDefault: true }),
     ).rejects.toMatchObject({ code: 11000 });
   });
+
+  it('findByDomain returns an active account whose domains include the domain', async () => {
+    await model.create({ marketplaceId: mpId, label: 'ML Autopeças', isDefault: true, domains: ['autoparts'] });
+    await model.create({ marketplaceId: mpId, label: 'ML Geral', isDefault: false, domains: ['general'] });
+
+    const found = await repo.findByDomain(mpId.toString(), 'general');
+    expect(found?.label).toBe('ML Geral');
+  });
+
+  it('findByDomain returns null when no account serves the domain', async () => {
+    await model.create({ marketplaceId: mpId, label: 'ML Autopeças', isDefault: true, domains: ['autoparts'] });
+    const found = await repo.findByDomain(mpId.toString(), 'general');
+    expect(found).toBeNull();
+  });
+
+  it('createAccount persists a non-default account with its domains', async () => {
+    const created = await repo.createAccount({
+      marketplaceId: mpId,
+      label: 'ML Geral',
+      domains: ['general'],
+      credentials: { clientId: 'enc:v1:abc' },
+    });
+    expect(created.label).toBe('ML Geral');
+    expect(created.isDefault).toBe(false);
+    const found = await repo.findByDomain(mpId.toString(), 'general');
+    expect(found?.label).toBe('ML Geral');
+  });
 });

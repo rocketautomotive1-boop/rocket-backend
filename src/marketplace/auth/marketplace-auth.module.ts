@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { MarketplaceModel, MarketplaceSchema } from '../schemas/marketplace.schema';
 import { MarketplaceAccountModel, MarketplaceAccountSchema } from './schemas/marketplace-account.schema';
 import { MarketplaceAccountRepository } from './services/marketplace-account.repository';
+import { MarketplaceAccountService } from './services/marketplace-account.service';
 import { MarketplaceAuthService } from './services/marketplace-auth.service';
 import { TokenManagerService } from './services/token-manager.service';
 
@@ -43,6 +44,7 @@ import { MarketplaceCallbackController } from './controllers/marketplace-callbac
         MarketplaceAuthService,
         TokenManagerService,
         MarketplaceAccountRepository,
+        MarketplaceAccountService,
         AmazonAuthAdapter,
         ShopeeAuthAdapter,
         MercadoLivreAuthAdapter,
@@ -55,6 +57,7 @@ import { MarketplaceCallbackController } from './controllers/marketplace-callbac
         MarketplaceAuthService,
         TokenManagerService,
         MarketplaceAccountRepository,
+        MarketplaceAccountService,
         AmazonAuthAdapter,
         ShopeeAuthAdapter,
         MercadoLivreAuthAdapter,
