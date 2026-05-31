@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { MarketplaceModel, MarketplaceDocument, TokenStrategy } from '../../schemas/marketplace.schema';
+import { MarketplaceAccountRepository } from './marketplace-account.repository';
 
 export interface ResolvedToken {
     accessToken: string | null;
@@ -20,6 +21,7 @@ export class TokenManagerService {
     constructor(
         @InjectModel(MarketplaceModel.name)
         private readonly marketplaceModel: Model<MarketplaceDocument>,
+        private readonly accountRepo: MarketplaceAccountRepository,
     ) { }
 
     /**
@@ -121,8 +123,12 @@ export class TokenManagerService {
         };
     }
 
-    private resolveOAuthToken(marketplace: MarketplaceDocument): ResolvedToken {
-        const activeToken = marketplace.tokens?.find(t => t.isActive);
+    private async resolveOAuthToken(marketplace: MarketplaceDocument): Promise<ResolvedToken> {
+        // Preferir a conta default (multi-client). Fallback ao token legado em tokens[].
+        const account = await this.accountRepo.findDefault(String(marketplace._id));
+        const accountToken = account?.token;
+        const activeToken = (accountToken?.isActive ? accountToken : null)
+            ?? marketplace.tokens?.find(t => t.isActive);
 
         if (!activeToken) {
             throw new Error(
