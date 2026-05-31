@@ -2,6 +2,7 @@ import { Injectable, Logger, Inject, forwardRef, OnModuleInit } from '@nestjs/co
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { QueueService } from '../queue/queue.service';
 import { MarketplaceAuthService } from '../marketplace/auth/services/marketplace-auth.service';
+import { MarketplaceAccountService } from '../marketplace/auth/services/marketplace-account.service';
 import { QuestionsService } from '../questions/questions.service';
 import { OrderSyncFlowService } from '../order/services/order-sync-flow.service';
 
@@ -13,6 +14,8 @@ export class SchedulerService implements OnModuleInit {
         private readonly queueService: QueueService,
         @Inject(forwardRef(() => MarketplaceAuthService))
         private readonly marketplaceAuthService: MarketplaceAuthService,
+        @Inject(forwardRef(() => MarketplaceAccountService))
+        private readonly marketplaceAccountService: MarketplaceAccountService,
         @Inject(forwardRef(() => QuestionsService))
         private readonly questionsService: QuestionsService,
         @Inject(forwardRef(() => OrderSyncFlowService))
@@ -43,6 +46,16 @@ export class SchedulerService implements OnModuleInit {
             }
         } catch (error) {
             this.logger.error('Error in Scheduled Token Refresh:', error);
+        }
+
+        // Caminho paralelo: contas multi-client (não afeta o refresh legado acima).
+        try {
+            const accountCount = await this.marketplaceAccountService.refreshExpiringAccountTokens();
+            if (accountCount > 0) {
+                this.logger.log(`Proactive Refresh (accounts): ${accountCount} account tokens refreshed.`);
+            }
+        } catch (error) {
+            this.logger.error('Error in Scheduled Account Token Refresh:', error);
         }
     }
 

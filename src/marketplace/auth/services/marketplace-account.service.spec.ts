@@ -123,4 +123,35 @@ describe('MarketplaceAccountService', () => {
       expect(repo.updateToken).toHaveBeenCalledWith('acc1', expect.objectContaining({ accessToken: 'AT' }));
     });
   });
+
+  describe('refreshExpiringAccountTokens', () => {
+    it('refreshes each expiring account and returns the count', async () => {
+      const repo = makeRepo();
+      (repo as any).findExpiringTokenAccounts = jest.fn().mockResolvedValue([{ _id: 'a1' }, { _id: 'a2' }]);
+      // findById is used inside refreshAccountToken
+      repo.findById.mockResolvedValue({
+        _id: 'a1', credentials: { clientId: encrypt('CID'), clientSecret: encrypt('CSECRET') },
+        token: { refreshToken: 'RT', additionalData: {} },
+      });
+      const adapter = makeAdapter() as any;
+      adapter.refreshTokenForAccount = jest.fn().mockResolvedValue({ accessToken: 'NEW', refreshToken: 'NRT', isActive: true });
+
+      const count = await svc(repo, adapter).refreshExpiringAccountTokens();
+      expect(count).toBe(2);
+      expect(adapter.refreshTokenForAccount).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not throw if one account refresh fails (counts only successes)', async () => {
+      const repo = makeRepo();
+      (repo as any).findExpiringTokenAccounts = jest.fn().mockResolvedValue([{ _id: 'a1' }, { _id: 'a2' }]);
+      repo.findById
+        .mockResolvedValueOnce({ _id: 'a1', credentials: { clientId: encrypt('CID'), clientSecret: encrypt('CSECRET') }, token: { refreshToken: 'RT', additionalData: {} } })
+        .mockResolvedValueOnce({ _id: 'a2', credentials: {}, token: null }); // will throw inside
+      const adapter = makeAdapter() as any;
+      adapter.refreshTokenForAccount = jest.fn().mockResolvedValue({ accessToken: 'NEW', isActive: true });
+
+      const count = await svc(repo, adapter).refreshExpiringAccountTokens();
+      expect(count).toBe(1);
+    });
+  });
 });

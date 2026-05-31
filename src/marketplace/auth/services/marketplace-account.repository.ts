@@ -61,6 +61,14 @@ export class MarketplaceAccountRepository {
     return this.model.findOne({ _id: this.toObjectId(accountId) } as any).lean().exec();
   }
 
+  /** Contas com token ativo cujo expiresAt é anterior a `before` (precisam refresh). */
+  async findExpiringTokenAccounts(before: Date): Promise<MarketplaceAccountModel[]> {
+    return this.model
+      .find({ 'token.isActive': true, 'token.expiresAt': { $lt: before } } as any)
+      .lean()
+      .exec();
+  }
+
   /** Persiste (substitui) o token OAuth de uma conta. Idempotente via $set. */
   async updateToken(accountId: string | Types.ObjectId, token: Record<string, any>): Promise<void> {
     await this.model.updateOne(

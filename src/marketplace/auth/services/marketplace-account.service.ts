@@ -79,6 +79,25 @@ export class MarketplaceAccountService {
     return promise;
   }
 
+  /**
+   * Refresh proativo de contas com token expirando (cron). Não derruba o lote
+   * se uma conta falhar — conta só os sucessos. Caminho paralelo ao legado.
+   */
+  async refreshExpiringAccountTokens(bufferMinutes = 30): Promise<number> {
+    const before = new Date(Date.now() + bufferMinutes * 60 * 1000);
+    const accounts = await this.repo.findExpiringTokenAccounts(before);
+    let refreshed = 0;
+    for (const acc of accounts) {
+      try {
+        await this.refreshAccountToken(String((acc as any)._id));
+        refreshed++;
+      } catch (err: any) {
+        // não derruba o lote; log fica a cargo do caller/scheduler
+      }
+    }
+    return refreshed;
+  }
+
   private async doRefreshAccountToken(accountId: string): Promise<void> {
     const account = await this.repo.findById(accountId);
     if (!account?.token?.refreshToken) {
