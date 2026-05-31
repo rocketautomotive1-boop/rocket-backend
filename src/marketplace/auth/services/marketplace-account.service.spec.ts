@@ -96,4 +96,31 @@ describe('MarketplaceAccountService', () => {
       await expect(svc(repo).refreshAccountToken('acc1')).rejects.toBeTruthy();
     });
   });
+
+  describe('buildAuthUrl', () => {
+    it('builds the auth URL using the account clientId', async () => {
+      const repo = makeRepo();
+      repo.findById.mockResolvedValue({ _id: 'acc1', credentials: { clientId: encrypt('CID') } });
+      const adapter = makeAdapter() as any;
+      adapter.generateAuthUrlForAccount = jest.fn().mockReturnValue({ authUrl: 'https://auth?client_id=CID' });
+
+      const { authUrl } = await svc(repo, adapter).buildAuthUrl('acc1', 'https://cb');
+      expect(adapter.generateAuthUrlForAccount).toHaveBeenCalledWith('CID', 'https://cb');
+      expect(authUrl).toContain('CID');
+    });
+  });
+
+  describe('handleAuthCallback', () => {
+    it('exchanges the code with account creds and saves the token', async () => {
+      const repo = makeRepo();
+      repo.findById.mockResolvedValue({ _id: 'acc1', credentials: { clientId: encrypt('CID'), clientSecret: encrypt('CSECRET') } });
+      const adapter = makeAdapter() as any;
+      adapter.authenticateForAccount = jest.fn().mockResolvedValue({ accessToken: 'AT', refreshToken: 'RT', isActive: true });
+
+      await svc(repo, adapter).handleAuthCallback('acc1', 'CODE', 'https://cb');
+
+      expect(adapter.authenticateForAccount).toHaveBeenCalledWith('CODE', 'CID', 'CSECRET', 'https://cb');
+      expect(repo.updateToken).toHaveBeenCalledWith('acc1', expect.objectContaining({ accessToken: 'AT' }));
+    });
+  });
 });

@@ -46,6 +46,24 @@ export class MarketplaceAccountService {
     });
   }
 
+  /** Gera a URL de autorização OAuth para a conta (usa o clientId da conta). */
+  async buildAuthUrl(accountId: string, redirectUri: string): Promise<{ authUrl: string }> {
+    const account = await this.repo.findById(accountId);
+    if (!account) throw new BadRequestException(`Conta ${accountId} não encontrada.`);
+    const clientId = this.readCredential(account.credentials, 'clientId');
+    return this.mlAdapter.generateAuthUrlForAccount(clientId, redirectUri);
+  }
+
+  /** Troca o code por token (credenciais da conta) e persiste na conta. */
+  async handleAuthCallback(accountId: string, code: string, redirectUri: string): Promise<void> {
+    const account = await this.repo.findById(accountId);
+    if (!account) throw new BadRequestException(`Conta ${accountId} não encontrada.`);
+    const clientId = this.readCredential(account.credentials, 'clientId');
+    const clientSecret = this.readCredential(account.credentials, 'clientSecret');
+    const tokenData = await this.mlAdapter.authenticateForAccount(code, clientId, clientSecret, redirectUri);
+    await this.saveAccountToken(accountId, tokenData);
+  }
+
   /** Persiste o token OAuth de uma conta (idempotente). */
   async saveAccountToken(accountId: string, tokenData: Record<string, any>): Promise<void> {
     await this.repo.updateToken(accountId, { ...tokenData, isActive: true });

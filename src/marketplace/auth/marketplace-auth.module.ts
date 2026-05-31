@@ -21,6 +21,7 @@ import { YampiAuthAdapter } from '../adapters/yampi/yampi-auth.adapter';
 
 import { HttpModule } from '@nestjs/axios';
 
+import { MarketplaceAccountAuthController } from './controllers/marketplace-account-auth.controller';
 import { MarketplaceAuthController } from './controllers/marketplace-auth.controller';
 import { MarketplaceCallbackController } from './controllers/marketplace-callback.controller';
 
@@ -38,7 +39,8 @@ import { MarketplaceCallbackController } from './controllers/marketplace-callbac
     ],
     controllers: [
         MarketplaceAuthController,
-        MarketplaceCallbackController
+        MarketplaceCallbackController,
+        MarketplaceAccountAuthController
     ],
     providers: [
         MarketplaceAuthService,
