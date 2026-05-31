@@ -124,6 +124,37 @@ describe('MarketplaceAccountService', () => {
     });
   });
 
+  describe('ensureValidAccountToken', () => {
+    it('returns the token as-is when it is not expiring', async () => {
+      const repo = makeRepo();
+      const future = new Date(Date.now() + 60 * 60 * 1000); // +1h
+      repo.findById.mockResolvedValue({ _id: 'acc1', token: { accessToken: 'AT', expiresAt: future, refreshToken: 'RT', isActive: true }, credentials: {} });
+      const adapter = makeAdapter() as any;
+      adapter.refreshTokenForAccount = jest.fn();
+
+      const token = await svc(repo, adapter).ensureValidAccountToken('acc1');
+      expect(token.accessToken).toBe('AT');
+      expect(adapter.refreshTokenForAccount).not.toHaveBeenCalled();
+    });
+
+    it('refreshes and returns the new token when expiring soon', async () => {
+      const repo = makeRepo();
+      const soon = new Date(Date.now() + 5 * 60 * 1000); // +5min (< 30min buffer)
+      repo.findById
+        .mockResolvedValueOnce({ _id: 'acc1', token: { accessToken: 'OLD', expiresAt: soon, refreshToken: 'RT', isActive: true }, credentials: { clientId: encrypt('CID'), clientSecret: encrypt('CSECRET') } })
+        // second findById inside refreshAccountToken
+        .mockResolvedValueOnce({ _id: 'acc1', token: { accessToken: 'OLD', expiresAt: soon, refreshToken: 'RT', additionalData: {} }, credentials: { clientId: encrypt('CID'), clientSecret: encrypt('CSECRET') } })
+        // third findById to return the refreshed token
+        .mockResolvedValueOnce({ _id: 'acc1', token: { accessToken: 'NEW', refreshToken: 'NRT', isActive: true }, credentials: {} });
+      const adapter = makeAdapter() as any;
+      adapter.refreshTokenForAccount = jest.fn().mockResolvedValue({ accessToken: 'NEW', refreshToken: 'NRT', isActive: true });
+
+      const token = await svc(repo, adapter).ensureValidAccountToken('acc1');
+      expect(adapter.refreshTokenForAccount).toHaveBeenCalled();
+      expect(token.accessToken).toBe('NEW');
+    });
+  });
+
   describe('refreshExpiringAccountTokens', () => {
     it('refreshes each expiring account and returns the count', async () => {
       const repo = makeRepo();

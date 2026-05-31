@@ -69,6 +69,29 @@ export class MarketplaceAccountService {
     await this.repo.updateToken(accountId, { ...tokenData, isActive: true });
   }
 
+  /**
+   * Retorna um token válido da conta, renovando se estiver expirando (buffer 30min).
+   * Usado pelo endpoint interno que serve o orchestrator (publish multi-conta).
+   */
+  async ensureValidAccountToken(accountId: string, bufferMinutes = 30): Promise<Record<string, any>> {
+    const account = await this.repo.findById(accountId);
+    if (!account?.token?.accessToken) {
+      throw new BadRequestException(`Conta ${accountId} não possui token ativo.`);
+    }
+    if (this.isExpiringSoon(account.token, bufferMinutes)) {
+      await this.refreshAccountToken(accountId);
+      const refreshed = await this.repo.findById(accountId);
+      return (refreshed?.token ?? account.token) as Record<string, any>;
+    }
+    return account.token as Record<string, any>;
+  }
+
+  private isExpiringSoon(token: any, bufferMinutes: number): boolean {
+    if (!token?.expiresAt) return false;
+    const bufferMs = bufferMinutes * 60 * 1000;
+    return new Date(token.expiresAt).getTime() - Date.now() < bufferMs;
+  }
+
   /** Renova o token de uma conta usando as credenciais dela. Lock por accountId. */
   async refreshAccountToken(accountId: string): Promise<void> {
     const inFlight = this.refreshLocks.get(accountId);
