@@ -171,5 +171,60 @@ export class MercadoLivreAuthAdapter implements IMarketplaceAuthAdapter, OnModul
     const authUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=offline_access%20read%20write`;
     return { authUrl };
   }
+
+  // ── OAuth por conta (multi-client) ────────────────────────────────────────
+  // Variantes puras que recebem as credenciais da conta como argumentos, em vez
+  // de ler do env. O caminho legado acima (env) permanece intocado p/ autopeças.
+
+  /** Gera a URL de autorização usando o clientId da conta. */
+  generateAuthUrlForAccount(clientId: string, redirectUri: string): { authUrl: string } {
+    if (!clientId) throw new InternalServerErrorException('clientId da conta ausente.');
+    const authUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=offline_access%20read%20write`;
+    return { authUrl };
+  }
+
+  /** Troca o code por token usando as credenciais da conta. */
+  async authenticateForAccount(code: string, clientId: string, clientSecret: string, redirectUri: string): Promise<any> {
+    const params = new URLSearchParams();
+    params.append('grant_type', 'authorization_code');
+    params.append('client_id', clientId);
+    params.append('client_secret', clientSecret);
+    params.append('code', code);
+    params.append('redirect_uri', redirectUri);
+
+    const response = await axios.post(`${this.baseUrl}/oauth/token`, params, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    });
+
+    return {
+      accessToken: response.data.access_token,
+      refreshToken: response.data.refresh_token,
+      expiresAt: new Date(Date.now() + response.data.expires_in * 1000),
+      tokenType: response.data.token_type,
+      additionalData: { scope: response.data.scope, userId: response.data.user_id, clientId },
+      isActive: true,
+    };
+  }
+
+  /** Renova o token usando as credenciais da conta. */
+  async refreshTokenForAccount(token: any, clientId: string, clientSecret: string): Promise<any> {
+    const response = await axios.post(`${this.baseUrl}/oauth/token`, {
+      grant_type: 'refresh_token',
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: token.refreshToken,
+    }, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    });
+
+    return {
+      accessToken: response.data.access_token,
+      refreshToken: response.data.refresh_token,
+      expiresAt: new Date(Date.now() + response.data.expires_in * 1000),
+      tokenType: response.data.token_type,
+      additionalData: { ...(token.additionalData ?? {}), scope: response.data.scope, userId: response.data.user_id, clientId },
+      isActive: true,
+    };
+  }
 }
 
