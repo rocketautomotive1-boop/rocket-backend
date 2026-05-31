@@ -6,6 +6,7 @@ import { GeneralProductModel, GeneralProductSchema } from './schemas/general-pro
 import { GeneralProductRepository } from './general-product.repository';
 import { GeneralProductService } from './general-product.service';
 import { GeneralDiscoveryService } from './services/general-discovery.service';
+import { GeneralDiscoveryResponseConsumer } from './consumers/general-discovery-response.consumer';
 
 /**
  * Domínio de itens gerais (saúde, beleza, bebidas, alimentos).
@@ -18,7 +19,7 @@ import { GeneralDiscoveryService } from './services/general-discovery.service';
       GENERAL_CONNECTION,
     ),
   ],
-  providers: [GeneralProductRepository, GeneralProductService, GeneralDiscoveryService],
+  providers: [GeneralProductRepository, GeneralProductService, GeneralDiscoveryService, GeneralDiscoveryResponseConsumer],
   exports: [GeneralProductService, GeneralProductRepository, GeneralDiscoveryService],
 })
 export class GeneralProductModule {}
