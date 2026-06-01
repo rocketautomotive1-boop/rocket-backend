@@ -100,4 +100,62 @@ export class MercadoLivrePricingAdapter {
     const data = response.data;
     return Array.isArray(data) ? data : [data];
   }
+
+  /**
+   * Sugere o preço de venda que atinge `targetMargin` para um dado custo.
+   * Busca binária no preço; a fee é reconsultada a cada candidato via `feeLookup`.
+   * Retorna `{ suggestedPrice: null, converged: false }` se a margem não for
+   * atingível na faixa (mesmo no `maxPrice` a margem fica abaixo do alvo).
+   *
+   * `converged` indica se o preço retornado está dentro da tolerância (0.5%) do
+   * alvo. Pode vir `false` se as 25 iterações se esgotarem — o que pode ocorrer
+   * se a curva de fee da ML não for monotônica (ex.: caps/floors por categoria).
+   * Nesse caso o preço é o melhor esforço e um aviso é logado.
+   *
+   * `feeLookup(price)` deve retornar o sale_fee_amount para aquele preço.
+   * Limitado a 25 iterações (≈ precisão de centavos em faixas usuais).
+   */
+  async suggestPriceForMargin(opts: {
+    cost: number;
+    targetMargin: number;
+    feeLookup: (price: number) => Promise<number>;
+    minPrice?: number;
+    maxPrice?: number;
+  }): Promise<{ suggestedPrice: number | null; converged: boolean }> {
+    const { cost, targetMargin, feeLookup } = opts;
+    let lo = opts.minPrice ?? Math.max(cost, 1);
+    let hi = opts.maxPrice ?? Math.max(cost * 10, 1000);
+
+    const marginAt = async (price: number): Promise<number> => {
+      const fee = await feeLookup(price);
+      return (price - cost - fee) / price; // price > 0 guaranteed by lo >= 1
+    };
+
+    // If even the max price can't reach the target, it's unreachable.
+    if ((await marginAt(hi)) < targetMargin) {
+      return { suggestedPrice: null, converged: false };
+    }
+
+    for (let i = 0; i < 25; i++) {
+      const mid = (lo + hi) / 2;
+      const margin = await marginAt(mid);
+      if (Math.abs(margin - targetMargin) <= 0.005) {
+        return { suggestedPrice: Math.round(mid * 100) / 100, converged: true };
+      }
+      if (margin < targetMargin) lo = mid;
+      else hi = mid;
+    }
+
+    // Fallthrough after 25 iterations: best effort. Verify and warn if off-target
+    // (can happen with non-monotonic ML fee curves).
+    const finalPrice = Math.round(((lo + hi) / 2) * 100) / 100;
+    const finalMargin = await marginAt(finalPrice);
+    const converged = Math.abs(finalMargin - targetMargin) <= 0.005;
+    if (!converged) {
+      this.logger.warn(
+        `suggestPriceForMargin não convergiu: margem ${finalMargin.toFixed(4)} vs alvo ${targetMargin} (preço ${finalPrice})`,
+      );
+    }
+    return { suggestedPrice: finalPrice, converged };
+  }
 }

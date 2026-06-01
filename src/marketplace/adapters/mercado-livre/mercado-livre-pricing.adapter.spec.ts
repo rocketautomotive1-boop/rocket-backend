@@ -124,4 +124,42 @@ describe('MercadoLivrePricingAdapter (pure math)', () => {
       expect(out).toHaveLength(1);
     });
   });
+
+  describe('suggestPriceForMargin', () => {
+    const adapter = new MercadoLivrePricingAdapter({ getValidToken: jest.fn() } as any);
+
+    // Fee model for the test: 15% of price, no fixed fee.
+    const feeLookup = async (price: number) => price * 0.15;
+
+    it('finds a price whose margin matches the target (cost 60, target 20%)', async () => {
+      // netProfit = price - 60 - 0.15*price = 0.85*price - 60
+      // margin = (0.85*price - 60)/price = 0.85 - 60/price = 0.20  => price = 60/0.65 ≈ 92.31
+      const r = await adapter.suggestPriceForMargin({
+        cost: 60,
+        targetMargin: 0.2,
+        feeLookup,
+        minPrice: 60,
+        maxPrice: 1000,
+      });
+      expect(r.suggestedPrice).toBeGreaterThan(92);
+      expect(r.suggestedPrice).toBeLessThan(93);
+      expect(r.converged).toBe(true);
+
+      const fee = await feeLookup(r.suggestedPrice);
+      const margin = (r.suggestedPrice - 60 - fee) / r.suggestedPrice;
+      expect(margin).toBeCloseTo(0.2, 2);
+    });
+
+    it('returns null when the target margin is unreachable within bounds', async () => {
+      const r = await adapter.suggestPriceForMargin({
+        cost: 60,
+        targetMargin: 0.95, // needs price→∞ with this fee model
+        feeLookup,
+        minPrice: 60,
+        maxPrice: 200,
+      });
+      expect(r.suggestedPrice).toBeNull();
+      expect(r.converged).toBe(false);
+    });
+  });
 });
