@@ -1,4 +1,5 @@
 import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
+import axios from 'axios';
 import { MercadoLivreAuthAdapter } from './mercado-livre-auth.adapter';
 
 /** Um listing type da resposta crua de /sites/{SITE}/listing_prices. */
@@ -74,5 +75,29 @@ export class MercadoLivrePricingAdapter {
           marginPct,
         };
       });
+  }
+
+  /**
+   * Proxy somente-leitura para /sites/MLB/listing_prices.
+   * Retorna sempre um array de listing types crus.
+   */
+  async getListingPrices(params: {
+    price: number;
+    categoryId?: string;
+    listingTypeId?: string;
+  }): Promise<RawListingType[]> {
+    const token = await this.authAdapter.getValidToken(this.marketplaceName);
+
+    const query: Record<string, string | number> = { price: params.price };
+    if (params.categoryId) query.category_id = params.categoryId;
+    if (params.listingTypeId) query.listing_type_id = params.listingTypeId;
+
+    const response = await axios.get(`${this.baseUrl}/sites/${this.site}/listing_prices`, {
+      params: query,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const data = response.data;
+    return Array.isArray(data) ? data : [data];
   }
 }

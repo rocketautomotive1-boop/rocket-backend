@@ -84,4 +84,44 @@ describe('MercadoLivrePricingAdapter (pure math)', () => {
       expect(Number.isNaN(out[0].netProfit)).toBe(false);
     });
   });
+
+  describe('getListingPrices (ML proxy)', () => {
+    const authAdapter = { getValidToken: jest.fn().mockResolvedValue('TOKEN123') };
+    const proxyAdapter = new MercadoLivrePricingAdapter(authAdapter as any);
+    const axios = jest.requireActual('axios');
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+      authAdapter.getValidToken.mockClear();
+    });
+
+    it('calls the MLB listing_prices endpoint with price and category, bearer token', async () => {
+      const spy = jest.spyOn(axios, 'get').mockResolvedValue({ data: [{ listing_type_id: 'gold_special' }] });
+
+      const out = await proxyAdapter.getListingPrices({ price: 100, categoryId: 'MLB1403' });
+
+      expect(authAdapter.getValidToken).toHaveBeenCalledWith('Mercado Livre');
+      const [url, config] = spy.mock.calls[0];
+      expect(url).toContain('/sites/MLB/listing_prices');
+      expect((config as any).params).toEqual({ price: 100, category_id: 'MLB1403' });
+      expect((config as any).headers.Authorization).toBe('Bearer TOKEN123');
+      expect(out).toEqual([{ listing_type_id: 'gold_special' }]);
+    });
+
+    it('omits category_id when not provided and passes listing_type_id when given', async () => {
+      const spy = jest.spyOn(axios, 'get').mockResolvedValue({ data: [] });
+
+      await proxyAdapter.getListingPrices({ price: 50, listingTypeId: 'gold_pro' });
+
+      const [, config] = spy.mock.calls[0];
+      expect((config as any).params).toEqual({ price: 50, listing_type_id: 'gold_pro' });
+    });
+
+    it('normalizes a single-object response into an array', async () => {
+      jest.spyOn(axios, 'get').mockResolvedValue({ data: { listing_type_id: 'gold_special' } });
+      const out = await proxyAdapter.getListingPrices({ price: 100, listingTypeId: 'gold_special' });
+      expect(Array.isArray(out)).toBe(true);
+      expect(out).toHaveLength(1);
+    });
+  });
 });
