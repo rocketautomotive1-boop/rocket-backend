@@ -8,6 +8,9 @@ interface GeneralDiscoveryResponse {
   barcode: string;
   status: 'completed' | 'failed';
   result?: Record<string, any>;
+  priceStats?: { min: number | null; avg: number | null; max: number | null; count: number } | null;
+  images?: string[];
+  sources?: Record<string, any>;
   error?: string;
   scrapedAt?: string;
 }
@@ -33,7 +36,15 @@ export class GeneralDiscoveryResponseConsumer {
       this.logger.warn(`General discovery ${msg.jobId} not applied: status=${msg.status} hasResult=${!!msg.result}`);
       return;
     }
-    await this.repo.upsertDraftByBarcode(msg.barcode, msg.result);
-    this.logger.log(`General discovery draft saved: jobId=${msg.jobId} barcode=${msg.barcode}`);
+    // Grava o enriquecimento da IA + preços/imagens reais do ML (quando houver).
+    const draft = {
+      ...msg.result,
+      priceStats: msg.priceStats ?? null,
+      images: msg.images ?? [],
+      sources: msg.sources ?? null,
+    };
+    await this.repo.upsertDraftByBarcode(msg.barcode, draft);
+    const mlCount = msg.sources?.mercadolivre?.items?.length ?? 0;
+    this.logger.log(`General discovery draft saved: jobId=${msg.jobId} barcode=${msg.barcode} (priceStats=${!!msg.priceStats} images=${msg.images?.length ?? 0} mlListings=${mlCount})`);
   }
 }

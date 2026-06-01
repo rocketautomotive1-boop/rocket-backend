@@ -7,6 +7,7 @@ import { GeneralProductRepository } from './general-product.repository';
 import { GeneralProductService } from './general-product.service';
 import { GeneralDiscoveryService } from './services/general-discovery.service';
 import { GeneralDiscoveryResponseConsumer } from './consumers/general-discovery-response.consumer';
+import { GeneralProductController } from './general-product.controller';
 
 /**
  * Domínio de itens gerais (saúde, beleza, bebidas, alimentos).
@@ -19,6 +20,7 @@ import { GeneralDiscoveryResponseConsumer } from './consumers/general-discovery-
       GENERAL_CONNECTION,
     ),
   ],
+  controllers: [GeneralProductController],
   providers: [GeneralProductRepository, GeneralProductService, GeneralDiscoveryService, GeneralDiscoveryResponseConsumer],
   exports: [GeneralProductService, GeneralProductRepository, GeneralDiscoveryService],
 })

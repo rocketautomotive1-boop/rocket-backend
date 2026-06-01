@@ -15,7 +15,39 @@ describe('GeneralDiscoveryResponseConsumer', () => {
       result: { titles: ['Nescau 400g'] },
     } as any);
 
-    expect(repo.upsertDraftByBarcode).toHaveBeenCalledWith('7891000100103', { titles: ['Nescau 400g'] });
+    // draft inclui o result da IA + priceStats/images/sources (defaults quando ausentes)
+    expect(repo.upsertDraftByBarcode).toHaveBeenCalledWith('7891000100103', {
+      titles: ['Nescau 400g'],
+      priceStats: null,
+      images: [],
+      sources: null,
+    });
+  });
+
+  it('merges real ML priceStats, images and individual listings (sources) into the draft', async () => {
+    const repo = makeRepo();
+    const consumer = new GeneralDiscoveryResponseConsumer(repo as any);
+
+    const sources = {
+      mercadolivre: { items: [{ url: 'u1', title: 'Óleo Elseve', price: 35.9 }], confidence: 'high' },
+      serp: { items: [], confidence: 'none' },
+    };
+    await consumer.handle({
+      jobId: 'j1',
+      barcode: '7899026478909',
+      status: 'completed',
+      result: { titles: ['Óleo Elseve'] },
+      priceStats: { min: 35.9, avg: 37.9, max: 39.9, count: 2 },
+      images: ['img1', 'img2'],
+      sources,
+    } as any);
+
+    expect(repo.upsertDraftByBarcode).toHaveBeenCalledWith('7899026478909', {
+      titles: ['Óleo Elseve'],
+      priceStats: { min: 35.9, avg: 37.9, max: 39.9, count: 2 },
+      images: ['img1', 'img2'],
+      sources,
+    });
   });
 
   it('does NOT upsert on a failed response', async () => {
