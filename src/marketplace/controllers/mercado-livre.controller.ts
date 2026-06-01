@@ -1,10 +1,11 @@
-import { Controller, Get, Post, Body, Param, BadRequestException, NotFoundException, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, BadRequestException, BadGatewayException, NotFoundException, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { MercadoLivreService } from '../services/mercado-livre.service';
 import { MarketplaceService } from '../services/marketplace.service';
 import { ProductTitleService } from '../../product/services/product-title.service';
 import { MarketplaceAuthService } from '../auth/services/marketplace-auth.service';
 import { ProductService } from '../../product/product.service';
+import { MercadoLivrePricingAdapter } from '../adapters/mercado-livre/mercado-livre-pricing.adapter';
 // import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'; // Assuming protection is needed
 
 @ApiTags('Mercado Livre')
@@ -16,6 +17,7 @@ export class MercadoLivreController {
         private readonly productTitleService: ProductTitleService,
         private readonly marketplaceAuthService: MarketplaceAuthService,
         private readonly productService: ProductService,
+        private readonly pricingAdapter: MercadoLivrePricingAdapter,
     ) { }
 
     @Get('item/:externalId/status')
@@ -141,5 +143,72 @@ export class MercadoLivreController {
         // Using ML service directly because this logic seems very specific (passing product doc)
         // Could eventually be genericized but for now extract is safer.
         return this.mercadoLivreService.discoverCategory(title, product);
+    }
+
+    @Get('listing-prices')
+    @ApiOperation({ summary: 'Simula custos de venda no Mercado Livre (somente leitura). Com targetMargin pode levar alguns segundos (múltiplas consultas à ML).' })
+    @ApiResponse({ status: 200, description: 'Comissão, lucro líquido e comparação de listing types' })
+    @ApiResponse({ status: 400, description: 'Parâmetros inválidos' })
+    async getListingPrices(
+        @Query('price') priceRaw: string,
+        @Query('cost') costRaw?: string,
+        @Query('categoryId') categoryId?: string,
+        @Query('listingTypeId') listingTypeId?: string,
+        @Query('targetMargin') targetMarginRaw?: string,
+    ) {
+        const price = Number(priceRaw);
+        if (!Number.isFinite(price) || price <= 0) {
+            throw new BadRequestException('Parâmetro "price" deve ser um número maior que zero.');
+        }
+        const cost = costRaw !== undefined ? Number(costRaw) : undefined;
+        if (cost !== undefined && (!Number.isFinite(cost) || cost < 0)) {
+            throw new BadRequestException('Parâmetro "cost" deve ser um número maior ou igual a zero.');
+        }
+        const targetMargin = targetMarginRaw !== undefined ? Number(targetMarginRaw) : undefined;
+        if (targetMargin !== undefined && (!Number.isFinite(targetMargin) || targetMargin <= 0 || targetMargin >= 0.95)) {
+            throw new BadRequestException('Parâmetro "targetMargin" deve estar entre 0 e 0.95.');
+        }
+
+        let raw;
+        try {
+            raw = await this.pricingAdapter.getListingPrices({ price, categoryId, listingTypeId });
+        } catch (error) {
+            throw new BadGatewayException(
+                `Falha ao consultar custos no Mercado Livre: ${error?.response?.data?.message || error.message}`,
+            );
+        }
+
+        const listingTypes = this.pricingAdapter.compareListingTypes(raw, price, cost);
+
+        let suggestion: { targetMargin: number; listingTypeId: string; suggestedPrice: number } | null = null;
+        if (targetMargin !== undefined && cost !== undefined) {
+            // Default the suggestion to the Clássico fee curve (or the explicitly requested type).
+            const suggestTypeId = listingTypeId || 'gold_special';
+            const feeLookup = async (candidatePrice: number): Promise<number> => {
+                const r = await this.pricingAdapter.getListingPrices({
+                    price: candidatePrice,
+                    categoryId,
+                    listingTypeId: suggestTypeId,
+                });
+                return r[0]?.sale_fee_amount ?? 0;
+            };
+            const { suggestedPrice } = await this.pricingAdapter.suggestPriceForMargin({
+                cost: cost ?? 0,
+                targetMargin,
+                feeLookup,
+            });
+            if (suggestedPrice !== null) {
+                suggestion = { targetMargin, listingTypeId: suggestTypeId, suggestedPrice };
+            }
+        }
+
+        return {
+            currencyId: raw[0]?.currency_id ?? 'BRL',
+            categoryId: categoryId ?? null,
+            price,
+            cost: cost ?? null,
+            listingTypes,
+            suggestion,
+        };
     }
 }
