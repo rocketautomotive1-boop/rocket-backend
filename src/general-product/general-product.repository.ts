@@ -39,6 +39,31 @@ export class GeneralProductRepository {
     ).exec();
   }
 
+  /**
+   * Upsert por barcode aplicando SOMENTE os campos do patch via `$set`.
+   * NUNCA grava `draftData` (o draft é sugestão de leitura, intocável aqui).
+   * Campos monetários/peso são castados para Decimal128 pelo schema do Mongoose.
+   * Retorna o documento atualizado e sanitizado.
+   */
+  async updateByBarcode(
+    barcode: string,
+    patch: Partial<GeneralProductModel>,
+  ): Promise<GeneralProductModel | null> {
+    // Defesa extra: jamais deixar draftData (ou o próprio barcode) entrar no $set.
+    const { draftData, barcode: _ignored, ...safe } = (patch ?? {}) as Record<string, any>;
+
+    const doc = await this.model
+      .findOneAndUpdate(
+        { barcode },
+        { $set: safe, $setOnInsert: { barcode } },
+        { upsert: true, new: true, setDefaultsOnInsert: true },
+      )
+      .lean()
+      .exec();
+
+    return this.toDto(doc);
+  }
+
   private toDto(doc: any): GeneralProductModel | null {
     if (!doc) return null;
     const obj = typeof doc.toObject === 'function' ? doc.toObject() : doc;

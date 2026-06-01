@@ -69,4 +69,33 @@ describe('GeneralProductRepository', () => {
     const all = await (repo as any).model.find({ barcode: '7891000100103' }).lean().exec();
     expect(all).toHaveLength(1);
   });
+
+  it('updateByBarcode creates the product on first save (upsert) with only patch fields', async () => {
+    const updated = await repo.updateByBarcode('7891000100103', { name: 'Nescau 400g', ncm: '18069000' });
+    expect(updated?.barcode).toBe('7891000100103');
+    expect(updated?.name).toBe('Nescau 400g');
+    expect(updated?.ncm).toBe('18069000');
+  });
+
+  it('updateByBarcode patches only the given fields on an existing product', async () => {
+    await repo.create({ barcode: '7891000100103', name: 'Antigo', ncm: '18069000' });
+    const updated = await repo.updateByBarcode('7891000100103', { name: 'Novo Nome' });
+    expect(updated?.name).toBe('Novo Nome');
+    expect(updated?.ncm).toBe('18069000'); // untouched field preserved
+  });
+
+  it('updateByBarcode NEVER overwrites draftData', async () => {
+    await repo.upsertDraftByBarcode('7891000100103', { titles: ['Sugestão IA'] });
+    await repo.updateByBarcode('7891000100103', { name: 'Confirmado', draftData: { titles: ['HACK'] } } as any);
+    const found = await repo.findByBarcode('7891000100103');
+    expect(found?.name).toBe('Confirmado');
+    expect(found?.draftData).toEqual({ titles: ['Sugestão IA'] }); // draft preserved
+  });
+
+  it('updateByBarcode stores money fields and sanitizes Decimal128 to string on read', async () => {
+    await repo.updateByBarcode('7891000100103', { price: 12.9, costPrice: 8 } as any);
+    const found = await repo.findByBarcode('7891000100103');
+    expect(Number(found?.price)).toBeCloseTo(12.9, 2);
+    expect(Number(found?.costPrice)).toBeCloseTo(8, 2);
+  });
 });
