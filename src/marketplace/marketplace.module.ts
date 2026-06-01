@@ -13,6 +13,7 @@ import { OrderModule } from '../order/order.module';
 import { ListingModule } from '../listing/listing.module'; // [NEW]
 import { AiModule } from '../ai/ai.module';
 import { MercadoLivreProductAdapter } from './adapters/mercado-livre/mercado-livre-product.adapter';
+import { MercadoLivrePricingAdapter } from './adapters/mercado-livre/mercado-livre-pricing.adapter';
 import { MercadoLivreController } from './controllers/mercado-livre.controller';
 import { PublicationLogService } from './services/publication-log.service';
 import { MarketplaceToken, MarketplaceTokenSchema } from './schemas/marketplace-token.schema';
@@ -145,6 +146,7 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     MercadoLivreAdapter,
     ShopeeAdapter,
     MercadoLivreProductAdapter,
+    MercadoLivrePricingAdapter,
     MercadoLivreOrderAdapter,
     MercadoLivreCategoryAdapter,
     MercadoLivreListingAdapter,
