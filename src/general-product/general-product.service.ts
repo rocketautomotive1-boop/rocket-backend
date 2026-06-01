@@ -3,6 +3,8 @@ import { BadRequestException, ConflictException, Injectable } from '@nestjs/comm
 import { GeneralProductRepository } from './general-product.repository';
 import { GeneralProductModel } from './schemas/general-product.schema';
 import { isValidEan13 } from './validation/ean13';
+import { deriveCompletion, GeneralCompletion } from './completion/derive-completion';
+import { UpdateGeneralProductPatch } from './dto/update-general-product.schema';
 
 /**
  * Regras de domínio do GeneralProduct. Side effects (persistência) ficam no
@@ -16,6 +18,22 @@ export class GeneralProductService {
     this.assertValidBarcode(data.barcode);
     await this.assertBarcodeUnused(data.barcode!);
     return this.repo.create(data);
+  }
+
+  /** Completude por seção, derivada dos campos finais (produto inexistente → tudo false). */
+  async getCompletion(barcode: string): Promise<GeneralCompletion> {
+    this.assertValidBarcode(barcode);
+    const product = await this.repo.findByBarcode(barcode);
+    return deriveCompletion(product);
+  }
+
+  /** Salva (upsert) os campos confirmados de uma seção. Não toca draftData. */
+  async updateByBarcode(
+    barcode: string,
+    patch: UpdateGeneralProductPatch,
+  ): Promise<GeneralProductModel | null> {
+    this.assertValidBarcode(barcode);
+    return this.repo.updateByBarcode(barcode, patch as unknown as Partial<GeneralProductModel>);
   }
 
   private assertValidBarcode(barcode?: string): void {
