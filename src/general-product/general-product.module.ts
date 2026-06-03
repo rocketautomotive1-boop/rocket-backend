@@ -6,7 +6,6 @@ import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
 import { GeneralProductRepository } from './general-product.repository';
 import { GeneralProductService } from './general-product.service';
 import { GeneralDiscoveryService } from './services/general-discovery.service';
-import { GeneralDiscoveryResponseConsumer } from './consumers/general-discovery-response.consumer';
 import { GeneralProductController } from './general-product.controller';
 
 /**
@@ -20,7 +19,7 @@ import { GeneralProductController } from './general-product.controller';
     ProductModule,
   ],
   controllers: [GeneralProductController],
-  providers: [GeneralProductRepository, GeneralProductService, GeneralDiscoveryService, GeneralDiscoveryResponseConsumer],
+  providers: [GeneralProductRepository, GeneralProductService, GeneralDiscoveryService],
   exports: [GeneralProductService, GeneralProductRepository, GeneralDiscoveryService],
 })
 export class GeneralProductModule {}
