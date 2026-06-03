@@ -130,10 +130,6 @@ export class GeneralProductModel {
   @Prop({ type: Object })
   draftData?: Record<string, any>;
 
-  /** Id do ProductModel projetado (system-owned, Mongo A) para publicação. Null até o 1º publish. */
-  @Prop({ type: Types.ObjectId, ref: 'ProductModel', default: null })
-  projectedProductId: Types.ObjectId | null;
-
   @Prop({ default: 'general', enum: ['general'] })
   domain: string;
 }
