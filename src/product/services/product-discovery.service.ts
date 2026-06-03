@@ -100,12 +100,19 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
     }
 
     async startDiscovery(params: {
-        partNumber: string;
+        partNumber?: string;
         brand?: string;
         productId?: string;
+        barcode?: string;
+        domain?: string;
     }): Promise<string> {
-        const { partNumber, brand, productId } = params;
-        const dedup = computeDiscoveryDedupFields({ partNumber, brand, isGenuine: false });
+        const { brand, productId, barcode, domain } = params;
+        const isGeneral = domain === 'general';
+        // Itens gerais buscam por barcode (não têm partNumber). Usamos o barcode
+        // como "partNumber" interno para reaproveitar dedup/intent/status sem
+        // tocar o caminho de autopeças.
+        const partNumber = isGeneral ? (barcode ?? '').trim() : (params.partNumber ?? '');
+        const dedup = computeDiscoveryDedupFields({ partNumber, brand: isGeneral ? '' : brand, isGenuine: false });
         const { partNumberNorm, brandNorm } = dedup;
         const productObjectId = productId ? new Types.ObjectId(productId) : undefined;
 
@@ -143,7 +150,8 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
 
             const nextIntentVersion = Number(latestByProduct?.intentVersion ?? 0) + 1;
             const jobId = uuidv4();
-            const query = `${partNumber} ${brand || ''}`.trim();
+            // general → busca pelo barcode; autopeças → partNumber + marca (igual ao atual).
+            const query = isGeneral ? partNumber : `${partNumber} ${brand || ''}`.trim();
 
             await this.discoveryModel.updateMany(
                 { productId: productObjectId, isActiveIntent: true },
@@ -179,6 +187,9 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
                     brand,
                     productId,
                     intentVersion: nextIntentVersion,
+                    // Roteamento por domínio no microserviço (autoparts/general).
+                    domain: domain ?? 'autoparts',
+                    barcode: isGeneral ? partNumber : barcode,
                 });
                 this.logger.log(`Published message to RabbitMQ: ${published ? 'YES' : 'NO'}`);
             } catch (err: any) {

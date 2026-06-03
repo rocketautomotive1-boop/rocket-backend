@@ -1,6 +1,7 @@
 // backend/src/general-product/general-product.module.ts
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ProductModule } from '../product/product.module';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
 import { GeneralProductRepository } from './general-product.repository';
 import { GeneralProductService } from './general-product.service';
@@ -15,6 +16,8 @@ import { GeneralProductController } from './general-product.controller';
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: ProductModel.name, schema: ProductSchema }]),
+    // Discovery unificado: reusa o ProductDiscoveryService (status + intent único).
+    ProductModule,
   ],
   controllers: [GeneralProductController],
   providers: [GeneralProductRepository, GeneralProductService, GeneralDiscoveryService, GeneralDiscoveryResponseConsumer],

@@ -1,6 +1,7 @@
 import { Controller, Post, Get, Put, Param, Body, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { GeneralDiscoveryService } from './services/general-discovery.service';
+import { ProductDiscoveryService } from '../product/services/product-discovery.service';
 import { GeneralProductRepository } from './general-product.repository';
 import { GeneralProductService } from './general-product.service';
 import { parseUpdatePatch } from './dto/update-general-product.schema';
@@ -15,6 +16,7 @@ import { ZodError } from 'zod';
 export class GeneralProductController {
   constructor(
     private readonly discovery: GeneralDiscoveryService,
+    private readonly productDiscovery: ProductDiscoveryService,
     private readonly repo: GeneralProductRepository,
     private readonly service: GeneralProductService,
   ) {}
@@ -35,7 +37,9 @@ export class GeneralProductController {
   @ApiOperation({ summary: 'Garante o produto geral por barcode + dispara discovery' })
   async ensure(@Param('barcode') barcode: string): Promise<{ productId: string; jobId: string }> {
     const { productId } = await this.service.ensureByBarcode(barcode);
-    const jobId = await this.discovery.startByBarcode(barcode);
+    // Discovery unificado: usa o ProductDiscoveryService (status consultável em
+    // /products/discovery/status/:jobId) com domain:'general' + barcode.
+    const jobId = await this.productDiscovery.startDiscovery({ productId, barcode, domain: 'general' });
     return { productId, jobId };
   }
 
