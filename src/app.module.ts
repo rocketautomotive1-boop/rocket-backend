@@ -40,7 +40,6 @@ import { SchedulerModule } from './scheduler/scheduler.module';
 import { VehicleDiscoveryModule } from './vehicle-discovery/vehicle-discovery.module';
 import { VehicleCompatibilityModule } from './vehicle-compatibility/vehicle-compatibility.module';
 import { InternalModule } from './internal/internal.module';
-import { GeneralDatabaseModule } from './database/general-database.module';
 import { GeneralProductModule } from './general-product/general-product.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
@@ -109,8 +108,6 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
         uri: configService.get<string>('MONGO_URI'),
       }),
     }),
-    // MongoDB Connection (general — itens gerais, banco físico separado)
-    GeneralDatabaseModule,
     GeneralProductModule,
     // ElasticSearch Connection
     // Search Module
