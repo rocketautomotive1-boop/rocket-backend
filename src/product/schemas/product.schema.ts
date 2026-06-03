@@ -139,10 +139,17 @@ export class ProductModel {
     @Prop({ index: true, unique: true, sparse: true })
     partNumber: string;
 
-    @Prop({ unique: true })
+    // unique + sparse: autopeças geram slug; itens gerais (domain:'general') podem
+    // não ter slug — sparse evita colisão de múltiplos null no índice unique.
+    @Prop({ unique: true, sparse: true })
     slug: string;
 
-    @Prop({ unique: true, sparse: true })
+    // Sem índice no @Prop: autopeças têm barcodes duplicados no histórico, então
+    // barcode NÃO é unique global. A unicidade (e o índice) do barcode para itens
+    // gerais (domain:'general') é criada como índice PARCIAL pela migração
+    // scripts/migrate-product-sparse-indexes.ts. Definir index aqui recriaria um
+    // barcode_1 conflitante no boot.
+    @Prop()
     barcode: string;
 
     @Prop()
