@@ -334,6 +334,10 @@ export class ProductModel {
 
     @Prop({ type: [SchemaFactory.createForClass(ProductWarning)], default: [] })
     warnings: ProductWarning[];
+
+    /** Origem do produto. 'autopecas' (default) ou 'general' (projetado de general_products). */
+    @Prop({ default: 'autopecas', index: true })
+    domain: string;
 }
 
 export const ProductSchema = SchemaFactory.createForClass(ProductModel);
