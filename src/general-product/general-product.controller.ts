@@ -27,6 +27,18 @@ export class GeneralProductController {
     return { jobId, barcode };
   }
 
+  /**
+   * Garante o Product `domain:'general'` do barcode (cria shell se preciso) e
+   * dispara o discovery. Retorna o productId (para navegar ao stepper) + jobId.
+   */
+  @Post('ensure/:barcode')
+  @ApiOperation({ summary: 'Garante o produto geral por barcode + dispara discovery' })
+  async ensure(@Param('barcode') barcode: string): Promise<{ productId: string; jobId: string }> {
+    const { productId } = await this.service.ensureByBarcode(barcode);
+    const jobId = await this.discovery.startByBarcode(barcode);
+    return { productId, jobId };
+  }
+
   /** Consulta o item geral (e seu draftData de discovery) por barcode. */
   @Get('by-barcode/:barcode')
   @ApiOperation({ summary: 'Consulta item geral por barcode' })

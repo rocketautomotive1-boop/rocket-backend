@@ -95,6 +95,27 @@ describe('GeneralProductRepository (unified ProductModel, domain:general)', () =
     expect((found as any).domain).toBe('general'); // domain guard
   });
 
+  it('ensureByBarcode creates a domain:general shell (idempotent) and returns the id', async () => {
+    const a = await repo.ensureByBarcode('7891000100103');
+    expect(a.productId).toBeTruthy();
+    const found = await repo.findByBarcode('7891000100103');
+    expect((found as any).domain).toBe('general');
+    expect((found as any).name).toBe('Item 7891000100103'); // placeholder
+
+    // second call returns the same product (no duplicate)
+    const b = await repo.ensureByBarcode('7891000100103');
+    expect(b.productId).toBe(a.productId);
+    const all = await (repo as any).model.find({ barcode: '7891000100103', domain: 'general' }).lean().exec();
+    expect(all).toHaveLength(1);
+  });
+
+  it('ensureByBarcode does not overwrite an existing name', async () => {
+    await repo.updateByBarcode('7891000100103', { name: 'Nescau Real' });
+    await repo.ensureByBarcode('7891000100103');
+    const found = await repo.findByBarcode('7891000100103');
+    expect(found?.name).toBe('Nescau Real'); // $setOnInsert only
+  });
+
   it('updateByBarcode stores money fields and sanitizes Decimal128 to string on read', async () => {
     await repo.updateByBarcode('7891000100103', { price: 12.9, costPrice: 8 } as any);
     const found = await repo.findByBarcode('7891000100103');

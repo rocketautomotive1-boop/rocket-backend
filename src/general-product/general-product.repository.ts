@@ -32,6 +32,25 @@ export class GeneralProductRepository {
   }
 
   /**
+   * Garante um Product `domain:'general'` para o barcode (cria um shell se não
+   * existir) e retorna o `_id`. Usado na identificação por barcode antes de
+   * navegar para o stepper. Idempotente; não toca campos já preenchidos.
+   * `name` é required no ProductModel → placeholder no insert (atualizado depois
+   * pelo discovery/usuário).
+   */
+  async ensureByBarcode(barcode: string): Promise<{ productId: string }> {
+    const doc = await this.model
+      .findOneAndUpdate(
+        { barcode, domain: GENERAL_DOMAIN },
+        { $setOnInsert: { barcode, domain: GENERAL_DOMAIN, name: `Item ${barcode}` } },
+        { upsert: true, new: true },
+      )
+      .lean()
+      .exec();
+    return { productId: String((doc as any)._id) };
+  }
+
+  /**
    * Grava (ou cria) o rascunho de discovery para um barcode. Idempotente:
    * `$set` apenas em draftData; `$setOnInsert` garante barcode + domain ao criar.
    * Não sobrescreve campos definidos pelo usuário (name/price/etc).

@@ -21,6 +21,12 @@ export class GeneralProductService {
     return this.repo.create(data);
   }
 
+  /** Garante o Product general do barcode (cria shell se preciso) e retorna o id. */
+  async ensureByBarcode(barcode: string): Promise<{ productId: string }> {
+    this.assertValidBarcode(barcode);
+    return this.repo.ensureByBarcode(barcode);
+  }
+
   /** Completude por seção, derivada dos campos finais (produto inexistente → tudo false). */
   async getCompletion(barcode: string): Promise<GeneralCompletion> {
     this.assertValidBarcode(barcode);
