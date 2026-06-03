@@ -108,14 +108,19 @@ export class DiscoveryMsResponseConsumer {
                 oemCodes: results?.oemCodes ?? results?.ai?.oemCodes ?? [],
                 vehicles: results?.vehicles ?? results?.ai?.vehicles ?? [],
                 categoryPath: results?.categoryPath ?? null,
+                mlCategoryId: results?.categoryId ?? null,
+                mlRootCategoryId: results?.rootCategoryId ?? null,
                 breadcrumb: results?.mercadolivre?.breadcrumb ?? null,
                 timing: results?.timing ?? null,
                 confidence: preferredSource === 'mercadolivre' ? 'high' : 'medium',
             };
 
-            // Resolve category from categoryPath
+            // Resolve category: PRIMEIRO pelo MLB category_id (assertivo, 1:1 via
+            // marketplaceMappings.externalId); fallback para o path/breadcrumb (texto).
             try {
-                const categoryId = await this.categoryResolution.resolve(updateData.final.categoryPath);
+                const categoryId =
+                    (await this.categoryResolution.resolveByExternalId(updateData.final.mlCategoryId)) ??
+                    (await this.categoryResolution.resolve(updateData.final.categoryPath));
                 if (categoryId) {
                     updateData.resolvedCategoryId = categoryId;
                     this.logger.log(`Category resolved for job ${jobId}: ${categoryId}`);

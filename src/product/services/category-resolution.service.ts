@@ -13,6 +13,26 @@ export class CategoryResolutionService {
     ) {}
 
     /**
+     * Resolve a categoria interna pelo category_id do marketplace (ex.: "MLB264201")
+     * via `marketplaceMappings.externalId`. É o caminho MAIS ASSERTIVO (1:1 pelo id
+     * do ML), preferível ao match por path/breadcrumb (texto). Retorna null se não
+     * houver mapping — nesse caso o auto-cadastro por IA (futuro) entra no frontend.
+     */
+    async resolveByExternalId(mlCategoryId: string | null): Promise<Types.ObjectId | null> {
+        if (!mlCategoryId?.trim()) return null;
+        const byExternal = await this.categoryModel.findOne({
+            'marketplaceMappings.externalId': mlCategoryId.trim(),
+            active: true,
+        });
+        if (byExternal) {
+            this.logger.debug(`Category resolved by externalId: ${mlCategoryId} → ${byExternal._id}`);
+            return byExternal._id as Types.ObjectId;
+        }
+        this.logger.debug(`No category mapping for externalId: ${mlCategoryId}`);
+        return null;
+    }
+
+    /**
      * Resolve a categoryPath string (ex: "Autopeças > Filtros > Filtro de Óleo")
      * to a CategoryModel _id using 3-level matching strategy.
      * Returns null if no match found.
