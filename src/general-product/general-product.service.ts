@@ -1,20 +1,21 @@
 // backend/src/general-product/general-product.service.ts
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { GeneralProductRepository } from './general-product.repository';
-import { GeneralProductModel } from './schemas/general-product.schema';
+import { ProductModel } from '../product/schemas/product.schema';
 import { isValidEan13 } from './validation/ean13';
-import { deriveCompletion, GeneralCompletion } from './completion/derive-completion';
+import { deriveGeneralCompletion, GeneralCompletion } from '../product/completion/derive-general-completion';
 import { UpdateGeneralProductPatch } from './dto/update-general-product.schema';
 
 /**
- * Regras de domínio do GeneralProduct. Side effects (persistência) ficam no
- * repositório; aqui só validação e orquestração. Métodos atômicos ≤25 linhas.
+ * Regras de domínio dos itens gerais (sobre o ProductModel unificado,
+ * domain:'general'). Side effects (persistência) ficam no repositório; aqui só
+ * validação e orquestração. Métodos atômicos ≤25 linhas.
  */
 @Injectable()
 export class GeneralProductService {
   constructor(private readonly repo: GeneralProductRepository) {}
 
-  async register(data: Partial<GeneralProductModel>): Promise<GeneralProductModel> {
+  async register(data: Partial<ProductModel>): Promise<ProductModel> {
     this.assertValidBarcode(data.barcode);
     await this.assertBarcodeUnused(data.barcode!);
     return this.repo.create(data);
@@ -24,16 +25,16 @@ export class GeneralProductService {
   async getCompletion(barcode: string): Promise<GeneralCompletion> {
     this.assertValidBarcode(barcode);
     const product = await this.repo.findByBarcode(barcode);
-    return deriveCompletion(product);
+    return deriveGeneralCompletion(product);
   }
 
   /** Salva (upsert) os campos confirmados de uma seção. Não toca draftData. */
   async updateByBarcode(
     barcode: string,
     patch: UpdateGeneralProductPatch,
-  ): Promise<GeneralProductModel | null> {
+  ): Promise<ProductModel | null> {
     this.assertValidBarcode(barcode);
-    return this.repo.updateByBarcode(barcode, patch as unknown as Partial<GeneralProductModel>);
+    return this.repo.updateByBarcode(barcode, patch as unknown as Partial<ProductModel>);
   }
 
   private assertValidBarcode(barcode?: string): void {

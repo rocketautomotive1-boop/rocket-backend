@@ -26,17 +26,6 @@ const taxSchema = z.object({
   origin: z.string().optional(),
 });
 
-const perishableSchema = z.object({
-  isPerishable: z.boolean().optional(),
-  shelfLifeDays: z.number().optional(),
-  expiryDate: z.string().optional(),
-  batch: z.string().optional(),
-});
-
-const regulatorySchema = z.object({
-  agency: z.enum(['ANVISA', 'MAPA', 'OTHER']).optional(),
-  number: z.string().optional(),
-});
 
 export const updateGeneralProductSchema = z
   .object({
@@ -46,18 +35,24 @@ export const updateGeneralProductSchema = z
     description: z.string().optional(),
     // imagens
     images: z.array(imageSchema).optional(),
-    // preço/estoque
+    // preço/estoque (quantity é aceito da UI, mas NÃO persiste no ProductModel —
+    // estoque vem de stock_movements; vira movimento na publicação)
     price: z.number().min(0, 'Preço deve ser maior ou igual a zero.').optional(),
     costPrice: z.number().min(0, 'Custo deve ser maior ou igual a zero.').optional(),
     listPrice: z.number().min(0, 'Preço de tabela deve ser maior ou igual a zero.').optional(),
     quantity: z.number().int('Quantidade deve ser um inteiro.').min(0, 'Quantidade deve ser maior ou igual a zero.').optional(),
-    // fiscal / regulatório
+    // fiscal: `ncm` top-level (da tela) é dobrado em `tax.ncm` no transform abaixo
     ncm: z.string().optional(),
     tax: taxSchema.optional(),
-    perishable: perishableSchema.optional(),
-    regulatoryRegistration: regulatorySchema.optional(),
   })
-  .strip(); // remove qualquer chave fora do schema (barcode, draftData, _id, slug, domain, etc.)
+  .strip() // remove chaves fora do schema (barcode, draftData, _id, slug, domain, etc.)
+  .transform((p) => {
+    const { ncm, quantity, ...rest } = p;
+    // ncm top-level → tax.ncm (campo do ProductModel unificado)
+    const tax = ncm != null ? { ...(rest.tax ?? {}), ncm } : rest.tax;
+    // quantity é descartado aqui (não é campo do ProductModel)
+    return tax !== undefined ? { ...rest, tax } : rest;
+  });
 
 export type UpdateGeneralProductPatch = z.infer<typeof updateGeneralProductSchema>;
 

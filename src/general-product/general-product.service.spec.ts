@@ -14,7 +14,7 @@ describe('GeneralProductService', () => {
     const service = new GeneralProductService(repo as any);
 
     await expect(
-      service.register({ barcode: '1234567890000', name: 'X', ncm: '1' }),
+      service.register({ barcode: '1234567890000', name: 'X', tax: { ncm: '1' } } as any),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(repo.create).not.toHaveBeenCalled();
   });
@@ -25,7 +25,7 @@ describe('GeneralProductService', () => {
     const service = new GeneralProductService(repo as any);
 
     await expect(
-      service.register({ barcode: '7891000100103', name: 'X', ncm: '1' }),
+      service.register({ barcode: '7891000100103', name: 'X', tax: { ncm: '1' } } as any),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(repo.create).not.toHaveBeenCalled();
   });
@@ -36,7 +36,7 @@ describe('GeneralProductService', () => {
     repo.create.mockResolvedValue({ barcode: '7891000100103', name: 'Nescau' });
     const service = new GeneralProductService(repo as any);
 
-    const result = await service.register({ barcode: '7891000100103', name: 'Nescau', ncm: '18069000' });
+    const result = await service.register({ barcode: '7891000100103', name: 'Nescau', tax: { ncm: '18069000' } } as any);
     expect(result.name).toBe('Nescau');
     expect(repo.create).toHaveBeenCalledTimes(1);
   });
@@ -47,16 +47,16 @@ describe('GeneralProductService', () => {
     const service = new GeneralProductService(repo as any);
 
     const c = await service.getCompletion('7891000100103');
-    expect(c).toEqual({ dados: false, imagens: false, precoEstoque: false, fiscal: false });
+    expect(c).toEqual({ dados: false, imagens: false, precoEstoque: false, fiscal: false, readyToPublish: false });
   });
 
   it('getCompletion derives from the product fields', async () => {
     const repo = makeRepo();
-    repo.findByBarcode.mockResolvedValue({ name: 'X', brand: { name: 'B' }, images: [{ url: 'u' }], price: '5', ncm: '1' });
+    repo.findByBarcode.mockResolvedValue({ name: 'X', brand: { name: 'B' }, images: [{ url: 'u' }], price: '5', tax: { ncm: '1' } });
     const service = new GeneralProductService(repo as any);
 
     const c = await service.getCompletion('7891000100103');
-    expect(c).toEqual({ dados: true, imagens: true, precoEstoque: true, fiscal: true });
+    expect(c).toEqual({ dados: true, imagens: true, precoEstoque: true, fiscal: true, readyToPublish: true });
   });
 
   it('getCompletion rejects an invalid EAN-13', async () => {

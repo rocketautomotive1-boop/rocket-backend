@@ -1,10 +1,10 @@
 // backend/src/general-product/general-product.repository.spec.ts
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { connect, Connection, Model } from 'mongoose';
-import { GeneralProductModel, GeneralProductSchema } from './schemas/general-product.schema';
+import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
 import { GeneralProductRepository } from './general-product.repository';
 
-describe('GeneralProductRepository', () => {
+describe('GeneralProductRepository (unified ProductModel, domain:general)', () => {
   let server: MongoMemoryServer;
   let connection: Connection;
   let model: Model<any>;
@@ -14,7 +14,7 @@ describe('GeneralProductRepository', () => {
     server = await MongoMemoryServer.create();
     const m = await connect(server.getUri());
     connection = m.connection;
-    model = connection.model(GeneralProductModel.name, GeneralProductSchema);
+    model = connection.model(ProductModel.name, ProductSchema);
     repo = new GeneralProductRepository(model);
   });
 
@@ -27,36 +27,38 @@ describe('GeneralProductRepository', () => {
     await model.deleteMany({});
   });
 
-  it('creates and reads back a general product (Decimal128 sanitized to string)', async () => {
+  it('creates with domain:general and reads back (Decimal128 sanitized to string)', async () => {
     const created = await repo.create({
       barcode: '7891000100103',
       name: 'Nescau 400g',
-      ncm: '18069000',
+      tax: { ncm: '18069000' } as any,
       price: '12.90' as any,
     });
     expect(created.barcode).toBe('7891000100103');
+    expect((created as any).domain).toBe('general');
 
     const found = await repo.findByBarcode('7891000100103');
     expect(found?.name).toBe('Nescau 400g');
     expect(typeof found?.price === 'string' || found?.price === undefined).toBe(true);
   });
 
-  it('enforces unique barcode (duplicate key 11000)', async () => {
-    await repo.create({ barcode: '7891000100103', name: 'A', ncm: '18069000' });
-    await expect(
-      repo.create({ barcode: '7891000100103', name: 'B', ncm: '18069000' }),
-    ).rejects.toMatchObject({ code: 11000 });
+  it('findByBarcode does NOT return an autopeças product with the same barcode', async () => {
+    // an autopeças product (domain defaults to 'autopecas') sharing the barcode
+    await model.create({ barcode: '7891000100103', name: 'Peça', partNumber: 'PN-1' });
+    const found = await repo.findByBarcode('7891000100103');
+    expect(found).toBeNull();
   });
 
-  it('upsertDraftByBarcode creates a product when the barcode is new', async () => {
+  it('upsertDraftByBarcode creates a domain:general product when the barcode is new', async () => {
     await repo.upsertDraftByBarcode('7891000100103', { titles: ['Nescau 400g'] });
     const found = await repo.findByBarcode('7891000100103');
     expect(found).not.toBeNull();
     expect(found?.draftData).toEqual({ titles: ['Nescau 400g'] });
+    expect((found as any).domain).toBe('general');
   });
 
   it('upsertDraftByBarcode updates only draftData on an existing product', async () => {
-    await repo.create({ barcode: '7891000100103', name: 'Nescau Existente', ncm: '18069000' });
+    await repo.create({ barcode: '7891000100103', name: 'Nescau Existente', tax: { ncm: '18069000' } as any });
     await repo.upsertDraftByBarcode('7891000100103', { titles: ['Sugestão IA'] });
     const found = await repo.findByBarcode('7891000100103');
     expect(found?.name).toBe('Nescau Existente'); // user data preserved
@@ -66,30 +68,31 @@ describe('GeneralProductRepository', () => {
   it('upsertDraftByBarcode is idempotent (two calls → one document)', async () => {
     await repo.upsertDraftByBarcode('7891000100103', { titles: ['A'] });
     await repo.upsertDraftByBarcode('7891000100103', { titles: ['A'] });
-    const all = await (repo as any).model.find({ barcode: '7891000100103' }).lean().exec();
+    const all = await (repo as any).model.find({ barcode: '7891000100103', domain: 'general' }).lean().exec();
     expect(all).toHaveLength(1);
   });
 
   it('updateByBarcode creates the product on first save (upsert) with only patch fields', async () => {
-    const updated = await repo.updateByBarcode('7891000100103', { name: 'Nescau 400g', ncm: '18069000' });
+    const updated = await repo.updateByBarcode('7891000100103', { name: 'Nescau 400g', tax: { ncm: '18069000' } as any });
     expect(updated?.barcode).toBe('7891000100103');
     expect(updated?.name).toBe('Nescau 400g');
-    expect(updated?.ncm).toBe('18069000');
+    expect((updated as any)?.tax?.ncm).toBe('18069000');
   });
 
   it('updateByBarcode patches only the given fields on an existing product', async () => {
-    await repo.create({ barcode: '7891000100103', name: 'Antigo', ncm: '18069000' });
+    await repo.create({ barcode: '7891000100103', name: 'Antigo', tax: { ncm: '18069000' } as any });
     const updated = await repo.updateByBarcode('7891000100103', { name: 'Novo Nome' });
     expect(updated?.name).toBe('Novo Nome');
-    expect(updated?.ncm).toBe('18069000'); // untouched field preserved
+    expect((updated as any)?.tax?.ncm).toBe('18069000'); // untouched field preserved
   });
 
-  it('updateByBarcode NEVER overwrites draftData', async () => {
+  it('updateByBarcode NEVER overwrites draftData and never changes domain', async () => {
     await repo.upsertDraftByBarcode('7891000100103', { titles: ['Sugestão IA'] });
-    await repo.updateByBarcode('7891000100103', { name: 'Confirmado', draftData: { titles: ['HACK'] } } as any);
+    await repo.updateByBarcode('7891000100103', { name: 'Confirmado', draftData: { titles: ['HACK'] }, domain: 'autopecas' } as any);
     const found = await repo.findByBarcode('7891000100103');
     expect(found?.name).toBe('Confirmado');
     expect(found?.draftData).toEqual({ titles: ['Sugestão IA'] }); // draft preserved
+    expect((found as any).domain).toBe('general'); // domain guard
   });
 
   it('updateByBarcode stores money fields and sanitizes Decimal128 to string on read', async () => {
