@@ -134,7 +134,9 @@ export class ProductModel {
     @Prop({ required: true, index: true })
     name: string;
 
-    @Prop({ required: true, index: true, unique: true })
+    // Opcional: autopeças sempre preenchem; itens gerais (domain:'general') usam
+    // `barcode` como identidade. unique+sparse permite ausência sem colidir.
+    @Prop({ index: true, unique: true, sparse: true })
     partNumber: string;
 
     @Prop({ unique: true })
