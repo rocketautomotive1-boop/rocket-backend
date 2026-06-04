@@ -450,7 +450,8 @@ REGRAS CRÍTICAS:
 
     async mapMarketplaceCategoryToInternal(
         marketplacePath: string,
-        existingTreeContext: { name: string; path: string }[]
+        existingTreeContext: { name: string; path: string }[],
+        domain: string = 'autopecas',
     ): Promise<{
         suggestedTree: string[];
         confidence: number;
@@ -467,7 +468,45 @@ REGRAS CRÍTICAS:
             .map(cat => `- ${cat.path}`)
             .join('\n');
 
-        const prompt = `
+        // Itens gerais (saúde, beleza, alimentos, etc.) NÃO são autopeças — o prompt
+        // não pode forçar a taxonomia automotiva (senão um suplemento vira "Outros
+        // Acessórios"). Para general usamos um prompt GENÉRICO, fiel à categoria do ML.
+        const prompt = domain === 'general'
+            ? `
+Você é um especialista em taxonomia de categorias de e-commerce (qualquer segmento:
+saúde, beleza, alimentos, bebidas, casa, eletrônicos, etc.).
+
+TAREFA: Mapear uma categoria do Mercado Livre para uma árvore de categorias interna,
+PRESERVANDO o segmento/domínio real do produto (NÃO force em automotivo/peças).
+
+CATEGORIA DO MERCADO LIVRE:
+"${marketplacePath}"
+
+CONTEXTO - CATEGORIAS EXISTENTES (exemplos, podem ser de outros segmentos):
+${contextLines}
+
+INSTRUÇÕES:
+1. Crie a árvore hierárquica fiel ao significado da categoria do ML.
+2. A raiz deve refletir o segmento real (ex.: "Saúde", "Beleza", "Alimentos", "Bebidas").
+3. NUNCA classifique como peça/acessório automotivo se o produto não for automotivo.
+4. Reutilize uma raiz existente SÓ se for do mesmo segmento; senão crie a raiz correta.
+5. Padrão: ["Raiz", "Nível 2", "Nível 3", ...].
+
+Retorne APENAS um JSON (sem markdown):
+{
+  "suggestedTree": ["Saúde", "Suplementos Alimentares", "Vitaminas e Minerais"],
+  "confidence": 90,
+  "reasoning": "Explicação breve",
+  "alternatives": [["Saúde", "Vitaminas e Suplementos"]]
+}
+
+REGRAS:
+- "suggestedTree": árvore (array de strings) fiel ao segmento do produto
+- "confidence": 0-100
+- "reasoning": justificativa (máx. 2 linhas)
+- "alternatives": até 2 opções (opcional)
+        `
+            : `
 Você é um especialista em categorização de peças automotivas.
 
 TAREFA: Mapear uma categoria do Mercado Livre para a estrutura de categorias da Rocket.

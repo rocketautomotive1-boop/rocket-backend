@@ -78,8 +78,9 @@ export class ProductCategoryController {
   async ensureFromMl(
     @Param('marketplaceTag') marketplaceTag: string,
     @Param('externalCategoryId') externalCategoryId: string,
+    @Query('domain') domain?: string,
   ) {
-    return this.productCategoryService.ensureCategoryFromMl(marketplaceTag, externalCategoryId);
+    return this.productCategoryService.ensureCategoryFromMl(marketplaceTag, externalCategoryId, domain ?? 'autopecas');
   }
 
   @Get('debug-counts')

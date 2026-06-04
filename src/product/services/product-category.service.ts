@@ -241,6 +241,7 @@ export class ProductCategoryService {
   async importMarketplaceExternalCategoryWithAiRefactor(
     marketplaceTag: string,
     externalCategoryId: string,
+    domain: string = 'autopecas',
   ): Promise<{
     marketplaceTag: string;
     marketplaceId: Types.ObjectId;
@@ -280,7 +281,7 @@ export class ProductCategoryService {
       return { name: cat.name, path };
     });
 
-    const aiMapping = await this.aiService.mapMarketplaceCategoryToInternal(marketplacePath, treeContext);
+    const aiMapping = await this.aiService.mapMarketplaceCategoryToInternal(marketplacePath, treeContext, domain);
 
     if (!aiMapping.suggestedTree?.length) {
       throw new BadRequestException('A IA não retornou uma árvore de categorias válida (suggestedTree vazio).');
@@ -332,6 +333,7 @@ export class ProductCategoryService {
   async ensureCategoryFromMl(
     marketplaceTag: string,
     externalCategoryId: string,
+    domain: string = 'autopecas',
   ): Promise<{
     categoryId: string | null;
     status: 'existing' | 'created' | 'failed';
@@ -365,7 +367,7 @@ export class ProductCategoryService {
 
     // 2) Não existe → importa + mapeia via IA. Isola qualquer falha.
     try {
-      const result = await this.importMarketplaceExternalCategoryWithAiRefactor(tag, ext);
+      const result = await this.importMarketplaceExternalCategoryWithAiRefactor(tag, ext, domain);
       const id = (result?.internalCategory as any)?._id;
       if (!id) {
         return { categoryId: null, status: 'failed', error: 'Import via IA não retornou categoria.' };
