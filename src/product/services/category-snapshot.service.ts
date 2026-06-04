@@ -46,6 +46,9 @@ export class CategorySnapshotService {
     const resolvedCategory = resolvedCategoryId
       ? await this.hydrateInternalCategory(new Types.ObjectId(resolvedCategoryId))
       : null;
+    // category_id do ML (do discovery) — permite o auto-cadastro da categoria via IA
+    // quando não há categoria interna nem resolvedCategoryId.
+    const mlCategoryId: string | null = discoveryDoc?.final?.mlCategoryId ?? null;
 
     const ml = internalCategory && mlMarketplace
       ? await this.buildMlState(product, internalCategory, String(mlMarketplace._id))
@@ -55,7 +58,7 @@ export class CategorySnapshotService {
       productId: String(productId),
       product,
       internalCategory,
-      discovery: { resolvedCategoryId, resolvedCategory },
+      discovery: { resolvedCategoryId, resolvedCategory, mlCategoryId },
       ml,
     };
   }

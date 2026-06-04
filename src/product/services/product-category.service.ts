@@ -319,6 +319,67 @@ export class ProductCategoryService {
   }
 
   /**
+   * Garante uma categoria interna para um `externalCategoryId` (ex.: "MLB264201"):
+   * - Se já existe mapping (`marketplaceMappings.externalId`), retorna o id (IDEMPOTENTE,
+   *   NÃO chama a IA).
+   * - Senão, importa a categoria do marketplace e mapeia via IA
+   *   (importMarketplaceExternalCategoryWithAiRefactor), retornando o id criado.
+   *
+   * Robusto: valida entrada, é idempotente, e isola falhas (ML/IA/timeout) num erro
+   * estruturado — NUNCA lança para fora sem contexto. Usado pelo auto-save de
+   * categoria do frontend quando o discovery traz o MLB mas não há categoria mapeada.
+   */
+  async ensureCategoryFromMl(
+    marketplaceTag: string,
+    externalCategoryId: string,
+  ): Promise<{
+    categoryId: string | null;
+    status: 'existing' | 'created' | 'failed';
+    error?: string;
+  }> {
+    const tag = (marketplaceTag || '').trim();
+    const ext = (externalCategoryId || '').trim();
+
+    if (!tag) {
+      return { categoryId: null, status: 'failed', error: 'marketplaceTag é obrigatório.' };
+    }
+    if (!/^MLB\d+$/i.test(ext)) {
+      // Só ML por ora; o id de categoria do ML é "MLB" + dígitos (sem prefixo MLBU de catálogo).
+      return { categoryId: null, status: 'failed', error: `externalCategoryId inválido para ML: "${ext}".` };
+    }
+
+    // 1) Idempotência: já mapeado? Retorna sem tocar na IA.
+    try {
+      const existing = await this.categoryModel
+        .findOne({ 'marketplaceMappings.externalId': ext, active: true })
+        .select('_id')
+        .lean()
+        .exec();
+      if (existing) {
+        return { categoryId: String((existing as any)._id), status: 'existing' };
+      }
+    } catch (e: any) {
+      this.logger.warn(`ensureCategoryFromMl lookup failed for ${ext}: ${e?.message}`);
+      // segue para tentar criar — o lookup falho não deve impedir a criação
+    }
+
+    // 2) Não existe → importa + mapeia via IA. Isola qualquer falha.
+    try {
+      const result = await this.importMarketplaceExternalCategoryWithAiRefactor(tag, ext);
+      const id = (result?.internalCategory as any)?._id;
+      if (!id) {
+        return { categoryId: null, status: 'failed', error: 'Import via IA não retornou categoria.' };
+      }
+      this.logger.log(`ensureCategoryFromMl created category ${id} for ${tag}/${ext}`);
+      return { categoryId: String(id), status: 'created' };
+    } catch (e: any) {
+      const msg = e?.message ?? 'Falha ao importar/mapear a categoria via IA.';
+      this.logger.error(`ensureCategoryFromMl create failed for ${tag}/${ext}: ${msg}`);
+      return { categoryId: null, status: 'failed', error: msg };
+    }
+  }
+
+  /**
    * Percorre suggestedTree; nós intermediários novos recebem aiReason de pai estrutural;
    * a folha recebe leafAiReason.
    */

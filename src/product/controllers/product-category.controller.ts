@@ -67,6 +67,21 @@ export class ProductCategoryController {
     );
   }
 
+  @Post('ensure-from-ml/:marketplaceTag/:externalCategoryId')
+  @ApiOperation({
+    summary: 'Garante a categoria interna a partir do category_id do marketplace (idempotente)',
+    description:
+      'Se já houver mapping para o externalCategoryId (ex.: MLB264201), retorna o id existente (sem IA). ' +
+      'Senão, importa a categoria do marketplace e mapeia via IA, retornando o id criado. Usado pelo ' +
+      'auto-save de categoria do frontend quando o discovery traz o MLB mas não há categoria mapeada.',
+  })
+  async ensureFromMl(
+    @Param('marketplaceTag') marketplaceTag: string,
+    @Param('externalCategoryId') externalCategoryId: string,
+  ) {
+    return this.productCategoryService.ensureCategoryFromMl(marketplaceTag, externalCategoryId);
+  }
+
   @Get('debug-counts')
   async debugCounts() {
     // Return top 10 categories with highest productCount
