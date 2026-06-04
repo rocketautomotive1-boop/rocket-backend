@@ -23,11 +23,16 @@ export class InternalProductController {
     async getProduct(@Param('id') id: string) {
         const doc = await this.productModel
             .findById(id)
-            .populate('category', '_id name mlCategoryId')
+            .populate('category', '_id name mlCategoryId marketplaceMappings')
             .lean()
             .exec();
         if (!doc) return null;
         const normalized = this.normalizeBson(doc);
+
+        // Resolve o category_id do ML a partir do marketplaceMappings quando o campo
+        // direto (mlCategoryId) estiver ausente — itens general têm o mapping do ML
+        // (externalId) mas não o mlCategoryId, e o orchestrator só lê mlCategoryId.
+        await this.fillMlCategoryId(normalized.category);
 
         // Compute stock and effective price from stock_movements — product schema has no stockQuantity field
         const [stockResult, priceResult] = await Promise.all([
@@ -87,6 +92,28 @@ export class InternalProductController {
             out[key] = this.normalizeBson(obj[key]);
         }
         return out;
+    }
+
+    /**
+     * Garante `category.mlCategoryId` preenchido a partir do marketplaceMappings
+     * do ML (externalId). Não sobrescreve um mlCategoryId já existente.
+     */
+    private async fillMlCategoryId(category: any): Promise<void> {
+        if (!category || typeof category !== 'object' || category.mlCategoryId) return;
+        const mappings = category.marketplaceMappings;
+        if (!Array.isArray(mappings) || mappings.length === 0) return;
+
+        const ml = await this.marketplaceModel
+            .findOne({ tag: 'mercadolivre' })
+            .select('_id')
+            .lean()
+            .exec();
+        if (!ml) return;
+
+        const mlId = String((ml as any)._id);
+        const mapping = mappings.find((m: any) => String(m.marketplaceId) === mlId);
+        const externalId = mapping?.externalId ?? mapping?.categoryResult?.category_id;
+        if (externalId) category.mlCategoryId = String(externalId);
     }
 
     @Get(':id/listings')
