@@ -34,7 +34,10 @@ export class MarketplaceAccountRepository {
   ): Promise<MarketplaceAccountModel | null> {
     const existing = await this.findDefault(data.marketplaceId as string | Types.ObjectId);
     if (existing) return null;
-    const created = await this.model.create({ ...data, isDefault: true });
+    const normalized = data.marketplaceId
+      ? { ...data, marketplaceId: this.toObjectId(data.marketplaceId as any) }
+      : data;
+    const created = await this.model.create({ ...normalized, isDefault: true });
     return created.toObject();
   }
 
@@ -52,7 +55,12 @@ export class MarketplaceAccountRepository {
 
   /** Cria uma conta não-default (ex: 2ª conta ML/Shopee do domínio geral). */
   async createAccount(data: Partial<MarketplaceAccountModel>): Promise<MarketplaceAccountModel> {
-    const created = await this.model.create({ ...data, isDefault: false });
+    // Mongoose NÃO coage string→ObjectId neste schema (ver nota no topo); normaliza
+    // na escrita para que findByDomain/findDefault (que buscam por ObjectId) casem.
+    const normalized = data.marketplaceId
+      ? { ...data, marketplaceId: this.toObjectId(data.marketplaceId as any) }
+      : data;
+    const created = await this.model.create({ ...normalized, isDefault: false });
     return created.toObject();
   }
 

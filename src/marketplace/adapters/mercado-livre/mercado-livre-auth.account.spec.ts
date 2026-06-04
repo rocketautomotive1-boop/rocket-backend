@@ -18,6 +18,16 @@ describe('MercadoLivreAuthAdapter — per-account OAuth (uses account credential
     expect(authUrl).toContain('response_type=code');
   });
 
+  it('generateAuthUrlForAccount embeds the state (accountId) when provided', () => {
+    const { authUrl } = adapter().generateAuthUrlForAccount('CID', 'https://cb', 'acc123');
+    expect(authUrl).toContain('state=acc123');
+  });
+
+  it('generateAuthUrlForAccount omits state when not provided', () => {
+    const { authUrl } = adapter().generateAuthUrlForAccount('CID', 'https://cb');
+    expect(authUrl).not.toContain('state=');
+  });
+
   it('authenticateForAccount exchanges code using the account credentials', async () => {
     mockedAxios.post.mockResolvedValue({
       data: { access_token: 'AT', refresh_token: 'RT', expires_in: 21600, token_type: 'bearer', scope: 's', user_id: 9 },

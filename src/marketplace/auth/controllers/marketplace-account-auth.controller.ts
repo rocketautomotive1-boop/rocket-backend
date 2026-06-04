@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { MarketplaceAccountService } from '../services/marketplace-account.service';
@@ -56,29 +56,27 @@ export class MarketplaceAccountAuthController {
     });
 
     const accountId = String((account as any)._id);
-    const { authUrl } = await this.accountService.buildAuthUrl(accountId, this.callbackUri(accountId));
+    const { authUrl } = await this.accountService.buildAuthUrl(accountId, this.callbackUri());
     return { accountId, label: account.label, domains: account.domains, authUrl };
   }
+
+  // NOTA: o callback OAuth é atendido na RAIZ por MarketplaceCallbackController
+  // (GET / com guarda code+state), porque a app ML tem a redirect registrada
+  // como a raiz e o ML exige match exato. O accountId trafega no `state`.
 
   @Get(':accountId/auth/url')
   @ApiOperation({ summary: 'Gera a URL de autorização OAuth para a conta' })
   async authUrl(@Param('accountId') accountId: string): Promise<{ authUrl: string }> {
-    return this.accountService.buildAuthUrl(accountId, this.callbackUri(accountId));
+    return this.accountService.buildAuthUrl(accountId, this.callbackUri());
   }
 
-  @Get(':accountId/auth/callback')
-  @ApiOperation({ summary: 'Callback OAuth da conta — troca code por token e persiste' })
-  async callback(
-    @Param('accountId') accountId: string,
-    @Query('code') code: string,
-  ): Promise<{ ok: true }> {
-    if (!code) throw new BadRequestException('Código de autorização não fornecido.');
-    await this.accountService.handleAuthCallback(accountId, code, this.callbackUri(accountId));
-    return { ok: true };
-  }
-
-  private callbackUri(accountId: string): string {
-    const base = this.config.get<string>('API_BASE_URL') ?? '';
-    return `${base}/marketplace-account/${accountId}/auth/callback`;
+  /**
+   * Redirect_uri FIXA — idêntica na autorização e na troca do code.
+   * É a RAIZ porque a app ML tem a redirect registrada como a raiz e o ML
+   * exige match exato. O callback é atendido por MarketplaceCallbackController
+   * (GET / com guarda de code+state). O accountId trafega no `state`.
+   */
+  private callbackUri(): string {
+    return this.config.get<string>('API_BASE_URL') ?? '';
   }
 }

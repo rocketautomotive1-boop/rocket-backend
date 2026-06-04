@@ -176,10 +176,15 @@ export class MercadoLivreAuthAdapter implements IMarketplaceAuthAdapter, OnModul
   // Variantes puras que recebem as credenciais da conta como argumentos, em vez
   // de ler do env. O caminho legado acima (env) permanece intocado p/ autopeças.
 
-  /** Gera a URL de autorização usando o clientId da conta. */
-  generateAuthUrlForAccount(clientId: string, redirectUri: string): { authUrl: string } {
+  /**
+   * Gera a URL de autorização usando o clientId da conta.
+   * `state` (opcional) volta intacto no callback — usamos para carregar o
+   * accountId, permitindo uma redirect_uri FIXA (sem id no path).
+   */
+  generateAuthUrlForAccount(clientId: string, redirectUri: string, state?: string): { authUrl: string } {
     if (!clientId) throw new InternalServerErrorException('clientId da conta ausente.');
-    const authUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=offline_access%20read%20write`;
+    const stateParam = state ? `&state=${encodeURIComponent(state)}` : '';
+    const authUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=offline_access%20read%20write${stateParam}`;
     return { authUrl };
   }
 

@@ -79,4 +79,22 @@ describe('MarketplaceAccountRepository', () => {
     const found = await repo.findByDomain(mpId.toString(), 'general');
     expect(found?.label).toBe('ML Geral');
   });
+
+  // Regressão: o controller passa marketplaceId como STRING (marketplace._id.toString()).
+  // O Mongoose não coage string→ObjectId neste schema, então sem normalização na
+  // escrita o campo ficava string e findByDomain (que busca por ObjectId) nunca casava.
+  it('createAccount normalizes a string marketplaceId to ObjectId so findByDomain matches', async () => {
+    await repo.createAccount({
+      marketplaceId: mpId.toString() as any,
+      label: 'ML Geral',
+      domains: ['general'],
+      credentials: { clientId: 'enc:v1:abc' },
+    });
+
+    const raw: any = await model.findOne({ label: 'ML Geral' }).lean().exec();
+    expect(raw.marketplaceId).toBeInstanceOf(Types.ObjectId);
+
+    const found = await repo.findByDomain(mpId.toString(), 'general');
+    expect(found?.label).toBe('ML Geral');
+  });
 });

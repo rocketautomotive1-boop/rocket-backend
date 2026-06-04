@@ -46,12 +46,16 @@ export class MarketplaceAccountService {
     });
   }
 
-  /** Gera a URL de autorização OAuth para a conta (usa o clientId da conta). */
+  /**
+   * Gera a URL de autorização OAuth para a conta (usa o clientId da conta).
+   * O accountId vai no `state` para que a redirect_uri possa ser FIXA — o
+   * callback lê o accountId do state em vez do path.
+   */
   async buildAuthUrl(accountId: string, redirectUri: string): Promise<{ authUrl: string }> {
     const account = await this.repo.findById(accountId);
     if (!account) throw new BadRequestException(`Conta ${accountId} não encontrada.`);
     const clientId = this.readCredential(account.credentials, 'clientId');
-    return this.mlAdapter.generateAuthUrlForAccount(clientId, redirectUri);
+    return this.mlAdapter.generateAuthUrlForAccount(clientId, redirectUri, accountId);
   }
 
   /** Troca o code por token (credenciais da conta) e persiste na conta. */

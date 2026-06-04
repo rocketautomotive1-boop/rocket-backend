@@ -49,4 +49,10 @@ describe('MarketplaceAccountAuthController.createAccount', () => {
     const { controller } = makeController({ registry: { findByTag: jest.fn().mockResolvedValue(null) } });
     await expect(controller.createAccount('nope', validBody)).rejects.toThrow(NotFoundException);
   });
+
+  it('passes the root API_BASE_URL as redirect_uri (ML requires exact match with the registered root)', async () => {
+    const { controller, accountService } = makeController();
+    await controller.createAccount('mercadolivre', validBody);
+    expect(accountService.buildAuthUrl).toHaveBeenCalledWith('acc1', 'https://api.test');
+  });
 });
