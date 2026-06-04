@@ -22,13 +22,32 @@ export class MarketplaceTemplateRepository {
 
   // ── Consultas ──────────────────────────────────────────────────────────────
 
-  async findDefault(marketplaceName: string): Promise<MarketplaceDescriptionTemplateSnapshot | null> {
+  /**
+   * Template padrão do marketplace, opcionalmente por domínio (multi-domínio).
+   * Precedência:
+   *   1. default+ativo do domínio informado (ex.: 'general')
+   *   2. default+ativo "clássico" (sem domain ou domain 'autopecas')
+   *   3. qualquer default+ativo (compat. com templates legados)
+   */
+  async findDefault(
+    marketplaceName: string,
+    domain?: string,
+  ): Promise<MarketplaceDescriptionTemplateSnapshot | null> {
     const marketplace = await this.findMarketplaceByName(marketplaceName);
     if (!marketplace) return null;
 
-    const template = marketplace.templates?.find(t => t.isDefault && t.isActive);
+    const actives = (marketplace.templates || []).filter(t => t.isDefault && t.isActive);
+    const isClassic = (t: any) => !t.domain || t.domain === 'autopecas';
+
+    const template =
+      (domain && domain !== 'autopecas'
+        ? actives.find((t: any) => t.domain === domain)
+        : undefined) ??
+      actives.find(isClassic) ??
+      actives[0];
+
     if (!template) {
-      this.logger.warn(`Nenhum template padrão ativo encontrado para "${marketplaceName}"`);
+      this.logger.warn(`Nenhum template padrão ativo encontrado para "${marketplaceName}"${domain ? ` (domain=${domain})` : ''}`);
       return null;
     }
     return template;

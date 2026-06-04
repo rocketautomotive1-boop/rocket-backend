@@ -51,9 +51,10 @@ export class MarketplaceDescriptionService {
     templateId?: string,
     listingTitle?: string,
   ): Promise<string> {
+    const productDomain = (product as any)?.domain as string | undefined;
     const template = templateId
       ? await this.templateRepo.findById(templateId)
-      : await this.templateRepo.findDefault(marketplaceName);
+      : await this.templateRepo.findDefault(marketplaceName, productDomain);
 
     if (!template) {
       throw new Error(`Nenhum template padrão encontrado para marketplace "${marketplaceName}"`);

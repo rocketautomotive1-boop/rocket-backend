@@ -43,6 +43,13 @@ export class MarketplaceDescriptionTemplateSnapshot {
     @Prop({ default: false })
     isDefault: boolean;
 
+    /**
+     * Domínio do produto que este template atende (ex.: 'general' p/ suplementos).
+     * Ausente/'autopecas' = template padrão (autopeças), preservando o legado.
+     */
+    @Prop({ type: String, required: false })
+    domain?: string;
+
     @Prop({ type: Object, nullable: true })
     placeholders: Record<string, any>;
 
