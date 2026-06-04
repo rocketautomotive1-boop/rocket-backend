@@ -50,6 +50,11 @@ export class MlAttributeHydrationService {
     if (!values.PART_NUMBER && product?.partNumber) values.PART_NUMBER = String(product.partNumber);
     if (!values.OEM       && product?.partNumber) values.OEM       = String(product.partNumber);
     if (!values.MODEL     && product?.partNumber) values.MODEL     = String(product.partNumber);
+    // Fluxo general (saúde/beleza/alimentos): produtos não têm partNumber, só EAN.
+    // O ML ainda exige MODEL, então usamos o barcode (EAN) como modelo.
+    if (!values.MODEL && product?.domain === 'general' && product?.barcode) {
+      values.MODEL = String(product.barcode);
+    }
     if (!values.SELLER_SKU && product?._id)      values.SELLER_SKU = String(product._id);
     if (!values.BRAND) {
       const brandName = product?.brand?.name || product?.brands?.name;

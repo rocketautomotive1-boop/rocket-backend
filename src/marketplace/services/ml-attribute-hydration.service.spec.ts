@@ -16,6 +16,24 @@ describe('MlAttributeHydrationService', () => {
       expect(v.MODEL).toBe('PN1');
     });
 
+    it('falls back MODEL to barcode (EAN) for general-domain products without partNumber', () => {
+      const v = svc.hydrateMlValues({ domain: 'general', barcode: '7898767280017' }, 'mp1');
+      expect(v.MODEL).toBe('7898767280017');
+      // EAN fallback is MODEL-only — part number / OEM stay empty for general items.
+      expect(v.PART_NUMBER).toBeUndefined();
+      expect(v.OEM).toBeUndefined();
+    });
+
+    it('does not use barcode for MODEL on non-general products', () => {
+      const v = svc.hydrateMlValues({ domain: 'autopecas', barcode: '7898767280017' }, 'mp1');
+      expect(v.MODEL).toBeUndefined();
+    });
+
+    it('prefers partNumber over barcode for MODEL even in general domain', () => {
+      const v = svc.hydrateMlValues({ domain: 'general', partNumber: 'PN1', barcode: '789' }, 'mp1');
+      expect(v.MODEL).toBe('PN1');
+    });
+
     it('prefers ML-saved attributes over derived ones', () => {
       const product = {
         partNumber: 'PN1',
