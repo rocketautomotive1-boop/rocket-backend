@@ -106,15 +106,18 @@ Substitui o `switch`. `Map<string, WebhookAdapter>` populado por discovery no bo
 ```typescript
 type SignatureScheme =
   | { type: 'none' }
-  | { type: 'hmac-sha256'; header: string; secretEnv: string; baseString: 'rawBody' | ((ctx) => string) }
+  | { type: 'hmac-sha256'; header: string; secretKey: string; baseString: 'rawBody' | ((ctx) => string) }
   | { type: 'aws-sns' };
 ```
 
+`secretKey` é a **chave dentro de `marketplaces.credentials`** (não env var). O `SignatureVerifier` injeta `MarketplaceCredentialsService` e resolve o segredo via `credentials.get(ctx.marketplace, scheme.secretKey)` — que já decifra (AES-256-GCM, `credentials-crypto.helper`), cacheia 60s e faz fallback `MP_<TAG>_<KEY>` no `.env` durante a transição. Isso alinha a camada de webhook ao refactor de `marketplaces` (segredos cifrados na tabela, não no `.env`).
+
 Regras:
 - HMAC: `timingSafeEqual` **com checagem de length antes** (length diferente → inválido, sem throw). Mata o `===` da Shopee (timing attack).
-- **Fail-closed:** scheme exige segredo e a env var está ausente → **rejeita** (não `return true`). O default seguro é negar.
+- **Fail-closed:** scheme exige segredo e `credentials.get()` retorna `undefined` (ausente em DB e env) → **rejeita** (não `return true`). O default seguro é negar.
 - `aws-sns`: valida assinatura X.509 do SNS antes de confirmar `SubscribeURL`.
 - `none`: explícito por adapter (ex.: OLX), nunca um default implícito.
+- Segredo por-conta (ex.: `partnerKey` da Shopee, hoje `SHOPEE_PARTNER_SECRET_<id>`): o adapter resolve a conta no `parse`/scheme e o verifier lê de `accounts[].credentials` quando aplicável; o caminho padrão usa `marketplaces.credentials`.
 
 ### 3.4 `WebhookContext`
 
@@ -251,6 +254,40 @@ Princípio: nunca devolver 5xx por payload que nunca vai parsear (evita retry in
 
 ---
 
+## 6b. Credenciais e config via tabela `marketplaces` (alinhamento ao refactor existente)
+
+O refactor recente de `marketplaces` moveu **tokens e credenciais** do `.env` para a tabela (`marketplaces.credentials` cifrado + `accounts[].credentials` por conta), com `MarketplaceCredentialsService` como fonte única (DB → fallback `MP_<TAG>_<KEY>` → undefined, cache 60s, AES-256-GCM). A camada de webhook **deve usar essa mesma fonte**, não o `.env`.
+
+### Dentro deste escopo (webhook + auth correlatos)
+
+1. **Segredos de webhook** → `marketplaces.credentials.webhookSecret` (cifrado), lidos pelo `SignatureVerifier` via `MarketplaceCredentialsService`. Remove do `.env`:
+   `MERCADO_LIVRE_WEBHOOK_SECRET`, `MAGALU_WEBHOOK_SECRET`, `B2W_WEBHOOK_SECRET`, `VIAVAREJO_WEBHOOK_SECRET`, `YAMPI_WEBHOOK_SECRET`, `ALIEXPRESS_WEBHOOK_SECRET`. O `SHOPEE_PARTNER_SECRET_<id>` vira `accounts[].credentials.partnerKey` (por conta).
+   Transição: aceitar `MP_<TAG>_WEBHOOKSECRET` como fallback (já suportado pelo service) antes da remoção definitiva.
+
+2. **`REDIRECT_URI` hard-coded no `.env`** → `marketplaces.settings.redirectUri`. Apenas 2 marketplaces estão presos ao `.env` (os demais já recebem `redirectUri` por parâmetro):
+   - `OLX_REDIRECT_URI` → `olx-auth.service.ts`, `olx.controller.ts`
+   - `MAGALU_REDIRECT_URI` → `magalu-auth.adapter.ts:23`
+   Lidos via `marketplace.settings?.redirectUri` com fallback ao `.env` na transição.
+
+### Candidatos mapeados (follow-up, FORA deste escopo — plano próprio)
+
+Levantamento de `process.env`/`configService.get` em `src/marketplace`. Classificados pela regra: **vai para a tabela o que é (a) segredo ou (b) específico do marketplace E variável em runtime/ambiente; fica no `.env` o que é config de deploy/infra.**
+
+| Item (.env atual) | Onde | Classificação | Destino sugerido |
+|---|---|---|---|
+| `OLX_CLIENT_ID` / `OLX_CLIENT_SECRET_<id>` | olx-auth, olx.controller | segredo per-conta | `accounts[].credentials` (clientId/clientSecret) — OLX ainda lê do `.env`, fora do padrão já aplicado a ML/Shopee |
+| `AMAZON_APP_ID` / `AMAZON_CLIENT_SECRET` (LWA) | amazon-auth.adapter | segredo per-marketplace | `marketplaces.credentials` |
+| `AMAZON_AWS_ACCESS_KEY` / `AMAZON_AWS_SECRET_KEY` | amazon.adapter, signer, token-manager | segredo (SigV4) | `marketplaces.credentials` (ou cofre de infra, ver nota) |
+| `AMAZON_SELLER_ID` / `AMAZON_MARKETPLACE_ID` | amazon.* | config per-conta variável | `accounts[].credentials`/`settings` (já há `additionalData.sellerId` como precedência) |
+| `MAGALU_CLIENT_ID` / `MAGALU_OAUTH_TOKEN_URL` | magalu-auth.adapter | clientId=segredo; tokenUrl=endpoint | clientId → `credentials`; tokenUrl → `settings` |
+| `MAGALU_BASE_URL` / `MAGALU_OAUTH_AUTHORIZE_URL` | magalu-*.adapter | endpoint do fornecedor | manter como **constante no adapter** (não é segredo nem varia por cliente) — limpar do `.env` |
+| `AMAZON_SPAPI_ENDPOINT` / `AMAZON_AWS_REGION` | amazon.* | endpoint/região | `settings` se variar por conta (sandbox vs prod); senão constante |
+| `RABBITMQ_URL` / `MARKETPLACE_QUEUE` / `MP_CRYPTO_KEY` / `AWS_*` genéricos | module, helper | infra/deploy | **manter no `.env`** — não pertencem ao registro de marketplace |
+
+Nota: chaves AWS SigV4 são segredo, mas são credenciais de *infra da conta AWS*, não "do marketplace Amazon" no sentido OAuth. Decisão de colocá-las em `marketplaces.credentials` vs. cofre de infra fica para o plano de follow-up; aqui apenas registramos o candidato.
+
+Princípio geral: **endpoints fixos do fornecedor são constantes no adapter, não config.** Hoje vários estão no `.env` com default hard-coded (`|| 'https://...'`) — isso é a pior combinação (config sem ser configurável de fato). Consolidar em constante elimina ruído do `.env`.
+
 ## 7. Migração (expand/contract, zero perda)
 
 Estilo bigtech: schema novo **retrocompatível na leitura**. Campos novos (`eventId`, `kind`, `owner`, `leaseUntil`) são opcionais; itens legados sem eles recebem fallback no claim/boot. Worker novo processa itens antigos e novos — sem janela de drain e sem drop. Drain explícito (deixar worker antigo terminar pendentes antes do switch) fica como plano B caso algum campo não possa ser inferido.
@@ -264,7 +301,7 @@ A coleção `webhook_inbox` é transitória (itens `done` em minutos) e hoje só
 Segue convenção do projeto (Jest, `--runInBand` por causa de contenção do `mongodb-memory-server`; lógica pura sem deps de framework onde possível).
 
 - **`parse()` de cada adapter** — unitário puro: payload exemplo → `NormalizedWebhook` esperado (inclui `eventId` estável e `kind:'ignore'`). 1 arquivo por adapter. É o maior risco de regressão.
-- **`SignatureVerifier`** — HMAC válido/inválido, length mismatch (timing-safe), SNS, scheme `none`, **fail-closed quando falta segredo**.
+- **`SignatureVerifier`** — HMAC válido/inválido, length mismatch (timing-safe), SNS, scheme `none`, **fail-closed quando falta segredo**, e resolução do segredo via `MarketplaceCredentialsService` (mock: DB hit, env fallback, ausente → reject).
 - **`WebhookInboxWorker`** — claim atômico, lease/reaper (leaseUntil vencido → reclaim), backoff, transição para `dead`. `mongodb-memory-server` + `--runInBand`.
 - **`WebhookDispatcher`** — `kind → comando` correto; mock EventEmitter; valida shape dos 3 comandos contra o esperado pelos listeners.
 - **`WebhookAdapterRegistry`** — discovery registra todos; `get` desconhecido → undefined.
