@@ -2,11 +2,11 @@ import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { MarketplaceModel, MarketplaceSchema } from '../schemas/marketplace.schema';
-import { MarketplaceAccountModel, MarketplaceAccountSchema } from './schemas/marketplace-account.schema';
-import { MarketplaceAccountRepository } from './services/marketplace-account.repository';
-import { MarketplaceAccountService } from './services/marketplace-account.service';
 import { MarketplaceAuthService } from './services/marketplace-auth.service';
 import { TokenManagerService } from './services/token-manager.service';
+import { MarketplaceTokenBrokerService } from './services/marketplace-token-broker.service';
+import { MarketplaceSignerService } from './services/marketplace-signer.service';
+import { MarketplaceCredentialsController } from './controllers/marketplace-credentials.controller';
 
 import { MarketplaceRegistryModule } from '../marketplace-registry.module';
 import { MarketplaceModule } from '../marketplace.module';
@@ -32,7 +32,6 @@ import { MarketplaceCallbackController } from './controllers/marketplace-callbac
 
         MongooseModule.forFeature([
             { name: MarketplaceModel.name, schema: MarketplaceSchema },
-            { name: MarketplaceAccountModel.name, schema: MarketplaceAccountSchema },
         ]),
         forwardRef(() => MarketplaceRegistryModule),
         forwardRef(() => MarketplaceModule),
@@ -40,13 +39,14 @@ import { MarketplaceCallbackController } from './controllers/marketplace-callbac
     controllers: [
         MarketplaceAuthController,
         MarketplaceCallbackController,
-        MarketplaceAccountAuthController
+        MarketplaceAccountAuthController,
+        MarketplaceCredentialsController,
     ],
     providers: [
         MarketplaceAuthService,
         TokenManagerService,
-        MarketplaceAccountRepository,
-        MarketplaceAccountService,
+        MarketplaceTokenBrokerService,
+        MarketplaceSignerService,
         AmazonAuthAdapter,
         ShopeeAuthAdapter,
         MercadoLivreAuthAdapter,
@@ -58,8 +58,8 @@ import { MarketplaceCallbackController } from './controllers/marketplace-callbac
     exports: [
         MarketplaceAuthService,
         TokenManagerService,
-        MarketplaceAccountRepository,
-        MarketplaceAccountService,
+        MarketplaceTokenBrokerService,
+        MarketplaceSignerService,
         AmazonAuthAdapter,
         ShopeeAuthAdapter,
         MercadoLivreAuthAdapter,

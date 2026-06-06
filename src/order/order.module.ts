@@ -31,6 +31,7 @@ import { OrderPricingListener } from './listeners/order-pricing.listener';
 import { OrderFinancialSummaryService } from './services/order-financial-summary.service';
 import { OrderCancellationService } from './services/order-cancellation.service';
 import { OrderSyncFlowService } from './services/order-sync-flow.service';
+import { OrderWebhookCommandListener } from './listeners/order-webhook-command.listener';
 
 // Test controller
 import { OrderTestController } from './controllers/order-test.controller';
@@ -77,6 +78,7 @@ import { OrderTestController } from './controllers/order-test.controller';
         OrderPricingListener,
         OrderFinancialSummaryService,
         OrderSyncFlowService,
+        OrderWebhookCommandListener,
     ],
     exports: [OrderService, OrderRepository, OrderProcessingService, OrderOrchestrator, StockOrchestratorService, OrderRectifyService, OrderPricingService, PricingCalculatorRegistry, OrderMarketplaceDetailsService, OrderFinancialSummaryService, OrderCancellationService, OrderSyncFlowService],
 })

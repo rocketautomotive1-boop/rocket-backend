@@ -133,13 +133,20 @@ export class ProductMovementService {
         createMovementDto.conditionId,
       );
 
+      // Custo do lote: clientes legados enviam o custo no campo `price`. O custo
+      // pertence a `costPrice` (snapshot do lote), NUNCA ao preço de venda do
+      // produto. Mantemos `price` espelhado p/ leitura legada até a migração.
+      const lotCost = createMovementDto.costPrice ?? createMovementDto.price ?? 0;
+
       const savedMovement = await this.productRepository.createMovement({
         productId: product._id,
         orderId: createMovementDto.orderId ? new Types.ObjectId(createMovementDto.orderId) : undefined,
         type,
         quantity,
         date: new Date(),
-        price: Types.Decimal128.fromString((createMovementDto.price || 0).toString()),
+        price: Types.Decimal128.fromString(lotCost.toString()),
+        costPrice: Types.Decimal128.fromString(lotCost.toString()),
+        expiryDate: createMovementDto.expiryDate ? new Date(createMovementDto.expiryDate) : undefined,
         reason: createMovementDto.reason || 'Manual Movement',
         fromAllocationId: (createMovementDto.fromAllocationId && Types.ObjectId.isValid(createMovementDto.fromAllocationId.toString()))
           ? new Types.ObjectId(createMovementDto.fromAllocationId.toString()) : undefined,
@@ -172,12 +179,10 @@ export class ProductMovementService {
           await this.productRepository.updatePrice(product._id as any, createMovementDto.price, session);
         }
       }
-      // 3. Inbound: Update product price if provided
-      else if (type === 'inbound') {
-        if (createMovementDto.price && createMovementDto.price > 0) {
-          await this.productRepository.updatePrice(product._id as any, createMovementDto.price, session);
-        }
-      }
+      // 3. Inbound: NÃO sobrescreve o preço de venda. A entrada de estoque carrega
+      // o CUSTO do lote (costPrice) — o preço de venda do produto é definido
+      // explicitamente pelo usuário (updatePrice/PUT). Antes, o inbound gravava o
+      // custo como preço de venda, contaminando o valor publicado no marketplace.
 
       // Auto-update Total Sold for sales/outbounds
       if (type === 'outbound') {
@@ -383,6 +388,8 @@ export class ProductMovementService {
       type: doc.type,
       quantity: doc.quantity,
       price: doc.price ? parseFloat(doc.price.toString()) : 0,
+      costPrice: doc.costPrice ? parseFloat(doc.costPrice.toString()) : (doc.price ? parseFloat(doc.price.toString()) : 0),
+      expiryDate: doc.expiryDate ?? null,
       createdAt: doc.date,
       updatedAt: doc.updatedAt,
       fromAllocation: null,

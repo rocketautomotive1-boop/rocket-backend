@@ -34,8 +34,10 @@ export class InternalProductController {
         // (externalId) mas não o mlCategoryId, e o orchestrator só lê mlCategoryId.
         await this.fillMlCategoryId(normalized.category);
 
-        // Compute stock and effective price from stock_movements — product schema has no stockQuantity field
-        const [stockResult, priceResult] = await Promise.all([
+        // Compute stock from stock_movements — product schema has no stockQuantity field.
+        // Preço de VENDA vem só do produto (product.price); movimentos guardam o
+        // CUSTO do lote (costPrice), que NUNCA deve ser usado como preço de venda.
+        const [stockResult] = await Promise.all([
             this.stockMovementModel.aggregate([
                 { $match: { productId: new Types.ObjectId(id) } },
                 {
@@ -56,21 +58,9 @@ export class InternalProductController {
                     },
                 },
             ]).exec(),
-            // Most recent inbound price as effective selling price
-            (this.stockMovementModel as any)
-                .findOne({ productId: new Types.ObjectId(id), type: 'inbound', price: { $exists: true, $ne: null } })
-                .sort({ date: -1 })
-                .select('price')
-                .lean()
-                .exec(),
         ]);
 
         normalized.stockQuantity = stockResult[0]?.total ?? 0;
-
-        // Use movement price only if product has no price set
-        if (!normalized.price && priceResult?.price) {
-            normalized.price = parseFloat(priceResult.price.toString());
-        }
 
         return normalized;
     }

@@ -15,7 +15,6 @@ export class ShopeeService {
 
   constructor(
     private shopeeAdapter: ShopeeAdapter,
-    @Inject(forwardRef(() => MarketplaceAuthService))
     private marketplaceAuthService: MarketplaceAuthService,
     @Inject(forwardRef(() => MarketplaceIntegrationHelperService))
     private helperService: MarketplaceIntegrationHelperService,

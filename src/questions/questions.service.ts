@@ -1,12 +1,16 @@
 import { Injectable, Logger, Inject, forwardRef, NotFoundException } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+    QuestionIngestRequestedCommand,
+    WEBHOOK_DOMAIN_COMMANDS,
+} from '../webhook/events/webhook.events';
 import { Types } from 'mongoose';
 import { QuestionRepository } from './question.repository';
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
 import { MarketplaceAuthService } from '../marketplace/auth/services/marketplace-auth.service';
 import { MercadoLivreAdapter } from '../marketplace/adapters/mercado-livre/mercado-livre.adapter';
-import { NotificationsService } from '../notifications/notifications.service';
+import { NOTIFICATION_EVENTS } from '../notifications/events/notification.events';
 import { MercadoLivreService } from '../marketplace/services/mercado-livre.service';
 import { ProductService } from '../product/product.service';
 import { ProductTitleService } from '../product/services/product-title.service';
@@ -25,16 +29,26 @@ export class QuestionsService {
         private mercadoLivreService: MercadoLivreService,
         @Inject(forwardRef(() => ProductService))
         private productService: ProductService,
-        private notificationsService: NotificationsService,
         private productTitleService: ProductTitleService,
         private aiService: AiService,
         private productCompatibilityService: ProductCompatibilityService,
         private eventEmitter: EventEmitter2,
     ) { }
 
+    @OnEvent(WEBHOOK_DOMAIN_COMMANDS.QUESTION_INGEST_REQUESTED, { async: true })
+    async handleQuestionIngestRequested(event: QuestionIngestRequestedCommand): Promise<void> {
+        this.logger.log(`[Webhook] Question ingest requested for ${event.marketplace}/${event.externalQuestionId}`);
+        try {
+            await this.syncSingleQuestion(event.externalQuestionId);
+        } catch (error) {
+            this.logger.error(`[Webhook] Question ingest failed: ${error.message}`, error.stack);
+            throw error;
+        }
+    }
+
     @OnEvent('question.sync_requested', { async: true })
-    async handleQuestionWebhook(event: { marketplace: string; payload: any }): Promise<void> {
-        this.logger.log(`[Webhook] Question sync triggered for ${event.marketplace}`);
+    async handleLegacyQuestionWebhook(event: { marketplace: string; payload: any }): Promise<void> {
+        this.logger.log(`[Webhook] Legacy question sync triggered for ${event.marketplace}`);
         try {
             const resourceId = event.payload?.resource?.split('/').pop();
             if (resourceId && event.marketplace === 'mercadolivre') {
@@ -43,7 +57,7 @@ export class QuestionsService {
                 await this.syncQuestions();
             }
         } catch (error) {
-            this.logger.error(`[Webhook] Question sync failed: ${error.message}`, error.stack);
+            this.logger.error(`[Webhook] Legacy question sync failed: ${error.message}`, error.stack);
         }
     }
 
@@ -54,19 +68,16 @@ export class QuestionsService {
         const mlMarketplace = marketplaces.find(m => m.enabled && m.name === 'Mercado Livre');
         if (!mlMarketplace) return;
 
-        let activeToken: any = await this.marketplaceAuth.getToken(mlMarketplace._id);
-        if (!activeToken) return;
-
-        if (activeToken.expiresAt && new Date(activeToken.expiresAt) < new Date(Date.now() + 5 * 60 * 1000)) {
-            try {
-                activeToken = await this.marketplaceAuth.ensureValidToken(mlMarketplace._id);
-            } catch { return; }
-        }
+        let activeToken: any;
+        try {
+            activeToken = await this.marketplaceAuth.ensureValidToken(mlMarketplace._id);
+        } catch { return; }
+        if (!activeToken?.accessToken) return;
 
         const q = await this.mercadoLivreAdapter.getQuestionById(activeToken.accessToken, mlQuestionId);
         if (!q) return;
 
-        await this.upsertQuestion(q, mlMarketplace, activeToken.accessToken);
+        await this.upsertQuestion(q, mlMarketplace, activeToken.accessToken, 'webhook');
     }
 
     async findAll(query: {
@@ -201,7 +212,7 @@ export class QuestionsService {
         if (!question) throw new NotFoundException('Question not found');
 
         const marketplace = await this.marketplaceRegistry.findOne(question.marketplaceId as any);
-        const activeToken = await this.marketplaceAuth.getToken(marketplace._id);
+        const activeToken = await this.marketplaceAuth.ensureValidToken(marketplace._id);
         const token = activeToken?.accessToken;
 
         if (!token) throw new Error(`No active token found for marketplace ${marketplace.name}`);
@@ -236,22 +247,17 @@ export class QuestionsService {
             if (!marketplace.enabled) continue;
 
             try {
-                let activeToken: any = await this.marketplaceAuth.getToken(marketplace._id);
-
-                if (!activeToken) {
-                    this.logger.warn(`Skipping sync for ${marketplace.name} (No active token)`);
+                // ensureValidToken já resolve a conta e renova se estiver expirando.
+                let activeToken: any;
+                try {
+                    activeToken = await this.marketplaceAuth.ensureValidToken(marketplace._id);
+                } catch (refreshError) {
+                    this.logger.warn(`Skipping sync for ${marketplace.name} (token indisponível): ${refreshError.message}`);
                     continue;
                 }
-
-                // Check for expiration
-                if (activeToken.expiresAt && new Date(activeToken.expiresAt) < new Date(Date.now() + 5 * 60 * 1000)) {
-                    this.logger.log(`Token for ${marketplace.name} is expired or about to expire. Refreshing...`);
-                    try {
-                        activeToken = await this.marketplaceAuth.ensureValidToken(marketplace._id);
-                    } catch (refreshError) {
-                        this.logger.error(`Failed to refresh token for ${marketplace.name}: ${refreshError.message}`);
-                        continue; // Skip this marketplace if refresh fails
-                    }
+                if (!activeToken?.accessToken) {
+                    this.logger.warn(`Skipping sync for ${marketplace.name} (No active token)`);
+                    continue;
                 }
 
                 if (marketplace.name === 'Mercado Livre') {
@@ -347,7 +353,12 @@ export class QuestionsService {
         return null;
     }
 
-    private async upsertQuestion(q: any, marketplace: any, token: string): Promise<boolean> {
+    private async upsertQuestion(
+        q: any,
+        marketplace: any,
+        token: string,
+        source: 'webhook' | 'sync' = 'sync',
+    ): Promise<boolean> {
         const exists = await this.questionRepository.findOne({ externalId: String(q.id) });
 
         if (exists) {
@@ -396,12 +407,13 @@ export class QuestionsService {
         });
 
         if (newQuestion.status === 'UNANSWERED') {
-            this.eventEmitter.emit('notification.send', {
-                category: 'question',
+            this.eventEmitter.emit(NOTIFICATION_EVENTS.REQUESTED, {
+                type: 'question.received',
+                aggregateType: 'question',
+                aggregateId: String(q.id),
                 title: 'Nova Pergunta!',
-                body: `${q.text.substring(0, 100)} — ${q.item_id}`,
+                body: `${q.text.substring(0, 100)} - ${q.item_id}`,
                 data: {
-                    type: 'question',
                     actionRoute: '/(drawer)/questions',
                     externalId: String(q.id),
                     marketplace: 'mercadolivre',
@@ -409,6 +421,7 @@ export class QuestionsService {
                 channels: ['push', 'websocket', 'persist'],
                 severity: 'info',
                 deduplicationKey: `question:mercadolivre:${q.id}`,
+                source,
             });
         }
 
@@ -422,7 +435,7 @@ export class QuestionsService {
         let newCount = 0;
 
         for (const q of questions) {
-            const isNew = await this.upsertQuestion(q, marketplace, token);
+            const isNew = await this.upsertQuestion(q, marketplace, token, 'sync');
             if (isNew) newCount++;
         }
 

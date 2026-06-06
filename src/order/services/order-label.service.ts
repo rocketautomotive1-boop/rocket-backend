@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import axios from 'axios';
 import { OrderDocument, OrderModel } from '../schemas/order.schema';
 import { MarketplaceModel, MarketplaceDocument } from '../../marketplace/schemas/marketplace.schema';
+import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
 import { buildSignedParams, buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
 
 export interface LabelResult {
@@ -20,6 +21,7 @@ export class OrderLabelService {
     constructor(
         @InjectModel(OrderModel.name) private readonly orderModel: Model<OrderDocument>,
         @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceDocument>,
+        private readonly auth: MarketplaceAuthService,
     ) {}
 
     async getLabel(orderId: string): Promise<LabelResult> {
@@ -32,8 +34,9 @@ export class OrderLabelService {
             .exec();
         if (!marketplace) throw new NotFoundException(`Marketplace not found for order ${orderId}`);
 
-        const activeToken = (marketplace as any).tokens?.find((t: any) => t.isActive);
-        if (!activeToken) {
+        // Via única de token (resolve via accounts[], renova se preciso).
+        const activeToken = await this.auth.ensureValidToken(String(marketplace._id));
+        if (!activeToken?.accessToken) {
             throw new NotFoundException(`No active token for marketplace ${marketplace.name}`);
         }
 

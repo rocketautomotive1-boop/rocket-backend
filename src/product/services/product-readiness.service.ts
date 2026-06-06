@@ -5,6 +5,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProductRepository } from '../product.repository';
 import { ProductTitleService } from './product-title.service';
+import { normalizeCompletedAt } from './product-readiness.normalize';
 import {
   PRODUCT_SECTION_EVENTS,
   ProductDimensionsSavedEvent,
@@ -123,7 +124,7 @@ export class ProductReadinessService {
 
       const product = await this.productRepository.findByIdClean(productId);
       const previousReady = !!(product as any).completion?.readyToPublish;
-      const previousCompletedAt = (product as any).completion?.completedAt ?? null;
+      const previousCompletedAt = normalizeCompletedAt((product as any).completion?.completedAt);
 
       const completedAt = computed.readyToPublish
         ? (previousCompletedAt ?? new Date())

@@ -16,7 +16,6 @@ export class TikTokShopService {
     private readonly productAdapter: TikTokShopProductAdapter,
     private readonly orderAdapter: TikTokShopOrderAdapter,
     private readonly categoryAdapter: TikTokShopCategoryAdapter,
-    @Inject(forwardRef(() => MarketplaceAuthService))
     private readonly marketplaceAuthService: MarketplaceAuthService,
     @Inject(forwardRef(() => MarketplaceDescriptionService))
     private readonly descriptionService: MarketplaceDescriptionService,

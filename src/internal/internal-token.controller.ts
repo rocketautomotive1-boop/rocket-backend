@@ -1,51 +1,54 @@
-import { Controller, Get, Param, NotFoundException, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, NotFoundException, UseGuards } from '@nestjs/common';
 import { MarketplaceAuthService } from '../marketplace/auth/services/marketplace-auth.service';
-import { MarketplaceAccountService } from '../marketplace/auth/services/marketplace-account.service';
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
 import { InternalKeyGuard } from '../common/guards/internal-key.guard';
 
+/**
+ * Token broker interno (microserviços) — protegido por x-internal-key.
+ * Contrato desacoplado: o consumidor manda CONTEXTO DE NEGÓCIO (tag do
+ * marketplace + domain opcional); o backend resolve a conta internamente. O
+ * vocabulário "account" não vaza para o contrato.
+ */
 @Controller('internal')
 @UseGuards(InternalKeyGuard)
 export class InternalTokenController {
     constructor(
         private readonly authService: MarketplaceAuthService,
-        private readonly accountService: MarketplaceAccountService,
         private readonly registry: MarketplaceRegistryService,
     ) {}
 
     /**
-     * Returns a valid access token for the requested marketplace tag.
-     * Intended for internal microservices only — protected by x-internal-key header.
+     * Access token válido (já renovado) para um marketplace, opcionalmente para
+     * o domínio informado (multi-client).
      *
      * Usage: GET /internal/token/mercadolivre
-     *        GET /internal/token/shopee
+     *        GET /internal/token/mercadolivre?domain=general
      */
     @Get('token/:tag')
-    async getToken(@Param('tag') tag: string) {
+    async getToken(@Param('tag') tag: string, @Query('domain') domain?: string) {
         const marketplace = await this.registry.findByTag(tag);
         if (!marketplace) throw new NotFoundException(`Marketplace not found: ${tag}`);
 
-        const resolved = await this.authService.ensureValidToken(marketplace._id.toString());
+        const resolved = await this.authService.ensureValidToken(marketplace._id.toString(), domain);
         if (!resolved?.accessToken) throw new NotFoundException(`No active token for marketplace: ${tag}`);
 
         return { token: resolved };
     }
 
     /**
-     * Token válido da CONTA que atende o domínio (multi-client). Caminho paralelo
-     * ao /token/:tag (default). Resolve via accountFor(domain) → ensureValidAccountToken.
-     *
-     * Usage: GET /internal/token/account/mercadolivre/general
+     * @deprecated Alias de retrocompatibilidade para o contrato antigo
+     * (`/token/account/:tag/:domain`). Removido na fatia final da unificação —
+     * use `GET /internal/token/:tag?domain=`. Mantido só para o orchestrator
+     * em trânsito não quebrar durante a migração.
      */
     @Get('token/account/:tag/:domain')
     async getAccountToken(@Param('tag') tag: string, @Param('domain') domain: string) {
         const marketplace = await this.registry.findByTag(tag);
         if (!marketplace) throw new NotFoundException(`Marketplace not found: ${tag}`);
 
-        const account = await this.accountService.accountFor(marketplace._id.toString(), domain);
-        if (!account) throw new NotFoundException(`No account for ${tag}/${domain}`);
+        const resolved = await this.authService.ensureValidToken(marketplace._id.toString(), domain);
+        if (!resolved?.accessToken) throw new NotFoundException(`No active token for ${tag}/${domain}`);
 
-        const token = await this.accountService.ensureValidAccountToken(String((account as any)._id));
-        return { token, accountLabel: (account as any).label };
+        return { token: resolved };
     }
 }

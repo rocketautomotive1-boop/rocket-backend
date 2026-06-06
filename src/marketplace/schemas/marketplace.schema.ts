@@ -13,6 +13,26 @@ class MarketplaceTokenSnapshot {
     @Prop({ default: true }) isActive: boolean;
 }
 
+/**
+ * Conta de marketplace (multi-client) embarcada em `marketplaces.accounts[]`.
+ * Modelo unificado que substitui a coleção `marketplace_accounts`: cada conta
+ * tem credenciais cifradas próprias (enc:v1:..., via credentials-crypto.helper)
+ * e seu próprio token OAuth. `_id` é estável (usado como `state` no OAuth).
+ *
+ * Invariantes garantidas em nível de aplicação (Mongo não faz unique parcial
+ * dentro de array): no máx. 1 conta `isDefault` por marketplace; `label` único
+ * por marketplace. Domínios canônicos do produto: 'autopecas' | 'general'.
+ */
+@Schema({ _id: true })
+export class MarketplaceAccountSnapshot {
+    @Prop({ required: true }) label: string;
+    @Prop({ default: false }) isDefault: boolean;
+    @Prop({ type: [String], default: [] }) domains: string[];
+    /** Credenciais cifradas da conta (clientId/clientSecret/...). Vazio → cai em marketplaces.credentials. */
+    @Prop({ type: Object, default: {} }) credentials: Record<string, string>;
+    @Prop({ type: MarketplaceTokenSnapshot }) token: MarketplaceTokenSnapshot;
+}
+
 @Schema()
 export class MarketplaceRequirementSnapshot {
     @Prop() fieldName: string; // The field name expected by the Marketplace API
@@ -90,8 +110,21 @@ export class MarketplaceModel {
     @Prop({ type: Object })
     settings: any;
 
-    @Prop({ type: [SchemaFactory.createForClass(MarketplaceTokenSnapshot)] })
-    tokens: MarketplaceTokenSnapshot[];
+    /**
+     * Contas multi-client (token + credenciais por domínio). Fonte ÚNICA de
+     * token/credenciais — substituiu a coleção `marketplace_accounts` e o
+     * campo legado `tokens[]` (removido na unificação).
+     */
+    @Prop({ type: [SchemaFactory.createForClass(MarketplaceAccountSnapshot)], default: [] })
+    accounts: MarketplaceAccountSnapshot[];
+
+    /**
+     * Credenciais semi-estáticas do marketplace que NÃO variam por conta
+     * (ex.: partnerKey Shopee). Cifradas (enc:v1:...). Escritas por
+     * MarketplaceCredentialsService — declaradas aqui para serem first-class em reads .lean().
+     */
+    @Prop({ type: Object, default: {} })
+    credentials: Record<string, string>;
 
     @Prop({ type: [SchemaFactory.createForClass(MarketplaceRequirementSnapshot)] })
     requirements: MarketplaceRequirementSnapshot[];

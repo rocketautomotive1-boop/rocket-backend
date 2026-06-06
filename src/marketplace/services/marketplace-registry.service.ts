@@ -2,7 +2,6 @@ import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { MarketplaceModel, MarketplaceDocument } from '../schemas/marketplace.schema';
-import { MarketplaceToken, MarketplaceTokenDocument } from '../schemas/marketplace-token.schema';
 
 @Injectable()
 export class MarketplaceRegistryService {
@@ -10,7 +9,6 @@ export class MarketplaceRegistryService {
 
     constructor(
         @InjectModel(MarketplaceModel.name) private marketplaceModel: Model<MarketplaceDocument>,
-        @InjectModel(MarketplaceToken.name) private tokenModel: Model<MarketplaceTokenDocument>,
     ) { }
 
     async findAll(): Promise<MarketplaceDocument[]> {
@@ -43,38 +41,19 @@ export class MarketplaceRegistryService {
             return null;
         }
 
-        const marketplace = await this.marketplaceModel.findById(id).exec();
-
-        if (marketplace) {
-            // We might want to separate token fetching, but keeping it here for now to match legacy behavior
-            const tokens = await this.tokenModel.find({ marketplaceId: marketplace._id as any }).sort({ createdAt: -1 }).exec();
-            (marketplace as any).tokens = tokens;
-        }
-
-        return marketplace;
+        // Token/credenciais vêm embarcados no próprio doc (marketplaces.tokens[] /
+        // marketplaces.accounts[]). NÃO sobrescrever a partir da coleção morta
+        // `marketplace_tokens` (nunca era escrita → zerava os tokens — bug silencioso).
+        return this.marketplaceModel.findById(id).exec();
     }
 
 
     async findByTag(tag: string): Promise<MarketplaceDocument> {
-        const marketplace = await this.marketplaceModel.findOne({ tag }).exec();
-
-        if (marketplace) {
-            const tokens = await this.tokenModel.find({ marketplaceId: marketplace._id as any }).sort({ createdAt: -1 }).exec();
-            (marketplace as any).tokens = tokens;
-        }
-
-        return marketplace;
+        return this.marketplaceModel.findOne({ tag }).exec();
     }
 
     async findByName(name: string): Promise<MarketplaceDocument> {
-        const marketplace = await this.marketplaceModel.findOne({ name }).exec();
-
-        if (marketplace) {
-            const tokens = await this.tokenModel.find({ marketplaceId: marketplace._id as any }).sort({ createdAt: -1 }).exec();
-            (marketplace as any).tokens = tokens;
-        }
-
-        return marketplace;
+        return this.marketplaceModel.findOne({ name }).exec();
     }
 
     async create(data: any): Promise<MarketplaceDocument> {

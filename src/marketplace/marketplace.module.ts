@@ -16,7 +16,6 @@ import { MercadoLivreProductAdapter } from './adapters/mercado-livre/mercado-liv
 import { MercadoLivrePricingAdapter } from './adapters/mercado-livre/mercado-livre-pricing.adapter';
 import { MercadoLivreController } from './controllers/mercado-livre.controller';
 import { PublicationLogService } from './services/publication-log.service';
-import { MarketplaceToken, MarketplaceTokenSchema } from './schemas/marketplace-token.schema';
 
 import { MercadoLivreOrderAdapter } from './adapters/mercado-livre/mercado-livre-order.adapter';
 import { MercadoLivreCategoryAdapter } from './adapters/mercado-livre/mercado-livre-category.adapter';
@@ -40,7 +39,6 @@ import { MarketplaceRegistryService } from './services/marketplace-registry.serv
 import { MarketplaceOrderService } from './services/marketplace-order.service';
 import { MercadoLivreService } from './services/mercado-livre.service';
 import { ShopeeService } from './services/shopee.service';
-import { AmericanasService } from './services/americanas.service';
 import { CategoryAttributesService } from './services/category-attributes.service';
 import { CategorySuggestionService } from './services/category-suggestion.service';
 import { ProductAttributesService } from './services/product-attributes.service';
@@ -121,7 +119,6 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
       { name: MarketplaceCategoryModel.name, schema: MarketplaceCategorySchema },
       { name: ProductModel.name, schema: ProductSchema },
       { name: StockMovementModel.name, schema: StockMovementSchema },
-      { name: MarketplaceToken.name, schema: MarketplaceTokenSchema },
       { name: QueueRecordModel.name, schema: QueueRecordSchema },
       {
         name: 'PublicationAttempt',
@@ -169,7 +166,6 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     ShopeeProductAdapter,
     ShopeeOrderAdapter,
     ShopeeCategoryAdapter,
-    AmericanasService,
     AmazonAdapter,
     AmazonService,
     AmazonProductAdapter,
@@ -216,7 +212,6 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     MercadoLivreService,
     MercadoLivreAttributesService,
     ShopeeService,
-    AmericanasService,
     AmazonAdapter,
     AmazonService,
     AmazonProductAdapter,

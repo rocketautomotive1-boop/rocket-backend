@@ -1,8 +1,7 @@
 import { Injectable, Logger, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { QueueService } from '../queue/queue.service';
-import { MarketplaceAuthService } from '../marketplace/auth/services/marketplace-auth.service';
-import { MarketplaceAccountService } from '../marketplace/auth/services/marketplace-account.service';
+import { MarketplaceTokenBrokerService } from '../marketplace/auth/services/marketplace-token-broker.service';
 import { QuestionsService } from '../questions/questions.service';
 import { OrderSyncFlowService } from '../order/services/order-sync-flow.service';
 
@@ -12,10 +11,8 @@ export class SchedulerService implements OnModuleInit {
 
     constructor(
         private readonly queueService: QueueService,
-        @Inject(forwardRef(() => MarketplaceAuthService))
-        private readonly marketplaceAuthService: MarketplaceAuthService,
-        @Inject(forwardRef(() => MarketplaceAccountService))
-        private readonly marketplaceAccountService: MarketplaceAccountService,
+        @Inject(forwardRef(() => MarketplaceTokenBrokerService))
+        private readonly tokenBroker: MarketplaceTokenBrokerService,
         @Inject(forwardRef(() => QuestionsService))
         private readonly questionsService: QuestionsService,
         @Inject(forwardRef(() => OrderSyncFlowService))
@@ -38,24 +35,12 @@ export class SchedulerService implements OnModuleInit {
     async handleTokenRefresh() {
         this.logger.log('Starting Scheduled Token Refresh Check...');
         try {
-            const count = await this.marketplaceAuthService.refreshExpiringTokens();
-            if (count > 0) {
-                this.logger.log(`Proactive Refresh: ${count} tokens refreshed.`);
-            } else {
-                this.logger.log('Proactive Refresh: No tokens needing refresh.');
-            }
+            const count = await this.tokenBroker.refreshExpiringTokens();
+            this.logger.log(
+                count > 0 ? `Proactive Refresh: ${count} account tokens refreshed.` : 'Proactive Refresh: No tokens needing refresh.',
+            );
         } catch (error) {
             this.logger.error('Error in Scheduled Token Refresh:', error);
-        }
-
-        // Caminho paralelo: contas multi-client (não afeta o refresh legado acima).
-        try {
-            const accountCount = await this.marketplaceAccountService.refreshExpiringAccountTokens();
-            if (accountCount > 0) {
-                this.logger.log(`Proactive Refresh (accounts): ${accountCount} account tokens refreshed.`);
-            }
-        } catch (error) {
-            this.logger.error('Error in Scheduled Account Token Refresh:', error);
         }
     }
 

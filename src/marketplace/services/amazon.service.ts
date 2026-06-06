@@ -17,7 +17,6 @@ export class AmazonService {
   constructor(
 
     private amazonAdapter: AmazonAdapter,
-    @Inject(forwardRef(() => MarketplaceAuthService))
     private marketplaceAuthService: MarketplaceAuthService,
     @Inject(forwardRef(() => MarketplaceIntegrationHelperService))
     private helperService: MarketplaceIntegrationHelperService,

@@ -6,6 +6,7 @@ import { OrderDocument, OrderModel } from '../schemas/order.schema';
 import { MarketplaceModel, MarketplaceDocument } from '../../marketplace/schemas/marketplace.schema';
 import { buildSignedParams, buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
 import { MarketplaceOrderService } from '../../marketplace/services/marketplace-order.service';
+import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
 
 // ── Shared types ────────────────────────────────────────────────────────────────
 
@@ -165,6 +166,7 @@ export class OrderMarketplaceDetailsService {
         @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceDocument>,
         @Inject(forwardRef(() => MarketplaceOrderService))
         private readonly marketplaceOrderService: MarketplaceOrderService,
+        private readonly auth: MarketplaceAuthService,
     ) {}
 
     async getDetails(orderId: string): Promise<MarketplaceOrderDetails> {
@@ -705,8 +707,8 @@ export class OrderMarketplaceDetailsService {
             .exec();
         if (!marketplace) throw new NotFoundException(`Marketplace not found for order ${orderId}`);
 
-        const token = (marketplace as any).tokens?.find((t: any) => t.isActive);
-        if (!token) throw new NotFoundException(`No active token for marketplace ${marketplace.name}`);
+        const token = await this.auth.ensureValidToken(String(marketplace._id));
+        if (!token?.accessToken) throw new NotFoundException(`No active token for marketplace ${marketplace.name}`);
 
         return { order, marketplace, token };
     }

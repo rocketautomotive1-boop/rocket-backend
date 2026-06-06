@@ -1,4 +1,21 @@
-import { MlAttributeHydrationService } from './ml-attribute-hydration.service';
+import { MlAttributeHydrationService, isValidGtin } from './ml-attribute-hydration.service';
+
+describe('isValidGtin', () => {
+  it('accepts valid EAN-13 / EAN-8 codes', () => {
+    expect(isValidGtin('7891234567895')).toBe(true); // EAN-13 (check digit 5)
+    expect(isValidGtin('96385074')).toBe(true);       // EAN-8
+  });
+  it('rejects wrong check digit', () => {
+    expect(isValidGtin('7891234567890')).toBe(false);
+  });
+  it('rejects wrong length / non-digits / empty', () => {
+    expect(isValidGtin('12345')).toBe(false);
+    expect(isValidGtin('789123456789X')).toBe(false);
+    expect(isValidGtin('')).toBe(false);
+    expect(isValidGtin(null)).toBe(false);
+    expect(isValidGtin(undefined)).toBe(false);
+  });
+});
 
 describe('MlAttributeHydrationService', () => {
   let svc: MlAttributeHydrationService;
@@ -32,6 +49,17 @@ describe('MlAttributeHydrationService', () => {
     it('prefers partNumber over barcode for MODEL even in general domain', () => {
       const v = svc.hydrateMlValues({ domain: 'general', partNumber: 'PN1', barcode: '789' }, 'mp1');
       expect(v.MODEL).toBe('PN1');
+    });
+
+    it('sets GTIN from a valid barcode for any domain', () => {
+      expect(svc.hydrateMlValues({ domain: 'general', barcode: '7898767280017' }, 'mp1').GTIN).toBe('7898767280017');
+      expect(svc.hydrateMlValues({ domain: 'autopecas', barcode: '7891234567895' }, 'mp1').GTIN).toBe('7891234567895');
+    });
+
+    it('does not set GTIN when the barcode is not a valid GTIN', () => {
+      expect(svc.hydrateMlValues({ barcode: '12345' }, 'mp1').GTIN).toBeUndefined();
+      expect(svc.hydrateMlValues({ barcode: '7891234567890' }, 'mp1').GTIN).toBeUndefined();
+      expect(svc.hydrateMlValues({}, 'mp1').GTIN).toBeUndefined();
     });
 
     it('prefers ML-saved attributes over derived ones', () => {

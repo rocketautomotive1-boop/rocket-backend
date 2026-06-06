@@ -29,6 +29,10 @@ export class StockMovementModel {
     @Prop({ type: Types.Decimal128 })
     costPrice: Types.Decimal128; // Cost Snapshot
 
+    /** Vencimento/validade do lote (saúde/beleza/alimentos). Por movimento inbound. */
+    @Prop({ type: Date })
+    expiryDate?: Date;
+
     @Prop()
     reason: string;
 

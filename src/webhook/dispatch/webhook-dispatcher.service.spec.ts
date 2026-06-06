@@ -1,0 +1,11 @@
+import { WebhookDispatcher } from './webhook-dispatcher.service';
+import { WEBHOOK_DOMAIN_COMMANDS } from '../events/webhook.events';
+describe('WebhookDispatcher.dispatch', () => {
+  const makeSut = () => { const emitter = { emitAsync: jest.fn().mockResolvedValue([]) }; return { sut: new WebhookDispatcher(emitter as any), emitter }; };
+  const base = { marketplace:'mercadolivre', topic:'orders_v2', externalId:'1', resource:'/orders/1', payload:{}, receivedAt:new Date() };
+  it('order → ORDER_SYNC_REQUESTED', async () => { const { sut, emitter } = makeSut(); await sut.dispatch({...base, kind:'order'}); expect(emitter.emitAsync).toHaveBeenCalledWith(WEBHOOK_DOMAIN_COMMANDS.ORDER_SYNC_REQUESTED, expect.objectContaining({ marketplace:'mercadolivre', externalOrderId:'1', resource:'/orders/1', source:'webhook' })); });
+  it('order_pack → ORDER_PACK_SYNC_REQUESTED', async () => { const { sut, emitter } = makeSut(); await sut.dispatch({...base, kind:'order_pack', externalId:'55', resource:'/packs/55'}); expect(emitter.emitAsync).toHaveBeenCalledWith(WEBHOOK_DOMAIN_COMMANDS.ORDER_PACK_SYNC_REQUESTED, expect.objectContaining({ marketplace:'mercadolivre', externalPackId:'55', source:'webhook' })); });
+  it('question → QUESTION_INGEST_REQUESTED', async () => { const { sut, emitter } = makeSut(); await sut.dispatch({...base, kind:'question', externalId:'77', resource:'/questions/77'}); expect(emitter.emitAsync).toHaveBeenCalledWith(WEBHOOK_DOMAIN_COMMANDS.QUESTION_INGEST_REQUESTED, expect.objectContaining({ externalQuestionId:'77' })); });
+  it('unparseable → não emite', async () => { const { sut, emitter } = makeSut(); await sut.dispatch({...base, kind:'unparseable' as any}); expect(emitter.emitAsync).not.toHaveBeenCalled(); });
+  it('order sem externalId → não emite', async () => { const { sut, emitter } = makeSut(); await sut.dispatch({...base, kind:'order', externalId: undefined}); expect(emitter.emitAsync).not.toHaveBeenCalled(); });
+});

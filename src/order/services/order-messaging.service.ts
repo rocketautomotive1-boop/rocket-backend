@@ -5,6 +5,7 @@ import axios from 'axios';
 import * as FormData from 'form-data';
 import { OrderDocument, OrderModel } from '../schemas/order.schema';
 import { MarketplaceModel, MarketplaceDocument } from '../../marketplace/schemas/marketplace.schema';
+import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
 import { buildSignedParams, buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
 
 export interface ChatMessage {
@@ -32,6 +33,7 @@ export class OrderMessagingService {
     constructor(
         @InjectModel(OrderModel.name) private readonly orderModel: Model<OrderDocument>,
         @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceDocument>,
+        private readonly auth: MarketplaceAuthService,
     ) {}
 
     async getMessages(orderId: string): Promise<MessageThread> {
@@ -366,8 +368,8 @@ export class OrderMessagingService {
             .exec();
         if (!marketplace) throw new NotFoundException(`Marketplace not found for order ${orderId}`);
 
-        const token = (marketplace as any).tokens?.find((t: any) => t.isActive);
-        if (!token) throw new NotFoundException(`No active token for marketplace ${marketplace.name}`);
+        const token = await this.auth.ensureValidToken(String(marketplace._id));
+        if (!token?.accessToken) throw new NotFoundException(`No active token for marketplace ${marketplace.name}`);
 
         return { order, marketplace, token };
     }

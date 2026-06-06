@@ -1,12 +1,15 @@
-import { Injectable, Logger, Inject, forwardRef, OnModuleInit, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, InternalServerErrorException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { MarketplaceAuthService } from '../../auth/services/marketplace-auth.service';
 import { MarketplaceModel, MarketplaceDocument } from '../../schemas/marketplace.schema';
 import { IMarketplaceAuthAdapter } from '../../interfaces/marketplace-auth-adapter.interface';
+import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
+import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
+import { TokenManagerService } from '../../auth/services/token-manager.service';
+import { MarketplaceTokenBrokerService } from '../../auth/services/marketplace-token-broker.service';
 
 @Injectable()
 export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
@@ -18,15 +21,17 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
 
   constructor(
     private readonly httpService: HttpService,
-    @Inject(forwardRef(() => MarketplaceAuthService))
-    private readonly authService: MarketplaceAuthService,
+    private readonly registry: MarketplaceAdapterRegistry,
+    private readonly marketplaceRegistry: MarketplaceRegistryService,
+    private readonly tokenManager: TokenManagerService,
+    private readonly broker: MarketplaceTokenBrokerService,
     @InjectModel(MarketplaceModel.name)
     private marketplaceModel: Model<MarketplaceDocument>,
     private readonly configService: ConfigService,
   ) { }
 
   onModuleInit() {
-    this.authService.registerAdapter(this);
+    this.registry.registerAuthAdapter(this);
   }
 
   /**
@@ -121,11 +126,11 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
    * Para uso externo, prefira MarketplaceAuthService.ensureValidToken(marketplaceId).
    */
   async getValidToken(marketplaceName: string): Promise<any> {
-    const marketplace = await this.authService.findByName(marketplaceName);
+    const marketplace = await this.marketplaceRegistry.findByName(marketplaceName);
     if (!marketplace) {
       throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);
     }
-    return this.authService.ensureValidToken(marketplace._id);
+    return this.tokenManager.resolveToken(String(marketplace._id));
   }
 
   /**
@@ -166,7 +171,7 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
         if (directTokenResponse.data.access_token) {
           this.logger.log(`Client credentials flow funcionou diretamente!`);
 
-          return this.authService.saveToken(marketplace._id, {
+          const directToken = {
             accessToken: directTokenResponse.data.access_token,
             refreshToken: directTokenResponse.data.refresh_token || null,
             expiresAt: this.resolveExpiresAt(directTokenResponse.data.expires_in),
@@ -177,7 +182,9 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
               scope: directTokenResponse.data.scope || 'autoupload basic_user_info',
               authMethod: 'client_credentials_direct'
             }
-          });
+          };
+          await this.broker.saveTokenForDomain(String(marketplace._id), undefined, directToken);
+          return directToken;
         }
       } catch (directError) {
         this.logger.warn(`Client credentials flow direto falhou: ${directError.message}`);
@@ -209,7 +216,7 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
         },
       );
 
-      return this.authService.saveToken(marketplace._id, {
+      const codeToken = {
         accessToken: tokenResponse.data.access_token,
         refreshToken: tokenResponse.data.refresh_token || null,
         expiresAt: this.resolveExpiresAt(tokenResponse.data.expires_in),
@@ -220,7 +227,9 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
           scope: tokenResponse.data.scope || 'autoupload basic_user_info',
           authMethod: 'authorization_code'
         }
-      });
+      };
+      await this.broker.saveTokenForDomain(String(marketplace._id), undefined, codeToken);
+      return codeToken;
     } catch (error) {
       this.logger.error(`Erro na autenticação automática para OLX: ${error.message}`);
       throw new Error(`Falha na autenticação automática para OLX: ${error.message}`);
@@ -281,30 +290,21 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
    */
   async checkTokenStatus(marketplaceName: string): Promise<any> {
     try {
-      const marketplace = await this.authService.findByName(marketplaceName);
+      const marketplace = await this.marketplaceRegistry.findByName(marketplaceName);
       if (!marketplace) {
         throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);
       }
 
-      // Buscar tokens no marketplace (embedded)
-      const tokens = marketplace.tokens || [];
+      // Token resolvido pela via única (accounts[]). Pode não existir.
+      const activeToken = await this.tokenManager
+        .resolveToken(String(marketplace._id))
+        .catch(() => null);
+      const now = new Date();
 
-      if (tokens.length === 0) {
+      if (!activeToken?.accessToken) {
         return {
           marketplace: marketplaceName,
           hasTokens: false,
-          message: 'Nenhum token encontrado para OLX. Sistema tentará autenticação automática.',
-          action: 'auto_authenticate'
-        };
-      }
-
-      const activeToken = tokens.find(token => token.isActive);
-      const now = new Date();
-
-      if (!activeToken) {
-        return {
-          marketplace: marketplaceName,
-          hasTokens: true,
           hasActiveToken: false,
           message: 'Nenhum token ativo encontrado para OLX. Sistema tentará autenticação automática.',
           action: 'auto_authenticate',
@@ -326,7 +326,7 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
           : `Token válido por mais ${expiresInMinutes} minutos.`,
         action: isExpired ? 'auto_reauthenticate' : 'valid',
         token: {
-          isActive: activeToken.isActive,
+          isActive: true,
           expiresAt: activeToken.expiresAt,
         }
       };

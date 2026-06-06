@@ -1,7 +1,7 @@
 import { Controller, Get, Query, Param, BadRequestException, NotFoundException, Res, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { MarketplaceAuthService } from '../services/marketplace-auth.service';
-import { MarketplaceAccountService } from '../services/marketplace-account.service';
+import { MarketplaceTokenBrokerService } from '../services/marketplace-token-broker.service';
 import { MarketplaceService } from '../../services/marketplace.service';
 import { ConfigService } from '@nestjs/config';
 
@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 export class MarketplaceCallbackController {
     constructor(
         private readonly marketplaceAuthService: MarketplaceAuthService,
-        private readonly accountService: MarketplaceAccountService,
+        private readonly broker: MarketplaceTokenBrokerService,
         private readonly marketplaceService: MarketplaceService,
         private readonly configService: ConfigService,
     ) { }
@@ -37,15 +37,16 @@ export class MarketplaceCallbackController {
         try {
             const apiBaseUrl = this.configService.get<string>('API_BASE_URL') ?? '';
             // redirect_uri da troca DEVE ser idêntica à da autorização: a raiz.
-            await this.accountService.handleAuthCallback(state, code, apiBaseUrl);
-            return res.status(200).send(this.successHtml('Conta conectada com sucesso!'));
+            await this.broker.handleAuthCallback(state, code, apiBaseUrl);
+            return res.status(200).send(this.successHtml('A conta foi conectada corretamente.'));
         } catch (error) {
             return res.status(500).send(this.errorHtml(error?.message ?? 'Falha desconhecida'));
         }
     }
 
+    // HTML compartilhado pelos dois fluxos de callback (raiz multi-client e /auth/:tag/callback).
     private successHtml(msg: string): string {
-        return `<html><head><title>Autenticação</title><style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#f0f2f5}.c{padding:2rem;background:#fff;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.1);text-align:center}h1{color:#10b981}</style></head><body><div class="c"><h1>${msg}</h1><p>Você pode fechar esta janela.</p></div></body></html>`;
+        return `<html><head><title>Autenticação</title><style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#f0f2f5}.c{padding:2rem;background:#fff;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.1);text-align:center}h1{color:#10b981}</style></head><body><div class="c"><h1>Autenticado com Sucesso!</h1><p>${msg}</p><p>Você pode fechar esta janela.</p></div></body></html>`;
     }
 
     private errorHtml(msg: string): string {
@@ -94,49 +95,9 @@ export class MarketplaceCallbackController {
             };
 
             await this.marketplaceAuthService.authenticate(marketplace.id || marketplace._id, authData);
-
-            // Return a simple success page or JSON?
-            // User didn't specify, but for a browser redirect callback, a nice HTML page is better.
-            return res.status(200).send(`
-                <html>
-                    <head>
-                        <title>Autenticação Sucesso</title>
-                        <style>
-                            body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f0f2f5; }
-                            .container { padding: 2rem; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
-                            h1 { color: #10b981; }
-                        </style>
-                    </head>
-                    <body>
-                        <div class="container">
-                            <h1>Autenticado com Sucesso!</h1>
-                            <p>O marketplace ${marketplace.name} foi conectado corretamente.</p>
-                            <p>Você pode fechar esta janela.</p>
-                        </div>
-                    </body>
-                </html>
-            `);
-
+            return res.status(200).send(this.successHtml(`O marketplace ${marketplace.name} foi conectado corretamente.`));
         } catch (error) {
-            return res.status(500).send(`
-                <html>
-                    <head>
-                        <title>Erro na Autenticação</title>
-                        <style>
-                            body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f0f2f5; }
-                            .container { padding: 2rem; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
-                            h1 { color: #ef4444; }
-                        </style>
-                    </head>
-                    <body>
-                        <div class="container">
-                            <h1>Falha na Autenticação</h1>
-                            <p>Não foi possível conectar o marketplace ${marketplace.name}.</p>
-                            <p>Erro: ${error.message}</p>
-                        </div>
-                    </body>
-                </html>
-            `);
+            return res.status(500).send(this.errorHtml(error?.message ?? 'Falha desconhecida'));
         }
     }
 

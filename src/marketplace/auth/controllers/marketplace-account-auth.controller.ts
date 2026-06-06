@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Body, Param, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
-import { MarketplaceAccountService } from '../services/marketplace-account.service';
+import { MarketplaceTokenBrokerService } from '../services/marketplace-token-broker.service';
 import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
 
 interface RegisterAccountBody {
@@ -20,7 +20,7 @@ interface RegisterAccountBody {
 @Controller('marketplace-account')
 export class MarketplaceAccountAuthController {
   constructor(
-    private readonly accountService: MarketplaceAccountService,
+    private readonly broker: MarketplaceTokenBrokerService,
     private readonly registry: MarketplaceRegistryService,
     private readonly config: ConfigService,
   ) {}
@@ -48,16 +48,15 @@ export class MarketplaceAccountAuthController {
     const marketplace = await this.registry.findByTag(tag);
     if (!marketplace) throw new NotFoundException(`Marketplace not found: ${tag}`);
 
-    const account = await this.accountService.registerAccount({
+    const account = await this.broker.registerAccount({
       marketplaceId: marketplace._id.toString(),
       label: body.label,
       domains: body.domains,
       credentials: { clientId: body.clientId, clientSecret: body.clientSecret },
     });
 
-    const accountId = String((account as any)._id);
-    const { authUrl } = await this.accountService.buildAuthUrl(accountId, this.callbackUri());
-    return { accountId, label: account.label, domains: account.domains, authUrl };
+    const { authUrl } = await this.broker.buildAuthUrl(account.accountId, this.callbackUri());
+    return { accountId: account.accountId, label: account.label, domains: account.domains, authUrl };
   }
 
   // NOTA: o callback OAuth é atendido na RAIZ por MarketplaceCallbackController
@@ -67,7 +66,7 @@ export class MarketplaceAccountAuthController {
   @Get(':accountId/auth/url')
   @ApiOperation({ summary: 'Gera a URL de autorização OAuth para a conta' })
   async authUrl(@Param('accountId') accountId: string): Promise<{ authUrl: string }> {
-    return this.accountService.buildAuthUrl(accountId, this.callbackUri());
+    return this.broker.buildAuthUrl(accountId, this.callbackUri());
   }
 
   /**

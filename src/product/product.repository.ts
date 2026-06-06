@@ -263,22 +263,20 @@ export class ProductRepository {
         return results.map(r => r._id);
     }
 
-    async syncPriceFromMovements(productId: string, session?: ClientSession): Promise<number> {
-        const latest = await this.findLatestMovementWithPrice(productId);
-        if (latest && latest.price) {
-            const price = parseFloat(latest.price.toString());
-            const current = await this.productModel
-                .findById(productId)
-                .select('price')
-                .lean()
-                .exec();
-            const currentPrice = current?.price != null ? Number(current.price.toString()) : 0;
-            if (Math.abs(currentPrice - price) > 0.0001) {
-                await this.updatePrice(productId, price, session);
-            }
-            return price;
-        }
-        return 0;
+    /**
+     * @deprecated NÃO sincroniza mais o preço de venda a partir de movimentos.
+     * O valor em `movement.price`/`costPrice` é o CUSTO do lote, não a venda —
+     * sincronizá-lo ao produto contaminava o preço publicado no marketplace.
+     * O preço de venda é definido explicitamente (updatePrice/PUT). Mantida
+     * inerte (retorna o preço de venda atual) para não quebrar callers legados.
+     */
+    async syncPriceFromMovements(productId: string, _session?: ClientSession): Promise<number> {
+        const current = await this.productModel
+            .findById(productId)
+            .select('price')
+            .lean()
+            .exec();
+        return current?.price != null ? Number(current.price.toString()) : 0;
     }
 
     async findLatestMovementWithPrice(productId: string): Promise<StockMovementDocument | null> {

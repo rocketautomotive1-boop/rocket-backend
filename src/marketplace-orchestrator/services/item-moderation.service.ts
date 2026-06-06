@@ -6,6 +6,7 @@ import axios from 'axios';
 import { ListingModel } from '../../listing/schemas/listing.schema';
 import { MercadoLivreAuthAdapter } from '../../marketplace/adapters/mercado-livre/mercado-livre-auth.adapter';
 import { MarketplaceRegistryService } from '../../marketplace/services/marketplace-registry.service';
+import { NOTIFICATION_EVENTS } from '../../notifications/events/notification.events';
 
 type MlInfraction = {
     id?: string;
@@ -253,8 +254,10 @@ export class ItemModerationService {
                 `Listing ${listing._id} flagged: wrong category (was ${previousExternalId})`,
             );
 
-            this.eventEmitter.emit('notification.send', {
-                category: 'moderation',
+            this.eventEmitter.emit(NOTIFICATION_EVENTS.REQUESTED, {
+                type: 'moderation.wrong_category',
+                aggregateType: 'moderation',
+                aggregateId: previousExternalId,
                 title: 'Anuncio finalizado - Categoria incorreta',
                 body: remedy
                     ? `O Mercado Livre finalizou o anuncio ${previousExternalId}. ${reason} ${remedy}`
@@ -270,6 +273,7 @@ export class ItemModerationService {
                 channels: ['push', 'websocket', 'persist'],
                 severity: 'warning',
                 deduplicationKey: `moderation:wrong_category:${previousExternalId}`,
+                source: 'reconciliation',
             });
         } catch (err) {
             this.logger.error(

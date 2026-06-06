@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { InternalTokenController } from './internal-token.controller';
+import { InternalSignController } from './internal-sign.controller';
 import { InternalProductController } from './internal-product.controller';
 import { InternalListingController } from './internal-listing.controller';
 import { MarketplaceAuthModule } from '../marketplace/auth/marketplace-auth.module';
@@ -23,6 +24,6 @@ import { StockMovementModel, StockMovementSchema } from '../product/schemas/stoc
             { name: StockMovementModel.name, schema: StockMovementSchema },
         ]),
     ],
-    controllers: [InternalTokenController, InternalProductController, InternalListingController],
+    controllers: [InternalTokenController, InternalSignController, InternalProductController, InternalListingController],
 })
 export class InternalModule {}

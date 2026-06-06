@@ -10,6 +10,7 @@ import { Logger } from '@nestjs/common';
 import { Namespace, Socket } from 'socket.io';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ORDER_EVENTS } from '../order/events/order.events';
+import { NOTIFICATION_EVENTS } from '../notifications/events/notification.events';
 
 @WebSocketGateway({
     namespace: '/orders',
@@ -77,7 +78,7 @@ export class OrderGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.logger.warn(`[OrderGateway] Broadcasted orderSyncFailed: ${event.externalId} — ${event.error}`);
     }
 
-    @OnEvent('notification.broadcast')
+    @OnEvent(NOTIFICATION_EVENTS.BROADCAST)
     handleNotificationBroadcast(notification: any) {
         this.server.to('order_updates').emit('notification', notification);
         this.logger.debug(`[OrderGateway] Broadcasted notification: ${notification.title}`);

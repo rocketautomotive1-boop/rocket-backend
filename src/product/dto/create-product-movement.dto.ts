@@ -1,4 +1,5 @@
 import { IsNotEmpty, IsOptional, IsNumber, IsString, IsEnum, IsDateString } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateProductMovementDto {
@@ -49,10 +50,22 @@ export class CreateProductMovementDto {
   @IsNumber()
   quantity: number;
 
-  @ApiPropertyOptional({ description: 'Preço unitário do produto' })
+  @ApiPropertyOptional({ description: 'Preço unitário do produto (legado: custo do lote)' })
   @IsOptional()
   @IsNumber()
   price?: number;
+
+  @ApiPropertyOptional({ description: 'Custo unitário do lote (snapshot). Não altera o preço de venda.' })
+  @IsOptional()
+  @IsNumber()
+  costPrice?: number;
+
+  @ApiPropertyOptional({ description: 'Vencimento/validade do lote (ISO date) — saúde/beleza/alimentos' })
+  @IsOptional()
+  // String vazia do formulário vira undefined — não é uma data inválida, é "sem vencimento".
+  @Transform(({ value }) => (value === '' || value === null ? undefined : value))
+  @IsDateString()
+  expiryDate?: string;
 
   @ApiPropertyOptional({ description: 'Quantidade anterior' })
   @IsOptional()

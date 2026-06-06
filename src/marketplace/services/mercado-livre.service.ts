@@ -24,7 +24,6 @@ export class MercadoLivreService {
   private readonly baseUrl = 'https://api.mercadolibre.com';
   constructor(
     private mercadoLivreAdapter: MercadoLivreAdapter,
-    @Inject(forwardRef(() => MarketplaceAuthService))
     private marketplaceAuthService: MarketplaceAuthService,
     @Inject(forwardRef(() => MarketplaceIntegrationHelperService))
     private helperService: MarketplaceIntegrationHelperService,

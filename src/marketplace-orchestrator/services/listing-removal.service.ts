@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ListingModel, ListingDocument } from '../../listing/schemas/listing.schema';
 import { MarketplaceModel, MarketplaceDocument } from '../../marketplace/schemas/marketplace.schema';
 import { PublicationLogService } from '../../marketplace/services/publication-log.service';
+import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
 import { MarketplaceSyncPayload } from '../dto/marketplace-sync.dto';
 
 @Injectable()
@@ -17,6 +18,7 @@ export class ListingRemovalService {
         @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceDocument>,
         private readonly amqpConnection: AmqpConnection,
         private readonly publicationLogService: PublicationLogService,
+        private readonly auth: MarketplaceAuthService,
     ) { }
 
     /**
@@ -48,9 +50,11 @@ export class ListingRemovalService {
             throw new NotFoundException(`Marketplace ${listing.marketplaceId} not found for listing ${listingId}`);
         }
 
-        // Check for active token
-        const hasActiveToken = marketplace.tokens?.some(t => t.isActive);
-        if (!hasActiveToken) {
+        // Token via via única (accounts[], renova se preciso). Pode não existir.
+        const activeToken = await this.auth
+            .ensureValidToken(String(marketplace._id))
+            .catch(() => null);
+        if (!activeToken?.accessToken) {
             // No token — can't call marketplace API. Remove locally with warning.
             await this.listingModel.findByIdAndUpdate(listingId, {
                 $set: { status: 'removed', publishingAt: null },
@@ -79,7 +83,6 @@ export class ListingRemovalService {
         }
 
         const jobId = uuidv4();
-        const activeToken = marketplace.tokens.find(t => t.isActive);
 
         // Create publication attempt log
         const attempt = await this.publicationLogService.createAttempt(
@@ -104,7 +107,7 @@ export class ListingRemovalService {
                 credentials: {
                     accessToken: activeToken.accessToken,
                     refreshToken: activeToken.refreshToken,
-                    expiresAt: activeToken.expiresAt?.toISOString(),
+                    expiresAt: activeToken.expiresAt ? new Date(activeToken.expiresAt).toISOString() : undefined,
                     ...activeToken.additionalData,
                 },
                 settings: marketplace.settings,

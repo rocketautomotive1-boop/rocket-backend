@@ -1,12 +1,22 @@
 import { config } from 'dotenv';
 import { NestFactory } from '@nestjs/core';
-import { json, urlencoded } from 'express';
+import { json, urlencoded, Request } from 'express';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { AppModule } from './app.module';
 import helmet from 'helmet';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+
+interface RequestWithRawBody extends Request {
+  rawBody?: Buffer;
+}
+
+const preserveWebhookRawBody = (req: RequestWithRawBody, _res: any, buf: Buffer) => {
+  if (req.originalUrl?.startsWith('/webhooks')) {
+    req.rawBody = Buffer.from(buf);
+  }
+};
 
 // Carregar variáveis de ambiente do arquivo .env
 config();
@@ -15,11 +25,11 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
   // Criar aplicação principal HTTP
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
 
   // Aumentar limites de payload para JSON e URL-encoded
-  app.use(json({ limit: '20mb' }));
-  app.use(urlencoded({ limit: '20mb', extended: true }));
+  app.use(json({ limit: '20mb', verify: preserveWebhookRawBody }));
+  app.use(urlencoded({ limit: '20mb', extended: true, verify: preserveWebhookRawBody }));
 
   // Configurar validação global
   app.useGlobalPipes(new ValidationPipe({

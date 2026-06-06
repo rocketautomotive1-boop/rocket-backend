@@ -18,7 +18,6 @@ export class MarketplaceOrderService {
     constructor(
         private readonly registryService: MarketplaceRegistryService,
         private readonly adapterRegistry: MarketplaceAdapterRegistry,
-        @Inject(forwardRef(() => MarketplaceAuthService))
         private readonly authService: MarketplaceAuthService,
         private readonly orderRepository: OrderRepository,
         @Inject(forwardRef(() => ProductService))

@@ -4,6 +4,10 @@ import { Model } from 'mongoose';
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationModel, NotificationDocument } from './schemas/notification.schema';
 import { NotificationsService } from './notifications.service';
+import {
+    NOTIFICATION_EVENTS,
+    NotificationRequestedEvent,
+} from './events/notification.events';
 
 export interface NotificationSendEvent {
     category: string;
@@ -27,7 +31,12 @@ export class NotificationBusService {
         private readonly eventEmitter: EventEmitter2,
     ) {}
 
-    @OnEvent('notification.send', { async: true })
+    @OnEvent(NOTIFICATION_EVENTS.REQUESTED, { async: true })
+    async handleNotificationRequested(event: NotificationRequestedEvent): Promise<void> {
+        await this.handleNotification(this.mapRequestedToSend(event));
+    }
+
+    @OnEvent(NOTIFICATION_EVENTS.SEND, { async: true })
     async handleNotification(event: NotificationSendEvent): Promise<void> {
         try {
             const channels = event.channels || ['push', 'persist'];
@@ -86,7 +95,7 @@ export class NotificationBusService {
             }
 
             if (channels.includes('websocket')) {
-                this.eventEmitter.emit('notification.broadcast', {
+                this.eventEmitter.emit(NOTIFICATION_EVENTS.BROADCAST, {
                     id: notification._id.toString(),
                     category: notification.category,
                     title: notification.title,
@@ -113,6 +122,29 @@ export class NotificationBusService {
         } catch (err) {
             this.logger.error(`[Bus] Error processing notification: ${(err as Error).message}`, (err as Error).stack);
         }
+    }
+
+    private mapRequestedToSend(event: NotificationRequestedEvent): NotificationSendEvent {
+        const deduplicationKey =
+            event.deduplicationKey ||
+            `${event.type}:${event.aggregateType}:${event.aggregateId}`;
+
+        return {
+            category: event.aggregateType,
+            title: event.title,
+            body: event.body,
+            data: {
+                ...(event.data || {}),
+                type: event.type,
+                aggregateType: event.aggregateType,
+                aggregateId: event.aggregateId,
+                source: event.source || 'system',
+            },
+            channels: event.channels,
+            severity: event.severity,
+            deduplicationKey,
+            targetUserId: event.targetUserId,
+        };
     }
 
     async findAll(query: {

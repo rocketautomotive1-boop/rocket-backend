@@ -2,9 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { MarketplaceToken } from '../../schemas/marketplace-token.schema';
 import axios from 'axios';
 
-import { OnModuleInit, Inject, forwardRef } from '@nestjs/common';
-import { MarketplaceAuthService } from '../../auth/services/marketplace-auth.service';
+import { OnModuleInit } from '@nestjs/common';
 import { IMarketplaceAuthAdapter } from '../../interfaces/marketplace-auth-adapter.interface';
+import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
 
 @Injectable()
 export class YampiAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit {
@@ -13,13 +13,10 @@ export class YampiAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit {
   public readonly name = 'Yampi';
   public readonly tag = 'yampi';
 
-  constructor(
-    @Inject(forwardRef(() => MarketplaceAuthService))
-    private authService: MarketplaceAuthService,
-  ) { }
+  constructor(private readonly registry: MarketplaceAdapterRegistry) { }
 
   onModuleInit() {
-    this.authService.registerAdapter(this);
+    this.registry.registerAuthAdapter(this);
   }
 
   async generateAuthUrl(redirectUri?: string): Promise<{ authUrl: string }> {

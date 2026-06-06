@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
-import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
@@ -23,6 +22,7 @@ import { BaileysWhatsAppProvider } from './providers/baileys-whatsapp.provider';
 import { WhatsAppNotificationService } from './services/whatsapp-notification.service';
 import { WhatsAppNotificationListener } from './listeners/whatsapp-notification.listener';
 import { WhatsAppCancellationListener } from './listeners/whatsapp-cancellation.listener';
+import { OrderAppNotificationListener } from './listeners/order-app-notification.listener';
 import { WhatsAppQueueWorker } from './workers/whatsapp-queue.worker';
 import { WhatsAppController } from './controllers/whatsapp.controller';
 
@@ -38,6 +38,7 @@ import { ProductSearchQuery } from './bot/queries/product-search.query';
 import { WhatsAppCommandSession } from './bot/whatsapp-command.session';
 import { NotificationReconcilerService } from './services/notification-reconciler.service';
 import { DailyReportService } from './services/daily-report.service';
+import { NotificationRabbitMqConsumer } from './consumers/notification-rabbitmq.consumer';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
 import { StockMovementModel, StockMovementSchema } from '../product/schemas/stock-movement.schema';
 
@@ -82,6 +83,7 @@ import { StockMovementModel, StockMovementSchema } from '../product/schemas/stoc
     WhatsAppNotificationService,
     WhatsAppNotificationListener,
     WhatsAppCancellationListener,
+    OrderAppNotificationListener,
     WhatsAppQueueWorker,
     // Bot providers
     WhatsAppCommandRouter,
@@ -95,6 +97,7 @@ import { StockMovementModel, StockMovementSchema } from '../product/schemas/stoc
     ProductSearchQuery,
     NotificationReconcilerService,
     DailyReportService,
+    NotificationRabbitMqConsumer,
   ],
   exports: [NotificationsService, NotificationBusService, EmailService, WhatsAppNotificationService],
 })

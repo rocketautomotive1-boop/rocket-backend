@@ -125,7 +125,14 @@ export class ProductService {
     // were a cache that drifted whenever product data was mutated through a
     // path that didn't emit a section-saved event (imports, discovery direct
     // writes, scripts). The compute is cheap (~5ms) and idempotent.
-    const computed = await this.productReadinessService.compute(id);
+    const product = await this.productRepository.findByIdClean(id);
+    if (!product) throw new NotFoundException('Produto não encontrado');
+
+    // Itens gerais (saúde/beleza/alimentos) têm regra de completude própria —
+    // não têm partNumber, títulos por marketplace nem dimensões obrigatórias.
+    const computed = (product as any).domain === 'general'
+      ? await this.computeGeneralCompletion(id, product)
+      : await this.productReadinessService.compute(id);
     if (!computed) throw new NotFoundException('Produto não encontrado');
 
     const compatibilitiesComplete = await this.productRepository.existsCompatibility({ product: id });
@@ -134,6 +141,43 @@ export class ProductService {
       ...computed,
       compatibilities: compatibilitiesComplete,
     };
+  }
+
+  /**
+   * Completude de um produto 'general', mapeada para as MESMAS chaves que o
+   * frontend lê (data/images/titles/category/inventory/dimensions). Seções que
+   * não se aplicam a itens gerais (titles/dimensions) não bloqueiam → true.
+   * inventory exige preço > 0 E estoque > 0 (igual autopeças), com estoque
+   * vindo da agregação de stock_movements (fonte única).
+   */
+  private async computeGeneralCompletion(id: string, product: any) {
+    const brandObj = product.brand || product.brands;
+    // No general a marca costuma vir como atributo BRAND (de marketplace), não
+    // no relacionamento brand do produto.
+    const brandAttr = Array.isArray(product.attributes)
+      ? product.attributes.find((a: any) => (a.code || a.id) === 'BRAND' && a.value)
+      : null;
+    const hasBrand = !!brandObj?.name || !!brandObj?.shortName || !!brandAttr;
+    const data = !!(product.name && String(product.name).trim()) && hasBrand;
+
+    const images = Array.isArray(product.images) && product.images.length > 0;
+    const category = !!product.category;
+
+    const stockQty = await this.productRepository.calculateStock(id);
+    const priceRaw = product.price ? Number(product.price) : 0;
+    const inventory = stockQty > 0 && priceRaw > 0;
+
+    // Títulos por marketplace são EXIGIDOS para general também (mesmo fluxo de
+    // autopeças): só conclui com pelo menos um título e bloqueia readyToPublish.
+    const titlesList = await this.productTitleService.findByProductId(id);
+    const titles = Array.isArray(titlesList) && titlesList.length > 0;
+
+    // Dimensões não se aplicam a itens gerais — não devem reprovar a publicação.
+    const dimensions = true;
+
+    const readyToPublish = data && images && titles && category && inventory;
+
+    return { data, images, titles, category, inventory, dimensions, readyToPublish };
   }
 
   async findForStore(page = 1, limit = 20, search?: string, featured?: boolean) {
@@ -190,7 +234,10 @@ export class ProductService {
 
     if (!costPrice || costPrice === 0) {
       lastMovement = await this.productRepository.findLatestMovementWithPrice(productDoc.id || productDoc._id);
-      costPrice = lastMovement?.price ? Number(lastMovement.price) : 0;
+      // costPrice é a fonte do custo; `price` é fallback legado (lotes antigos
+      // gravavam o custo nesse campo antes da separação custo/venda).
+      const lastCost = (lastMovement as any)?.costPrice ?? lastMovement?.price;
+      costPrice = lastCost ? Number(lastCost) : 0;
     }
 
     // 3. Normalize Attributes

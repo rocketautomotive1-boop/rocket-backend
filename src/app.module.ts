@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ProductModule } from './product/product.module';
 import { MarketplaceModule } from './marketplace/marketplace.module';
+import { MarketplaceCredentialsModule } from './marketplace/credentials/marketplace-credentials.module';
 
 import { QueueModule } from './queue/queue.module';
 import { RabbitMqModule } from './common/rabbitmq/rabbitmq.module';
@@ -49,6 +50,7 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
   imports: [
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
+    MarketplaceCredentialsModule,
     ConfigModule.forRoot({
       isGlobal: true,
     }),
