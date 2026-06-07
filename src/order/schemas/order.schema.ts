@@ -199,6 +199,15 @@ export class OrderModel {
         };
     };
 
+    @Prop()
+    marketplaceTag?: string; // denormalized adapter tag for reconcile/gateway
+
+    @Prop({ type: Object })
+    reconcile?: {
+        lastCheckedAt?: Date;
+        detectedBy?: 'webhook' | 'reconcile' | 'gap-detector';
+    };
+
     fiscalDocuments?: any[];
 }
 
@@ -211,3 +220,6 @@ OrderSchema.virtual('fiscalDocuments', {
 OrderSchema.set('toObject', { virtuals: true });
 OrderSchema.set('toJSON', { virtuals: true });
 OrderSchema.index({ 'customer.document': 1 }); // Great for customer history lookup
+OrderSchema.index({ marketplaceId: 1, status: 1 });
+OrderSchema.index({ logisticsStatus: 1, status: 1 });
+OrderSchema.index({ 'items.productId': 1 });
