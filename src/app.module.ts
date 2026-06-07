@@ -27,6 +27,7 @@ import { CustomerModule } from './customer/customer.module';
 import { CheckoutModule } from './checkout/checkout.module';
 import { PaymentModule } from './payment/payment.module';
 import { OrderModule } from './order/order.module';
+import { StockModule } from './stock/stock.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -95,6 +96,7 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
     FiscalModule,
     LogisticsModule,
     OrderModule,
+    StockModule,
     CustomerModule,
     CheckoutModule,
     PaymentModule,

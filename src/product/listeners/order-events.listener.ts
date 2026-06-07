@@ -2,7 +2,7 @@ import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ORDER_EVENTS, OrderSyncedEvent, OrderProcessedEvent } from '../../order/events/order.events';
 import { ProductService } from '../product.service';
-import { StockLedgerProvider } from '../ports/stock-ledger.provider';
+import { STOCK_LEDGER_PORT, StockLedgerPort } from '../../order/ports/stock-ledger.port';
 import { OrchestratorPublisherService } from '../../marketplace-orchestrator/orchestrator-publisher.service';
 
 @Injectable()
@@ -11,10 +11,10 @@ export class OrderEventsListener {
 
     constructor(
         private readonly productService: ProductService,
-        // Stock orchestration now lives in the product domain (StockLedgerProvider),
-        // so this listener no longer imports anything from the order module at runtime
-        // (only ORDER_EVENTS *types*). This removes the product -> order cycle.
-        private readonly stockLedger: StockLedgerProvider,
+        // Stock writes go through the StockLedgerPort (owned by StockModule). This listener
+        // imports only ORDER_EVENTS *types* + the port token — no domain-module cycle.
+        @Inject(STOCK_LEDGER_PORT)
+        private readonly stockLedger: StockLedgerPort,
         @Inject(forwardRef(() => OrchestratorPublisherService))
         private readonly orchestratorPublisher: OrchestratorPublisherService,
     ) { }

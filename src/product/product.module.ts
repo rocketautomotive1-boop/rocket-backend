@@ -109,9 +109,9 @@ import { ReadinessRecoveryJob } from './jobs/readiness-recovery.job';
 import { CategorySnapshotService } from './services/category-snapshot.service';
 
 import { ProductResolverProvider } from './ports/product-resolver.provider';
-import { StockLedgerProvider } from './ports/stock-ledger.provider';
 import { PRODUCT_RESOLVER_PORT } from '../order/ports/product-resolver.port';
-import { STOCK_LEDGER_PORT } from '../order/ports/stock-ledger.port';
+// STOCK_LEDGER_PORT is now owned by StockModule (single stock owner).
+import { StockModule } from '../stock/stock.module';
 
 
 @Module({
@@ -151,6 +151,7 @@ import { STOCK_LEDGER_PORT } from '../order/ports/stock-ledger.port';
     forwardRef(() => MarketplaceModule),
     AiModule,
     ListingModule,
+    StockModule,
     UserProductivityModule,
     forwardRef(() => MarketplaceOrchestratorModule),
   ],
@@ -217,9 +218,7 @@ import { STOCK_LEDGER_PORT } from '../order/ports/stock-ledger.port';
     CategorySnapshotService,
     // Hexagonal port implementations consumed by OrderModule
     ProductResolverProvider,
-    StockLedgerProvider,
     { provide: PRODUCT_RESOLVER_PORT, useClass: ProductResolverProvider },
-    { provide: STOCK_LEDGER_PORT, useClass: StockLedgerProvider },
   ],
   exports: [
 
@@ -246,7 +245,6 @@ import { STOCK_LEDGER_PORT } from '../order/ports/stock-ledger.port';
     ProductDiscoveryService,
     // Tokens consumed by OrderModule
     PRODUCT_RESOLVER_PORT,
-    STOCK_LEDGER_PORT,
   ],
 })
 export class ProductModule { }
