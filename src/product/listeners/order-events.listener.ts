@@ -2,7 +2,7 @@ import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ORDER_EVENTS, OrderSyncedEvent, OrderProcessedEvent } from '../../order/events/order.events';
 import { ProductService } from '../product.service';
-import { StockOrchestratorService } from '../../order/services/stock-orchestrator.service';
+import { StockLedgerProvider } from '../ports/stock-ledger.provider';
 import { OrchestratorPublisherService } from '../../marketplace-orchestrator/orchestrator-publisher.service';
 
 @Injectable()
@@ -11,8 +11,10 @@ export class OrderEventsListener {
 
     constructor(
         private readonly productService: ProductService,
-        @Inject(forwardRef(() => StockOrchestratorService))
-        private readonly stockOrchestrator: StockOrchestratorService,
+        // Stock orchestration now lives in the product domain (StockLedgerProvider),
+        // so this listener no longer imports anything from the order module at runtime
+        // (only ORDER_EVENTS *types*). This removes the product -> order cycle.
+        private readonly stockLedger: StockLedgerProvider,
         @Inject(forwardRef(() => OrchestratorPublisherService))
         private readonly orchestratorPublisher: OrchestratorPublisherService,
     ) { }
@@ -74,8 +76,8 @@ export class OrderEventsListener {
                 quantity: i.quantity
             }));
 
-            // Delegate to Orchestrator for Atomic Transaction (Check -> Deduct -> Status Update -> Notify)
-            const result = await this.stockOrchestrator.deductStock(
+            // Delegate to the product-owned stock ledger for the atomic standalone deduction.
+            const result = await this.stockLedger.deductStandalone(
                 String(event.orderId),
                 itemsToDeduct,
                 String(event.externalId),

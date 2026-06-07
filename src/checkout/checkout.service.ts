@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { CartService } from './cart.service';
-import { OrderService } from '../order/order.service';
+import { OrderLifecycleService } from '../order/lifecycle/order-lifecycle.service';
 import { CustomerService } from '../customer/customer.service';
 import { PaymentService } from '../payment/payment.service';
 import { FreightService } from '../logistics/freight/freight.service';
@@ -9,7 +9,7 @@ import { FreightService } from '../logistics/freight/freight.service';
 export class CheckoutService {
     constructor(
         private cartService: CartService,
-        private orderService: OrderService,
+        private orderLifecycle: OrderLifecycleService,
         private customerService: CustomerService,
         private paymentService: PaymentService,
         private freightService: FreightService
@@ -69,7 +69,7 @@ export class CheckoutService {
         }
 
         // 5. Create Order
-        const order = await this.orderService.createDirectOrder(customerId, cart.items, {
+        const order = await this.orderLifecycle.createDirectOrder(customerId, cart.items, {
             paymentMethod: checkoutData.paymentMethod,
             transactionId: paymentResult.transactionId,
             shippingCost: shipping

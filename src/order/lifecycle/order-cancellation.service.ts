@@ -1,10 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrderModel, OrderDocument } from '../schemas/order.schema';
 import { ORDER_EVENTS, OrderCancelledEvent } from '../events/order.events';
-import { ProductMovementService } from '../../product/services/product-movement.service';
+import { STOCK_LEDGER_PORT, StockLedgerPort } from '../ports/stock-ledger.port';
 
 export interface CancellationResult {
   stockReverted: boolean;
@@ -17,14 +17,14 @@ export class OrderCancellationService {
 
   constructor(
     @InjectModel(OrderModel.name) private readonly orderModel: Model<OrderDocument>,
-    private readonly productMovementService: ProductMovementService,
+    @Inject(STOCK_LEDGER_PORT) private readonly stock: StockLedgerPort,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
-   * Lista pedidos com inconsistência de cancelamento:
-   * - status=cancelled mas logisticsStatus=deducted → estoque não foi revertido
-   * - status=cancelled mas logisticsStatus != 'cancelled' → logística não atualizada
+   * Lists orders with a cancellation inconsistency:
+   * - status=cancelled but logisticsStatus=deducted → stock was not reverted
+   * - status=cancelled but logisticsStatus != 'cancelled' → logistics not updated
    */
   async findInconsistentCancellations(lookbackDays = 30): Promise<{
     pendingRevert: any[];
@@ -55,9 +55,7 @@ export class OrderCancellationService {
     };
   }
 
-  /**
-   * Corrige em lote todos os pedidos cancelados com estoque inconsistente.
-   */
+  /** Bulk-fix all cancelled orders with inconsistent stock. */
   async fixInconsistentCancellations(lookbackDays = 30): Promise<{
     processed: number;
     stockReverted: number;
@@ -71,11 +69,11 @@ export class OrderCancellationService {
       try {
         const order = await this.orderModel.findById(entry.id).exec();
         if (!order) continue;
-        const result = await this.process(order, {}, 'sync'); // 'sync' → sem notificação WhatsApp
+        const result = await this.process(order, {}, 'sync'); // 'sync' → no WhatsApp notification
         if (result.stockReverted) stockReverted++;
       } catch (err) {
-        errors.push(`${entry.externalId}: ${err.message}`);
-        this.logger.error(`Failed to fix cancellation for ${entry.externalId}: ${err.message}`);
+        errors.push(`${entry.externalId}: ${(err as Error).message}`);
+        this.logger.error(`Failed to fix cancellation for ${entry.externalId}: ${(err as Error).message}`);
       }
     }
 
@@ -83,10 +81,10 @@ export class OrderCancellationService {
   }
 
   /**
-   * Processa o cancelamento de um pedido:
-   * - Reverte estoque se ainda estava deducted
-   * - Atualiza logisticsStatus para 'cancelled'
-   * - Emite ORDER_CANCELLED para notificação WhatsApp
+   * Processes a cancellation:
+   * - reverts stock if still deducted
+   * - updates logisticsStatus to 'cancelled'
+   * - emits ORDER_CANCELLED for WhatsApp notification
    */
   async process(
     order: OrderDocument,
@@ -95,26 +93,24 @@ export class OrderCancellationService {
   ): Promise<CancellationResult> {
     let stockReverted = false;
 
-    // Reverte estoque apenas se ainda estava deducted (evita reverter duas vezes)
+    // Revert stock only if still deducted (avoids double-revert)
     if (order.logisticsStatus === 'deducted') {
       const itemsToRevert = order.items.filter(i => i.productId);
       if (itemsToRevert.length > 0) {
         try {
-          for (const item of itemsToRevert) {
-            await this.productMovementService.create({
-              productId: item.productId.toString(),
-              type: 'inbound',
-              quantity: item.quantity,
-              price: item.unitPrice,
-              orderId: order._id.toString(),
-              reference: `cancel:${order.externalId}`,
-              notes: `Estorno por cancelamento do pedido ${order.externalId}`,
-            });
-          }
+          await this.stock.revert(
+            order._id.toString(),
+            itemsToRevert.map(i => ({
+              productId: i.productId.toString(),
+              quantity: i.quantity,
+              unitPrice: i.unitPrice,
+            })),
+            `cancel:${order.externalId}`,
+          );
           stockReverted = true;
           this.logger.log(`Stock reverted for order ${order.externalId} (${itemsToRevert.length} items)`);
         } catch (err) {
-          this.logger.error(`Failed to revert stock for order ${order.externalId}: ${err.message}`);
+          this.logger.error(`Failed to revert stock for order ${order.externalId}: ${(err as Error).message}`);
         }
       }
 
@@ -133,7 +129,7 @@ export class OrderCancellationService {
       });
     }
 
-    // Emite evento — o WhatsAppCancellationListener notifica se triggeredBy === 'webhook'
+    // Emit event — WhatsAppCancellationListener notifies when triggeredBy === 'webhook'
     const event = new OrderCancelledEvent(
       order._id.toString(),
       order.externalId,

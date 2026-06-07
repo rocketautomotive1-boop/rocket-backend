@@ -9,7 +9,6 @@ import { CategoryController } from './controllers/category.controller';
 import { CategoryService } from './services/category.service';
 import { ProductModule } from '../product/product.module';
 import { AuthModule } from '../auth/auth.module';
-import { OrderModule } from '../order/order.module';
 import { ListingModule } from '../listing/listing.module'; // [NEW]
 import { AiModule } from '../ai/ai.module';
 import { MercadoLivreProductAdapter } from './adapters/mercado-livre/mercado-livre-product.adapter';
@@ -114,7 +113,6 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
     YampiModule,
     MagaluModule,
     forwardRef(() => QueueModule),
-    forwardRef(() => OrderModule),
     ListingModule,
     MongooseModule.forFeature([
       { name: MarketplaceModel.name, schema: MarketplaceSchema },
@@ -123,6 +121,7 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
       { name: ProductModel.name, schema: ProductSchema },
       { name: StockMovementModel.name, schema: StockMovementSchema },
       { name: QueueRecordModel.name, schema: QueueRecordSchema },
+      { name: require('../order/schemas/order.schema').OrderModel.name, schema: require('../order/schemas/order.schema').OrderSchema },
       {
         name: 'PublicationAttempt',
         schema: require('./schemas/publication-attempt.schema').PublicationAttemptSchema

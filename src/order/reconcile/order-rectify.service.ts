@@ -1,10 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types, ClientSession } from 'mongoose';
 import { OrderModel, OrderDocument } from '../schemas/order.schema';
 import { OrderRepository } from '../order.repository';
-import { ProductMatcherService } from '../../product/services/product-matcher.service';
-import { StockOrchestratorService } from './stock-orchestrator.service';
+import { PRODUCT_RESOLVER_PORT, ProductResolverPort } from '../ports/product-resolver.port';
+import { STOCK_LEDGER_PORT, StockLedgerPort } from '../ports/stock-ledger.port';
 import { Result } from '../../common/utils/result.util';
 
 const RECTIFY_BATCH_SIZE = 20;
@@ -41,13 +41,14 @@ export class OrderRectifyService {
         @InjectModel(OrderModel.name)
         private readonly orderModel: Model<OrderDocument>,
         private readonly orderRepository: OrderRepository,
-        private readonly productMatcher: ProductMatcherService,
-        private readonly stockOrchestrator: StockOrchestratorService,
+        @Inject(PRODUCT_RESOLVER_PORT)
+        private readonly resolver: ProductResolverPort,
+        @Inject(STOCK_LEDGER_PORT)
+        private readonly stock: StockLedgerPort,
     ) { }
 
     /**
-     * Retorna pedidos que possuem ao menos um item com productId === null.
-     * Útil para listar pedidos pendentes de retificação.
+     * Returns orders that have at least one item with productId === null.
      */
     async findUnresolved(marketplaceId?: string): Promise<any[]> {
         const query: any = { 'items.productId': null };
@@ -62,8 +63,8 @@ export class OrderRectifyService {
     }
 
     /**
-     * Re-resolve productIds de um pedido individual, criando os movimentos de estoque faltantes.
-     * Idempotente: pode ser chamado múltiplas vezes sem duplicar movimentos.
+     * Re-resolves productIds of a single order, creating missing stock movements.
+     * Idempotent: can be called multiple times without duplicating movements.
      */
     async rectifyOrder(orderId: string): Promise<Result<RectifyResult>> {
         const order = await this.orderRepository.findById(orderId);
@@ -71,7 +72,7 @@ export class OrderRectifyService {
             return Result.fail(`Order ${orderId} not found`);
         }
 
-        // Já totalmente deduzido — nada a fazer
+        // Already fully deducted — nothing to do
         if (order.logisticsStatus === 'deducted' && (order.stockMovementIds ?? []).length > 0) {
             const resolvedCount = order.items.filter(i => i.productId != null).length;
             return Result.ok({
@@ -87,11 +88,11 @@ export class OrderRectifyService {
         const marketplaceId = order.marketplaceId.toString();
         let anyNewlyResolved = false;
 
-        // Re-resolve apenas os itens com productId === null
+        // Re-resolve only items with productId === null
         for (const item of order.items) {
             if (item.productId) continue;
 
-            const pId = await this.productMatcher.resolveProduct(
+            const pId = await this.resolver.resolveProduct(
                 (item as any).externalId ?? '',
                 (item as any).sku ?? '',
                 marketplaceId,
@@ -111,7 +112,7 @@ export class OrderRectifyService {
         let movementsCreated = 0;
         const isConfirmed = CONFIRMED_STATUSES.has((order.status ?? '').toLowerCase());
 
-        // Cria movimentos apenas para itens recém-resolvidos em pedidos confirmados
+        // Create movements only for newly-resolved items in confirmed orders
         if (isConfirmed && anyNewlyResolved) {
             const stockItems = order.items
                 .filter(i => i.productId)
@@ -122,7 +123,7 @@ export class OrderRectifyService {
                 try {
                     session.startTransaction();
 
-                    const result = await this.stockOrchestrator.deductAndLink(
+                    const result = await this.stock.deductAndLink(
                         orderId,
                         stockItems,
                         order.externalId,
@@ -140,18 +141,20 @@ export class OrderRectifyService {
 
                     await session.commitTransaction();
                 } catch (err) {
-                    await session.abortTransaction();
+                    if (session.inTransaction()) {
+                        await session.abortTransaction();
+                    }
                     this.logger.error(
-                        `[Rectify] Falha na dedução de estoque para ${order.externalId}: ${(err as Error).message}`,
+                        `[Rectify] Stock deduction failed for ${order.externalId}: ${(err as Error).message}`,
                     );
-                    // Salva os productIds resolvidos mesmo se a dedução falhar
+                    // Save resolved productIds even if deduction fails
                 } finally {
                     session.endSession();
                 }
             }
         }
 
-        // Determina status final
+        // Determine final status
         const finalStatus = unresolvedCount === 0 ? 'deducted' : 'unresolved';
         order.logisticsStatus = finalStatus;
         if (unresolvedCount === 0 && isConfirmed) {
@@ -171,12 +174,11 @@ export class OrderRectifyService {
     }
 
     /**
-     * Retifica todos os pedidos não resolvidos em batches de RECTIFY_BATCH_SIZE.
-     * Retorna um sumário com total, sucedidos, falhos e movimentos criados.
+     * Rectifies all unresolved orders in batches of RECTIFY_BATCH_SIZE.
      */
     async bulkRectify(marketplaceId?: string): Promise<Result<BulkRectifyResult>> {
         const unresolved = await this.findUnresolved(marketplaceId);
-        this.logger.log(`[Rectify] Bulk: ${unresolved.length} pedidos não resolvidos encontrados`);
+        this.logger.log(`[Rectify] Bulk: ${unresolved.length} unresolved orders found`);
 
         let succeeded = 0;
         let failed = 0;
@@ -194,14 +196,14 @@ export class OrderRectifyService {
                     } else {
                         failed++;
                         this.logger.warn(
-                            `[Rectify] Falha no pedido ${order.externalId}: ${result.error}`,
+                            `[Rectify] Failed for order ${order.externalId}: ${result.error}`,
                         );
                     }
                 }),
             );
 
             this.logger.log(
-                `[Rectify] Batch ${Math.floor(i / RECTIFY_BATCH_SIZE) + 1} concluído`,
+                `[Rectify] Batch ${Math.floor(i / RECTIFY_BATCH_SIZE) + 1} done`,
             );
         }
 

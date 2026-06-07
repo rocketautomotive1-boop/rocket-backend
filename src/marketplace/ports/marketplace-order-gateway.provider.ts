@@ -60,4 +60,12 @@ export class MarketplaceOrderGatewayProvider implements MarketplaceOrderGateway 
           new Date(a.date_last_updated).getTime() - new Date(b.date_last_updated).getTime(),
       );
   }
+
+  async getBillingInfo(billingId: string, marketplaceId: string): Promise<any> {
+    const mkt = await this.registry.findOne(marketplaceId);
+    if (!mkt) return null;
+    const adapter = this.adapters.getOrderAdapter(mkt.name);
+    if (!adapter.getBillingInfo) return null;
+    return adapter.getBillingInfo(billingId);
+  }
 }

@@ -32,7 +32,6 @@ import { QueueModule } from '../queue/queue.module';
 import { S3Module } from '../common/s3/s3.module';
 import { MarketplaceRegistryModule } from '../marketplace/marketplace-registry.module';
 import { MarketplaceModule } from '../marketplace/marketplace.module';
-import { OrderModule } from '../order/order.module';
 
 import { ProductBrandController } from './controllers/product-brand.controller';
 import { ProductCategoryController } from './controllers/product-category.controller';
@@ -151,7 +150,6 @@ import { STOCK_LEDGER_PORT } from '../order/ports/stock-ledger.port';
     MarketplaceRegistryModule,
     forwardRef(() => MarketplaceModule),
     AiModule,
-    forwardRef(() => OrderModule),
     ListingModule,
     UserProductivityModule,
     forwardRef(() => MarketplaceOrchestratorModule),

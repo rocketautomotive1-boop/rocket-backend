@@ -5,7 +5,9 @@ import { MarketplaceRegistryService } from './marketplace-registry.service';
 import { MarketplaceAdapterRegistry } from '../registries/marketplace-adapter.registry';
 import { MarketplaceAuthService } from '../auth/services/marketplace-auth.service';
 import { StandardOrder } from '../model/order.interface';
-import { OrderRepository } from '../../order/order.repository';
+// Direct OrderModel access (schema-only import, NOT the order module) so marketplace does not
+// depend on OrderModule — breaks the marketplace<->order cycle.
+import { OrderModel, OrderDocument } from '../../order/schemas/order.schema';
 import { ProductService } from '../../product/product.service';
 import { ProductRepository } from '../../product/product.repository';
 import { IgnoredOrderModel, IgnoredOrderDocument } from '../schemas/ignored-order.schema';
@@ -19,7 +21,8 @@ export class MarketplaceOrderService {
         private readonly registryService: MarketplaceRegistryService,
         private readonly adapterRegistry: MarketplaceAdapterRegistry,
         private readonly authService: MarketplaceAuthService,
-        private readonly orderRepository: OrderRepository,
+        @InjectModel(OrderModel.name)
+        private readonly orderModel: Model<OrderDocument>,
         @Inject(forwardRef(() => ProductService))
         private readonly productService: ProductService,
         private readonly productRepository: ProductRepository,
@@ -106,7 +109,7 @@ export class MarketplaceOrderService {
                 // If offset=0 (first page), we search local.
                 // If the user provided a search term, we prioritize finding matches.
                 // Repo method: findAll(offset, limit, search)
-                const localMatches = await this.orderRepository.findAll(0, 50, params.q);
+                const localMatches = await this.findLocalOrders(params.q);
                 const localOrders = localMatches.filter(Boolean).map(o => this.normalizeToStandardOrder(o));
 
                 // Merge Live + Local (Deduplicate by ID or ExternalID)
@@ -217,7 +220,10 @@ export class MarketplaceOrderService {
         const externalIds = orders.map(o => String(o.id));
 
         // Check actual Order Collection (covers both Stock-Synced and Admin-Synced)
-        const existingOrders = await this.orderRepository.findExistingExternalIds(externalIds);
+        const existingOrders = await this.orderModel.find(
+            { externalId: { $in: externalIds } },
+            { externalId: 1, syncedAt: 1, marketplaceId: 1, status: 1 },
+        ).exec();
 
         // Create existence map
         const existingMap = new Map<string, any>();
@@ -419,28 +425,16 @@ export class MarketplaceOrderService {
             status: raw.status || 'unknown'
         };
     }
-    private async saveOrdersToDb(orders: StandardOrder[]): Promise<void> {
-        const dbOrders = orders.map(o => ({
-            externalId: o.id,
-            marketplaceId: o.marketplaceId,
-            status: o.status,
-            totalAmount: o.total_amount,
-            createdAt: new Date(o.date_created),
-            customer: {
-                name: o.buyer?.name || 'Comprador',
-                document: '',
-                email: '',
-                phone: ''
-            },
-            items: (o.items || []).map((i: any) => ({
-                sku: i.sku,
-                title: i.title,
-                quantity: i.quantity,
-                unitPrice: i.unit_price,
-                productId: i.id
-            })),
-            syncedAt: new Date(),
-        }));
-        await this.orderRepository.upsertBatch(dbOrders);
+    /** Local order lookup for hybrid search (direct model query, no order module dependency). */
+    private async findLocalOrders(search: string): Promise<OrderDocument[]> {
+        const regex = new RegExp(search, 'i');
+        return this.orderModel.find({
+            $or: [
+                { externalId: regex },
+                { 'customer.name': regex },
+                { 'customer.email': regex },
+                { 'items.title': regex },
+            ],
+        }).sort({ createdAt: -1 }).limit(50).exec();
     }
 }

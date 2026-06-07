@@ -29,4 +29,7 @@ export interface MarketplaceOrderGateway {
    * sliding window internally. Returns [] if none.
    */
   listOrdersSince(marketplaceId: string, cursor: Date): Promise<ExternalOrderRef[]>;
+
+  /** Fetch raw billing info JSON for a billing id (marketplace-specific). */
+  getBillingInfo(billingId: string, marketplaceId: string): Promise<any>;
 }

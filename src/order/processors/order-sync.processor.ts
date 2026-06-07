@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { OrderService } from '../order.service';
+import { OrderIngestService } from '../ingest/order-ingest.service';
 import { QueueService } from '../../queue/queue.service';
 import { QueueRecordModel, QueueRecordDocument } from '../../queue/schemas/queue-record.schema';
 import { ORDER_EVENTS } from '../events/order.events';
@@ -14,7 +14,7 @@ export class OrderSyncProcessor implements OnModuleInit {
     private readonly inFlight = new Set<string>();
 
     constructor(
-        private readonly orderService: OrderService,
+        private readonly ingest: OrderIngestService,
         private readonly queueService: QueueService,
         private readonly eventEmitter: EventEmitter2,
         @InjectModel(QueueRecordModel.name)
@@ -73,7 +73,7 @@ export class OrderSyncProcessor implements OnModuleInit {
         }
 
         try {
-            await this.orderService.processSyncOrder({ externalId, marketplaceId, source: source ?? 'sync' });
+            await this.ingest.ingest(externalId, marketplaceId, source ?? 'sync');
 
             if (queueRecordId) {
                 await this.queueService.completeJob(queueRecordId, { success: true });

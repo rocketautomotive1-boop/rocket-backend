@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import axios from 'axios';
@@ -164,7 +164,6 @@ export class OrderMarketplaceDetailsService {
     constructor(
         @InjectModel(OrderModel.name) private readonly orderModel: Model<OrderDocument>,
         @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceDocument>,
-        @Inject(forwardRef(() => MarketplaceOrderService))
         private readonly marketplaceOrderService: MarketplaceOrderService,
         private readonly auth: MarketplaceAuthService,
     ) {}
