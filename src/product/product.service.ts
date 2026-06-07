@@ -13,6 +13,7 @@ import { ProductFilterService } from './services/product-filter.service';
 import { PaginatedResponseDto, ProductFilterDto, ProductStatus } from './dto/product-filter.dto';
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
 import { ProductRepository } from './product.repository';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
 import { ProductMovementService, resolveMovementCondition } from './services/product-movement.service';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 import { MarketplaceDocument } from '../marketplace/schemas/marketplace.schema';
@@ -59,6 +60,7 @@ export class ProductService {
 
   constructor(
     private readonly productRepository: ProductRepository,
+    @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
     private readonly queueService: QueueService,
     private readonly productCompatibilityService: ProductCompatibilityService,
     private readonly productFilterService: ProductFilterService,
@@ -163,7 +165,7 @@ export class ProductService {
     const images = Array.isArray(product.images) && product.images.length > 0;
     const category = !!product.category;
 
-    const stockQty = await this.productRepository.calculateStock(id);
+    const stockQty = (await this.stockQuery.getProductStock(id)).onHand;
     const priceRaw = product.price ? Number(product.price) : 0;
     const inventory = stockQty > 0 && priceRaw > 0;
 
@@ -208,7 +210,8 @@ export class ProductService {
   async getProductStock(id: string): Promise<number> {
     const product = await this.findDocument(id);
     if (!product) return 0;
-    return this.productRepository.calculateStock(product.id || (product as any)._id.toString());
+    const pid = product.id || (product as any)._id.toString();
+    return (await this.stockQuery.getProductStock(pid)).onHand;
   }
 
 

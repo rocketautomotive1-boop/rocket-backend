@@ -1,9 +1,10 @@
 // backend/src/product/services/product-readiness.service.ts
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProductRepository } from '../product.repository';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
 import { ProductTitleService } from './product-title.service';
 import { normalizeCompletedAt } from './product-readiness.normalize';
 import {
@@ -33,6 +34,7 @@ export class ProductReadinessService {
 
   constructor(
     private readonly productRepository: ProductRepository,
+    @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
     private readonly productTitleService: ProductTitleService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
@@ -93,7 +95,7 @@ export class ProductReadinessService {
 
     const category = !!(product as any).category;
 
-    const stockQty = await this.productRepository.calculateStock(productId);
+    const stockQty = (await this.stockQuery.getProductStock(productId)).onHand;
     const priceRaw = (product as any).price ? Number((product as any).price) : 0;
     const inventory = stockQty > 0 && priceRaw > 0;
 

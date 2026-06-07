@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AllocationModel, AllocationDocument } from '../schemas/allocation.schema';
 import { ProductModel, ProductDocument } from '../schemas/product.schema';
 import { StockMovementModel, StockMovementDocument } from '../schemas/stock-movement.schema';
 import { ProductRepository } from '../product.repository';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
 import { CreateProductAllocationDto } from '../dto/create-product-allocation.dto';
 import { UpdateProductAllocationDto } from '../dto/update-product-allocation.dto';
 
@@ -25,6 +26,7 @@ export class ProductAllocationService {
     @InjectModel(ProductModel.name) private productModel: Model<ProductDocument>,
     @InjectModel(StockMovementModel.name) private stockMovementModel: Model<StockMovementDocument>,
     private readonly productRepository: ProductRepository,
+    @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
   ) { }
 
   private escapeRegex(str: string): string {
@@ -265,7 +267,7 @@ export class ProductAllocationService {
 
       const boxProducts = await Promise.all(matchedProducts.map(async (p: any) => {
           const pid = String(p._id);
-          const quantity = Math.max(await this.productRepository.calculateStock(pid), 1);
+          const quantity = Math.max((await this.stockQuery.getProductStock(pid)).onHand, 1);
 
           const movPrices = movementPriceMap.get(pid);
           let price = movPrices?.price || movPrices?.costPrice || toNumber(p.price) || toNumber(p.costPrice) || toNumber(p.listPrice);
