@@ -28,6 +28,7 @@ export type SignatureScheme =
       secretKey: string;
       baseString: 'rawBody' | ((ctx: WebhookContext) => string);
     }
+  | { type: 'shared-token'; header: string; secretKey: string }
   | { type: 'aws-sns' };
 
 export interface WebhookAdapter {

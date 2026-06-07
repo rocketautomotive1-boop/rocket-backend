@@ -62,6 +62,24 @@ describe('SignatureVerifier (hmac-sha256)', () => {
     await expect(sut.verify({ type: 'none' }, makeCtx())).resolves.toBe(true);
   });
 
+  it('FAIL-CLOSED: rawBody ausente em scheme rawBody → rejeita', async () => {
+    const { sut } = makeSut('s3cr3t');
+    const ctx = makeCtx({ rawBody: undefined, headers: { 'x-signature': 'a'.repeat(64) } });
+    await expect(sut.verify(scheme, ctx)).resolves.toBe(false);
+  });
+
+  it('baseString custom vazio → rejeita', async () => {
+    const { sut } = makeSut('k');
+    const customScheme = {
+      type: 'hmac-sha256' as const,
+      header: 'x-sig',
+      secretKey: 'partnerKey',
+      baseString: (_c: WebhookContext) => '',
+    };
+    const ctx = makeCtx({ headers: { 'x-sig': 'a'.repeat(64) } });
+    await expect(sut.verify(customScheme, ctx)).resolves.toBe(false);
+  });
+
   it('baseString custom é usado no HMAC', async () => {
     const { sut } = makeSut('k');
     const ctx = makeCtx({ payload: { partner_id: 7 }, rawBody: Buffer.from('BODY'), headers: {} });
@@ -70,6 +88,42 @@ describe('SignatureVerifier (hmac-sha256)', () => {
       baseString: (c: WebhookContext) => `${c.payload?.partner_id ?? ''}${c.rawBody?.toString('utf8') ?? ''}` };
     const ok = await sut.verify(customScheme, makeCtx({ payload: { partner_id: 7 }, rawBody: Buffer.from('BODY'), headers: { 'x-sig': expected } }));
     expect(ok).toBe(true);
+  });
+});
+
+describe('SignatureVerifier (shared-token)', () => {
+  const makeSut = (configured?: string) => {
+    const credentials = { get: jest.fn().mockResolvedValue(configured) };
+    return { sut: new SignatureVerifier(credentials as any), credentials };
+  };
+  const scheme = {
+    type: 'shared-token' as const,
+    header: 'x-webhook-token',
+    secretKey: 'webhookToken',
+  };
+
+  it('token configurado + header correspondente → true', async () => {
+    const { sut } = makeSut('tok3n');
+    const ctx = makeCtx({ marketplace: 'olx', headers: { 'x-webhook-token': 'tok3n' } });
+    await expect(sut.verify(scheme, ctx)).resolves.toBe(true);
+  });
+
+  it('token configurado + header incorreto → false', async () => {
+    const { sut } = makeSut('tok3n');
+    const ctx = makeCtx({ marketplace: 'olx', headers: { 'x-webhook-token': 'errado' } });
+    await expect(sut.verify(scheme, ctx)).resolves.toBe(false);
+  });
+
+  it('token configurado + header ausente → false', async () => {
+    const { sut } = makeSut('tok3n');
+    const ctx = makeCtx({ marketplace: 'olx', headers: {} });
+    await expect(sut.verify(scheme, ctx)).resolves.toBe(false);
+  });
+
+  it('token NÃO configurado → true (aceite transitório)', async () => {
+    const { sut } = makeSut(undefined);
+    const ctx = makeCtx({ marketplace: 'olx', headers: {} });
+    await expect(sut.verify(scheme, ctx)).resolves.toBe(true);
   });
 });
 

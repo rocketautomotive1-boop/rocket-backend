@@ -22,6 +22,27 @@ export class WebhookIngressService {
       return { success: true };
     }
     if (normalized.kind === 'ignore') return { success: true };
+    const idRequiringKinds = ['order', 'order_pack', 'question'];
+    if (
+      idRequiringKinds.includes(normalized.kind) &&
+      (!normalized.externalId || normalized.externalId.trim() === '')
+    ) {
+      const deadEventId =
+        normalized.eventId && !normalized.eventId.endsWith(':')
+          ? normalized.eventId
+          : `${ctx.marketplace}:${ctx.topic}:missing-id:${Date.now()}`;
+      await this.inbox.appendDead(
+        ctx.marketplace,
+        ctx.topic,
+        deadEventId,
+        ctx.payload,
+        `externalId ausente para kind=${normalized.kind}`,
+      );
+      this.logger.error(
+        `[Ingress] externalId ausente ${ctx.marketplace}/${ctx.topic} kind=${normalized.kind} — descartado (dead)`,
+      );
+      return { success: true };
+    }
     await this.inbox.append(ctx.marketplace, ctx.topic, normalized);
     this.metrics.incReceived(ctx.marketplace, normalized.kind);
     return { success: true };

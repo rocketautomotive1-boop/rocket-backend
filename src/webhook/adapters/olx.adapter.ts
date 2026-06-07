@@ -4,7 +4,7 @@ import { NormalizedWebhook, RegisterWebhookAdapter, SignatureScheme, WebhookAdap
 @RegisterWebhookAdapter('olx')
 export class OLXAdapter implements WebhookAdapter {
   readonly marketplace = 'olx';
-  readonly signatureScheme: SignatureScheme = { type:'none' };
+  readonly signatureScheme: SignatureScheme = { type:'shared-token', header:'x-webhook-token', secretKey:'webhookToken' };
   parse(ctx: WebhookContext): NormalizedWebhook {
     const topic = String(ctx.topic||'').toLowerCase();
     const resource = String(ctx.payload?.resource||'');

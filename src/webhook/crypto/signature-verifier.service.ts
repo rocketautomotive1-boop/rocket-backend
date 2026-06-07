@@ -17,6 +17,8 @@ export class SignatureVerifier {
         return true;
       case 'hmac-sha256':
         return this.verifyHmac(scheme, ctx);
+      case 'shared-token':
+        return this.verifySharedToken(scheme, ctx);
       case 'aws-sns':
         return this.verifySns(ctx);
     }
@@ -38,11 +40,42 @@ export class SignatureVerifier {
       );
       return false;
     }
-    const base =
-      scheme.baseString === 'rawBody'
-        ? ctx.rawBody ?? Buffer.from(JSON.stringify(ctx.payload))
-        : Buffer.from(scheme.baseString(ctx));
+    let base: Buffer;
+    if (scheme.baseString === 'rawBody') {
+      if (!ctx.rawBody || ctx.rawBody.length === 0) {
+        this.logger.error(
+          `[Sig] rawBody ausente para HMAC marketplace=${ctx.marketplace} — rejeitando (fail-closed)`,
+        );
+        return false;
+      }
+      base = ctx.rawBody;
+    } else {
+      const custom = scheme.baseString(ctx);
+      if (!custom) {
+        this.logger.warn(`[Sig] baseString custom vazio marketplace=${ctx.marketplace}`);
+        return false;
+      }
+      base = Buffer.from(custom);
+    }
     const expected = crypto.createHmac('sha256', secret).update(base).digest('hex');
+    return this.safeEqual(expected, provided);
+  }
+
+  private async verifySharedToken(
+    scheme: Extract<SignatureScheme, { type: 'shared-token' }>,
+    ctx: WebhookContext,
+  ): Promise<boolean> {
+    const expected = await this.credentials.get(ctx.marketplace, scheme.secretKey);
+    if (!expected) {
+      // token não provisionado ainda: transitório, aceita com aviso
+      this.logger.warn(`[Sig] shared-token '${scheme.secretKey}' não configurado para ${ctx.marketplace} — aceitando (transitório). Configure para habilitar verificação.`);
+      return true;
+    }
+    const provided = ctx.headers[scheme.header.toLowerCase()];
+    if (!provided) {
+      this.logger.error(`[Sig] shared-token ausente no request para ${ctx.marketplace} — rejeitando`);
+      return false;
+    }
     return this.safeEqual(expected, provided);
   }
 

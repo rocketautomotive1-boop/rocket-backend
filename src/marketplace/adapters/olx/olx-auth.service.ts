@@ -10,6 +10,7 @@ import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter
 import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
 import { TokenManagerService } from '../../auth/services/token-manager.service';
 import { MarketplaceTokenBrokerService } from '../../auth/services/marketplace-token-broker.service';
+import { resolveRedirectUri } from '../shared/resolve-redirect-uri';
 
 @Injectable()
 export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
@@ -35,10 +36,19 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
   }
 
   /**
+   * Resolve a redirect_uri da OLX a partir de marketplaces.settings.redirectUri,
+   * com fallback para a env OLX_REDIRECT_URI.
+   */
+  private async resolveOlxRedirectUri(): Promise<string> {
+    const mkt = await this.marketplaceRegistry.findByTag(this.tag).catch(() => null);
+    return resolveRedirectUri(mkt, this.configService.get('OLX_REDIRECT_URI'));
+  }
+
+  /**
    * Alias for generateAuthUrl to satisfy interface and controller usage
    */
   async generateAuthUrl(redirectUri?: string): Promise<{ authUrl: string }> {
-    const finalRedirectUri = redirectUri || this.configService.get('OLX_REDIRECT_URI');
+    const finalRedirectUri = redirectUri || await this.resolveOlxRedirectUri();
     const clientId = this.configService.get('OLX_CLIENT_ID');
 
     const authUrl = `${this.baseUrl}/oauth`;
@@ -67,9 +77,11 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
 
       const clientId = this.configService.get('OLX_CLIENT_ID');
       const clientSecret = this.configService.get(`OLX_CLIENT_SECRET_${clientId}`);
-      // Always use OLX_REDIRECT_URI — must match exactly what's registered in the OLX app.
-      // Never use additionalData.redirectUri (which may carry a dynamic ngrok/dev host).
-      const redirectUri = this.configService.get('OLX_REDIRECT_URI');
+      // Sourced from marketplaces.settings.redirectUri (fallback OLX_REDIRECT_URI env).
+      // Must match exactly what's registered in the OLX app — this is the fixed
+      // app-registered URI. Never use additionalData.redirectUri (which may carry a
+      // dynamic ngrok/dev host).
+      const redirectUri = await this.resolveOlxRedirectUri();
 
       if (!clientId || !clientSecret || !redirectUri) {
         throw new InternalServerErrorException('Credenciais da OLX não configuradas');
@@ -204,7 +216,7 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
           grant_type: 'authorization_code',
           client_id: clientId,
           client_secret: clientSecret,
-          redirect_uri: this.configService.get('OLX_REDIRECT_URI') || 'http://localhost:3000/oauth/callback',
+          redirect_uri: (await this.resolveOlxRedirectUri()) || 'http://localhost:3000/oauth/callback',
           code: authCode,
         },
         {
@@ -248,7 +260,7 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
           params: {
             scope: 'autoupload basic_user_info',
             state: '/profile',
-            redirect_uri: this.configService.get('OLX_REDIRECT_URI') || 'http://localhost:3000/oauth/callback',
+            redirect_uri: (await this.resolveOlxRedirectUri()) || 'http://localhost:3000/oauth/callback',
             response_type: 'code',
             client_id: clientId
           },

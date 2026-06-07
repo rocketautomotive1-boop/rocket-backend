@@ -21,6 +21,14 @@ describe('WebhookIngressService.ingest', () => {
     await sut.ingest(webhookAdapter as any, webhookContext as any);
     expect(inbox.append).toHaveBeenCalled(); expect(metrics.incReceived).toHaveBeenCalledWith('mercadolivre','order');
   });
+  it('kind order sem externalId → appendDead, não append, ack', async () => {
+    const { sut, inbox } = makeSut();
+    const { webhookContext, webhookAdapter } = ctxFor(()=>({ kind:'order', eventId:'shopee:order:', externalId:'', raw:{} }));
+    const r = await sut.ingest(webhookAdapter as any, webhookContext as any);
+    expect(inbox.appendDead).toHaveBeenCalled();
+    expect(inbox.append).not.toHaveBeenCalled();
+    expect(r.success).toBe(true);
+  });
   it('parse lança → appendDead + ack', async () => {
     const { sut, inbox } = makeSut();
     const { webhookContext, webhookAdapter } = ctxFor(()=>{ throw new Error('payload ruim'); });
