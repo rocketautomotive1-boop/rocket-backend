@@ -13,6 +13,7 @@ const DEFAULTS: Record<NotificationCategory, CategoryDefaults> = {
   question:    { channels: ['persist', 'push', 'websocket'], audience: { kind: 'all-admins' } },
   stock:       { channels: ['persist', 'push', 'websocket'], audience: { kind: 'all-admins' } },
   marketplace: { channels: ['persist', 'push', 'websocket'], audience: { kind: 'all-admins' } },
+  moderation:  { channels: ['persist', 'push', 'websocket'], audience: { kind: 'all-admins' } },
   system:      { channels: ['persist', 'push', 'websocket'], audience: { kind: 'all-admins' } },
 };
 

@@ -1,5 +1,5 @@
 export type NotificationCategory =
-  | 'order' | 'question' | 'stock' | 'system' | 'marketplace';
+  | 'order' | 'question' | 'stock' | 'system' | 'marketplace' | 'moderation';
 
 export type NotificationSeverity = 'info' | 'success' | 'warning' | 'error';
 
