@@ -25,6 +25,20 @@ export class OrderRepository {
         return this.orderModel.findOne(query).populate('fiscalDocuments').exec();
     }
 
+    /**
+     * Lean existence/status lookup by externalId — no fiscalDocuments populate.
+     * Used by reconcile/gap-detection where only existence + status matter (efficiency:
+     * avoids the cross-model populate that the full read does).
+     */
+    async findStatusByExternalId(
+        externalId: string,
+    ): Promise<{ _id: any; externalId: string; status: string; logisticsStatus?: string } | null> {
+        return this.orderModel
+            .findOne({ externalId }, { externalId: 1, status: 1, logisticsStatus: 1 })
+            .lean<{ _id: any; externalId: string; status: string; logisticsStatus?: string }>()
+            .exec();
+    }
+
 
 
     async save(order: OrderDocument): Promise<OrderDocument> {
