@@ -30,8 +30,9 @@ describe('applyNotificationDefaults', () => {
   });
 
   it('usa fallback de categoria desconhecida (system defaults)', () => {
+    // categoria fora da união NotificationCategory — exercita o branch `?? FALLBACK`
     const r = applyNotificationDefaults({
-      type: 'x', aggregateType: 'marketplace', aggregateId: '1', title: 't', body: 'b',
+      type: 'x', aggregateType: 'totally-unknown' as any, aggregateId: '1', title: 't', body: 'b',
     });
     expect(r.channels).toEqual(['persist', 'push', 'websocket']);
     expect(r.audience).toEqual({ kind: 'all-admins' });
