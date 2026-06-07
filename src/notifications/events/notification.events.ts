@@ -3,7 +3,7 @@ export const NOTIFICATION_EVENTS = {
   BROADCAST: 'notification.broadcast',
 } as const;
 
-// Re-export para consumidores existentes (questions, gateway)
+// Re-export conveniente dos contratos canônicos (ingest/translators, gateway, questions)
 export type {
   NotificationCategory, NotificationSeverity, NotificationChannelKey,
   NotificationSource, AudienceSpec,
