@@ -49,7 +49,8 @@ import { MarketplaceAuthModule } from '../marketplace/auth/marketplace-auth.modu
 import { PartnerModel, PartnerSchema } from './schemas/partner.schema';
 import { NotificationLogModel, NotificationLogSchema } from './schemas/notification-log.schema';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
-import { StockMovementModel, StockMovementSchema } from '../product/schemas/stock-movement.schema';
+import { StockMovementModel, StockMovementSchema } from '../stock/schemas/stock-movement.schema';
+import { StockModule } from '../stock/stock.module';
 import { BaileysWhatsAppProvider } from './providers/baileys-whatsapp.provider';
 import { WhatsAppNotificationService } from './services/whatsapp-notification.service';
 import { WhatsAppNotificationListener } from './listeners/whatsapp-notification.listener';
@@ -74,6 +75,7 @@ import { DailyReportService } from './services/daily-report.service';
     DiscoveryModule,
     AuthModule,
     OrderModule, // legacy WhatsApp subsystem only — see note above
+    StockModule, // STOCK_QUERY_PORT for the product-search bot query
     MarketplaceAuthModule, // legacy WhatsApp bot queries only — see note above
     MongooseModule.forFeature([
       { name: UserModel.name, schema: UserSchema },

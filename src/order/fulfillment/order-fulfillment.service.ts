@@ -8,6 +8,7 @@ import { ProductService } from '../../product/product.service';
 import { ProductRepository } from '../../product/product.repository';
 import { PRODUCT_RESOLVER_PORT, ProductResolverPort } from '../ports/product-resolver.port';
 import { MARKETPLACE_ORDER_GATEWAY, MarketplaceOrderGateway } from '../ports/marketplace-order.gateway';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
 import { ORDER_EVENTS, OrderSyncedEvent } from '../events/order.events';
 
 /**
@@ -26,6 +27,7 @@ export class OrderFulfillmentService {
         private readonly productRepository: ProductRepository,
         @Inject(PRODUCT_RESOLVER_PORT) private readonly resolver: ProductResolverPort,
         @Inject(MARKETPLACE_ORDER_GATEWAY) private readonly gateway: MarketplaceOrderGateway,
+        @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
         private readonly eventEmitter: EventEmitter2,
     ) { }
 
@@ -165,7 +167,7 @@ export class OrderFulfillmentService {
 
                 stockUpdated.push(productIdKey);
 
-                const newStock = await this.productRepository.calculateStock(productIdKey);
+                const newStock = (await this.stockQuery.getProductStock(productIdKey)).onHand;
                 this.eventEmitter.emit('product.stock.updated', {
                     productId,
                     partNumber: product.partNumber,

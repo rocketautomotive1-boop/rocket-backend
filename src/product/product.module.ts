@@ -243,6 +243,9 @@ import { StockModule } from '../stock/stock.module';
     CatalogMigrationService,
     ProductMatcherService,
     ProductDiscoveryService,
+    // Re-export StockModule so consumers of ProductModule can inject STOCK_QUERY_PORT
+    // without each importing StockModule directly.
+    StockModule,
     // Tokens consumed by OrderModule
     PRODUCT_RESOLVER_PORT,
   ],

@@ -8,6 +8,7 @@ import { ListingModel, ListingDocument } from '../../listing/schemas/listing.sch
 import { CategoryModel, CategoryDocument } from '../schemas/category.schema';
 import { ProductService } from '../product.service';
 import { ProductRepository } from '../product.repository';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
 import {
   ProductFilterDto,
   PaginatedResponseDto,
@@ -40,6 +41,7 @@ export class ProductFilterService {
     private readonly searchService: SearchService,
     @InjectModel(ListingModel.name) private listingModel: Model<ListingDocument>,
     private readonly productRepository: ProductRepository,
+    @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
   ) { }
 
   async findProducts(filters: ProductFilterDto): Promise<PaginatedResponseDto<ProductModel>> {
@@ -159,10 +161,10 @@ export class ProductFilterService {
   private async applyInventoryFilters(query: any, inventoryFilter?: InventoryFilterDto): Promise<void> {
     if (!inventoryFilter) return;
     if (inventoryFilter.hasStock) {
-      const ids = await this.productRepository.getProductIdsWithMinStock(1);
+      const ids = await this.stockQuery.getProductIdsWithMinStock(1);
       query._id = { ...(query._id || {}), $in: ids };
     } else if (inventoryFilter.minStock !== undefined) {
-      const ids = await this.productRepository.getProductIdsWithMinStock(inventoryFilter.minStock);
+      const ids = await this.stockQuery.getProductIdsWithMinStock(inventoryFilter.minStock);
       query._id = { ...(query._id || {}), $in: ids };
     }
   }

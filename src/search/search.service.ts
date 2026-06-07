@@ -6,6 +6,7 @@ import { ProductRepository } from '../product/product.repository';
 import { ProductCompatibilityService } from '../product/services/product-compatibility.service';
 import { CrossReferenceService } from '../product/services/cross-reference.service';
 import { ListingService } from '../listing/listing.service'; // [NEW] Import
+import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
 
 @Injectable()
 export class SearchService implements OnModuleInit {
@@ -22,6 +23,7 @@ export class SearchService implements OnModuleInit {
         private readonly productService: ProductService,
         private readonly listingService: ListingService,
         private readonly productRepository: ProductRepository,
+        @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
     ) { }
 
     async onModuleInit() {
@@ -272,7 +274,7 @@ export class SearchService implements OnModuleInit {
                 thumbnail: thumbnail,
                 brandImage: brandImage,
                 isGenuine: product.brand?.isGenuine || false,
-                quantity: await this.productRepository.calculateStock(product._id.toString()),
+                quantity: (await this.stockQuery.getProductStock(product._id.toString())).onHand,
                 price: product.price ? Number(product.price.toString()) : 0,
                 listPrice: product.listPrice ? Number(product.listPrice.toString()) : 0, // NEW
                 description: product.description || '' // NEW

@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SearchService } from '../search/search.service';
 import { ProductRepository } from '../product/product.repository';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { UserDocument, UserModel } from '../auth/schemas/user.schema';
@@ -21,6 +22,7 @@ export class AiService {
         @InjectModel(UserModel.name) private userModel: Model<UserDocument>,
         @InjectModel(VehicleModel.name) private vehicleModel: Model<VehicleDocument>,
         private readonly productRepository: ProductRepository,
+        @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
     ) {
         const apiKey = this.configService.get<string>('GEMINI_API_KEY');
         if (apiKey) {
@@ -254,7 +256,7 @@ DADOS DO PRODUTO:
 - Detalhes Técnicos: ${product.details || 'N/A'}
 - Condição: ${product.condition || 'N/A'}
 - Garantia: ${product.warranty?.months ? product.warranty.months + ' meses' : 'N/A'}
-- Estoque: ${product._id ? await this.productRepository.calculateStock(String(product._id)) : 'N/A'} unidades
+- Estoque: ${product._id ? (await this.stockQuery.getProductStock(String(product._id))).onHand : 'N/A'} unidades
 ${listingPrice ? `- Preço: R$ ${listingPrice}` : ''}
 ${attrs ? `\nATRIBUTOS:\n${attrs}` : ''}
 ${compList ? `\nVEÍCULOS COMPATÍVEIS: ${compList}` : ''}

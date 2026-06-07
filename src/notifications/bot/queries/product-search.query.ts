@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ProductModel } from '../../../product/schemas/product.schema';
-import { StockMovementModel } from '../../../product/schemas/stock-movement.schema';
+import { StockMovementModel } from '../../../stock/schemas/stock-movement.schema';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../../../stock/ports/stock-query.port';
 
 interface ProductListRow {
   _id: Types.ObjectId | string;
@@ -12,9 +13,6 @@ interface ProductListRow {
   active?: boolean;
 }
 
-const STOCK_INBOUND_TYPES = ['inbound', 'purchase_return'];
-const STOCK_OUTBOUND_TYPES = ['outbound', 'sale', 'transfer'];
-
 @Injectable()
 export class ProductSearchQuery {
   private readonly logger = new Logger(ProductSearchQuery.name);
@@ -22,7 +20,8 @@ export class ProductSearchQuery {
 
   constructor(
     @InjectModel('ProductModel') private readonly productModel: Model<ProductModel>,
-    @InjectModel('StockMovementModel') private readonly stockMovementModel: Model<StockMovementModel>,
+    @InjectModel(StockMovementModel.name) private readonly stockMovementModel: Model<StockMovementModel>,
+    @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
   ) {}
 
   async execute(searchTerm: string): Promise<string> {
@@ -42,7 +41,7 @@ export class ProductSearchQuery {
       const lines = [`🔎 *Resultados para:* ${term}`];
 
       for (const product of products) {
-        const stock = await this.calculateStock(String((product as any)._id));
+        const stock = (await this.stockQuery.getProductStock(String((product as any)._id))).onHand;
         const lastMovement = await this.getLastMovement(String((product as any)._id));
         const price = this.formatPrice(product.price);
         const status = product.active === false ? 'inativo' : 'ativo';
@@ -85,32 +84,6 @@ export class ProductSearchQuery {
       .limit(this.MAX_RESULTS)
       .lean()
       .exec()) as any;
-  }
-
-  private async calculateStock(productId: string): Promise<number> {
-    const matchProductId = Types.ObjectId.isValid(productId) ? new Types.ObjectId(productId) : productId;
-    const stats = await this.stockMovementModel.aggregate([
-      { $match: { productId: matchProductId } },
-      {
-        $group: {
-          _id: '$productId',
-          total: {
-            $sum: {
-              $switch: {
-                branches: [
-                  { case: { $in: ['$type', STOCK_INBOUND_TYPES] }, then: '$quantity' },
-                  { case: { $in: ['$type', STOCK_OUTBOUND_TYPES] }, then: { $multiply: ['$quantity', -1] } },
-                  { case: { $eq: ['$type', 'adjustment'] }, then: '$quantity' },
-                ],
-                default: 0,
-              },
-            },
-          },
-        },
-      },
-    ]);
-
-    return stats.length ? Number(stats[0].total ?? 0) : 0;
   }
 
   private async getLastMovement(productId: string): Promise<string | null> {

@@ -8,6 +8,7 @@ import { getTikTokShopBaseUrl, buildSignedParams, buildHeaders } from './tiktok-
 import { ProductDocument } from '../../../product/product-types';
 import { MarketplaceDocument } from '../../schemas/marketplace.schema';
 import { ProductRepository } from '../../../product/product.repository';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../../../stock/ports/stock-query.port';
 
 @Injectable()
 export class TikTokShopProductAdapter implements IMarketplaceProductAdapter, OnModuleInit {
@@ -23,6 +24,7 @@ export class TikTokShopProductAdapter implements IMarketplaceProductAdapter, OnM
     @Inject(forwardRef(() => MarketplaceDescriptionService))
     private readonly descriptionService: MarketplaceDescriptionService,
     private readonly productRepository: ProductRepository,
+    @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
   ) {}
 
   onModuleInit() {
@@ -266,7 +268,7 @@ export class TikTokShopProductAdapter implements IMarketplaceProductAdapter, OnM
     const p = product as any;
     const price = p.price || 0;
     const productId = (p._id || p.id)?.toString();
-    const stock = Math.max(0, await this.productRepository.calculateStock(productId));
+    const stock = Math.max(0, (await this.stockQuery.getProductStock(productId)).onHand);
 
     return {
       title: (p.name || '').slice(0, 255),
