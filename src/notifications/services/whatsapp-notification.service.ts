@@ -39,44 +39,70 @@ export class WhatsAppNotificationService {
    * Fire-and-forget: enfileira em RabbitMQ, retorna imediatamente
    */
   async sendSaleNotification(order: any, pricing: OrderPricingDetailDto, financial?: OrderFinancialSummary): Promise<void> {
-    try {
-      // 1. Formatar mensagem
-      const message = this.formatSaleMessage(order, pricing, financial);
+    const message = this.formatSaleMessage(order, pricing, financial);
 
-      // 2. Preparar job
+    await this.enqueueWhatsAppText(message, {
+      orderId: order._id?.toString(),
+      externalOrderId: order.externalId,
+      metadata: {
+        grossProfit: pricing.totals.totalGrossProfit,
+        netProfit: pricing.totals.totalNetProfit,
+        marginPercent: pricing.totals.profitMarginPercent,
+        marketplace: pricing.marketplace,
+      },
+    });
+  }
+
+  /**
+   * Envia uma mensagem genérica de sistema para o grupo configurado.
+   * Fire-and-forget: enfileira em RabbitMQ, retorna imediatamente.
+   */
+  async sendSystemMessage(title: string, body: string): Promise<void> {
+    const text = `*${title}*\n${body}`;
+    await this.enqueueWhatsAppText(text);
+  }
+
+  /**
+   * Enfileira um texto livre como notificação WhatsApp (job + log de auditoria + publish).
+   * Reutilizado por sendSaleNotification e sendSystemMessage para evitar duplicação.
+   * Fire-and-forget: nunca lança — apenas loga o erro (não falha o fluxo chamador).
+   */
+  private async enqueueWhatsAppText(
+    content: string,
+    opts?: { orderId?: string; externalOrderId?: string; metadata?: Record<string, any> }
+  ): Promise<void> {
+    try {
+      // 1. Preparar job
       const jobId = uuidv4();
       const job: WhatsAppNotificationJobDto = {
         jobId,
         destination: this.groupId, // Grupo configurado ou individual
-        content: message,
-        orderId: order._id?.toString(),
-        externalOrderId: order.externalId,
-        metadata: {
-          grossProfit: pricing.totals.totalGrossProfit,
-          netProfit: pricing.totals.totalNetProfit,
-          marginPercent: pricing.totals.profitMarginPercent,
-          marketplace: pricing.marketplace,
-        },
+        content,
+        orderId: opts?.orderId,
+        externalOrderId: opts?.externalOrderId,
+        metadata: opts?.metadata,
       };
 
-      // 3. Criar log de notificação (para auditoria)
+      // 2. Criar log de notificação (para auditoria)
       const logEntry = await this.notificationLogModel.create({
         jobId,
         type: 'whatsapp',
         destination: job.destination,
-        orderId: order._id?.toString(),
-        externalOrderId: order.externalId,
-        content: message,
+        orderId: opts?.orderId,
+        externalOrderId: opts?.externalOrderId,
+        content,
         metadata: job.metadata,
         status: 'queued',
         nextRetryAt: new Date(),
       });
 
       this.logger.debug(
-        `Notification queued for order ${order.externalId} (jobId: ${jobId})`
+        opts?.externalOrderId
+          ? `Notification queued for order ${opts.externalOrderId} (jobId: ${jobId})`
+          : `Notification queued (jobId: ${jobId})`
       );
 
-      // 4. Enfileirar em RabbitMQ (fire-and-forget)
+      // 3. Enfileirar em RabbitMQ (fire-and-forget)
       await this.amqpConnection.publish(
         'rocket.notifications', // exchange
         'whatsapp.sale', // routing key
@@ -90,9 +116,11 @@ export class WhatsAppNotificationService {
 
     } catch (error) {
       this.logger.error(
-        `Error queueing WhatsApp notification for order ${order.externalId}: ${error.message}`
+        opts?.externalOrderId
+          ? `Error queueing WhatsApp notification for order ${opts.externalOrderId}: ${error.message}`
+          : `Error queueing WhatsApp notification: ${error.message}`
       );
-      // Não falha a order se notificação falhar
+      // Não falha o fluxo chamador se notificação falhar
     }
   }
 
