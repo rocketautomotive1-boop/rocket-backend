@@ -86,6 +86,9 @@ import { TikTokShopCategoryAdapter } from './adapters/tiktok-shop/tiktok-shop-ca
 import { TikTokShopService } from './services/tiktok-shop.service';
 import { TikTokShopController } from './controllers/tiktok-shop.controller';
 
+import { MarketplaceOrderGatewayProvider } from './ports/marketplace-order-gateway.provider';
+import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gateway';
+
 @Module({
   imports: [
     HttpModule,
@@ -186,6 +189,9 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     MlDimensionsCalculatorService,
     MlDimensionsAttributeHandler,
     MlAttributeHydrationService,
+    // Hexagonal port implementation consumed by OrderModule (pure — no Order DB access)
+    MarketplaceOrderGatewayProvider,
+    { provide: MARKETPLACE_ORDER_GATEWAY, useClass: MarketplaceOrderGatewayProvider },
   ],
   exports: [
     MarketplaceService,
@@ -232,6 +238,8 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     TikTokShopCategoryAdapter,
     TikTokShopService,
     MlAttributeHydrationService,
+    // Token consumed by OrderModule
+    MARKETPLACE_ORDER_GATEWAY,
   ],
 })
 export class MarketplaceModule { }

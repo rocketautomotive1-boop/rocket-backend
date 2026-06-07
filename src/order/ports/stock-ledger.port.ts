@@ -26,4 +26,15 @@ export interface StockLedgerPort {
     items: Array<StockItem & { unitPrice: number }>,
     reference: string,
   ): Promise<void>;
+
+  /**
+   * Deduct stock in its OWN transaction (no external session) and link movements to the order.
+   * Used by the legacy ORDER_EVENTS.SYNCED path. Idempotent on `reference`.
+   */
+  deductStandalone(
+    orderId: string,
+    items: StockItem[],
+    reference: string,
+    marketplaceName: string,
+  ): Promise<{ status: string; movementsCount?: number; reason?: string }>;
 }

@@ -109,6 +109,10 @@ import { PublicationTriggerListener } from './listeners/publication-trigger.list
 import { ReadinessRecoveryJob } from './jobs/readiness-recovery.job';
 import { CategorySnapshotService } from './services/category-snapshot.service';
 
+import { ProductResolverProvider } from './ports/product-resolver.provider';
+import { StockLedgerProvider } from './ports/stock-ledger.provider';
+import { PRODUCT_RESOLVER_PORT } from '../order/ports/product-resolver.port';
+import { STOCK_LEDGER_PORT } from '../order/ports/stock-ledger.port';
 
 
 @Module({
@@ -213,6 +217,11 @@ import { CategorySnapshotService } from './services/category-snapshot.service';
     PublicationTriggerListener,
     ReadinessRecoveryJob,
     CategorySnapshotService,
+    // Hexagonal port implementations consumed by OrderModule
+    ProductResolverProvider,
+    StockLedgerProvider,
+    { provide: PRODUCT_RESOLVER_PORT, useClass: ProductResolverProvider },
+    { provide: STOCK_LEDGER_PORT, useClass: StockLedgerProvider },
   ],
   exports: [
 
@@ -236,7 +245,10 @@ import { CategorySnapshotService } from './services/category-snapshot.service';
     CrossReferenceService,
     CatalogMigrationService,
     ProductMatcherService,
-    ProductDiscoveryService
+    ProductDiscoveryService,
+    // Tokens consumed by OrderModule
+    PRODUCT_RESOLVER_PORT,
+    STOCK_LEDGER_PORT,
   ],
 })
 export class ProductModule { }
