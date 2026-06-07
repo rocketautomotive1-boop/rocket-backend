@@ -32,6 +32,29 @@ export class NotificationModel {
     @Prop({ default: false })
     emailSent: boolean;
 
+    @Prop({
+        type: [{
+            channel: { type: String, required: true },
+            status: { type: String, default: 'pending' }, // 'pending'|'sent'|'failed'
+            attempts: { type: Number, default: 0 },
+            lastError: { type: String, default: null },
+            lastAttemptAt: { type: Date, default: null },
+            nextRetryAt: { type: Date, default: null },
+        }],
+        default: [],
+    })
+    delivery: Array<{
+        channel: string;
+        status: 'pending' | 'sent' | 'failed';
+        attempts: number;
+        lastError: string | null;
+        lastAttemptAt: Date | null;
+        nextRetryAt: Date | null;
+    }>;
+
+    @Prop({ type: [{ type: Types.ObjectId, ref: 'UserModel' }], default: [] })
+    audienceUserIds: Types.ObjectId[];
+
     @Prop({ type: [{ type: Types.ObjectId, ref: 'UserModel' }], default: [] })
     readBy: Types.ObjectId[];
 
