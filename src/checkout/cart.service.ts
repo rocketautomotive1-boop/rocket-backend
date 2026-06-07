@@ -1,5 +1,5 @@
 
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CartModel, CartDocument } from './schemas/cart.schema';
@@ -8,6 +8,7 @@ import { ProductRepository } from '../product/product.repository';
 import { AddToCartDto } from './dto/add-to-cart.dto';
 import { CouponModel, CouponDocument } from './schemas/coupon.schema';
 import { CustomerService } from '../customer/customer.service'; // Assuming path for CustomerService
+import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
 
 @Injectable()
 export class CartService {
@@ -17,6 +18,7 @@ export class CartService {
         private readonly productService: ProductService,
         private readonly productRepository: ProductRepository,
         private readonly customerService: CustomerService,
+        @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
     ) { }
 
     async applyCoupon(customerId: number | null, sessionId: string | null, code: string): Promise<CartDocument> {
@@ -115,7 +117,7 @@ export class CartService {
         }
 
         // Validate Stock (real-time from stock_movements)
-        const stock = await this.productRepository.calculateStock(productId);
+        const stock = (await this.stockQuery.getProductStock(productId)).available;
         if (newTotalQuantity > stock) {
             throw new BadRequestException(`Apenas ${stock} unidades disponíveis.`);
         }
@@ -152,7 +154,7 @@ export class CartService {
         }
 
         // Validate Stock (real-time from stock_movements)
-        const stock = await this.productRepository.calculateStock(productId);
+        const stock = (await this.stockQuery.getProductStock(productId)).available;
         if (dto.quantity > stock) {
             throw new BadRequestException(`Apenas ${stock} unidades disponíveis.`);
         }

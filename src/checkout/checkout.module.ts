@@ -11,6 +11,7 @@ import { CartCleanupService } from './cart-cleanup.service';
 import { OrderModule } from '../order/order.module';
 import { PaymentModule } from '../payment/payment.module';
 import { LogisticsModule } from '../logistics/logistics.module';
+import { StockModule } from '../stock/stock.module';
 
 @Module({
     imports: [
@@ -22,7 +23,8 @@ import { LogisticsModule } from '../logistics/logistics.module';
         CustomerModule,
         PaymentModule,
         LogisticsModule,
-        OrderModule
+        OrderModule,
+        StockModule
     ],
     controllers: [CartController],
     providers: [CartService, CheckoutService, CartCleanupService],
