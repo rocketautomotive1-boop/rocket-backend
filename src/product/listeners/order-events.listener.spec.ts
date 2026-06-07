@@ -12,52 +12,53 @@ describe('OrderEventsListener', () => {
   };
 
   const makeSut = () => {
-    const syncQueueService = { enqueue: jest.fn().mockResolvedValue(undefined) };
+    // Constructor order: (productService, stockLedger, orchestratorPublisher)
+    const orchestratorPublisher = { requestSync: jest.fn().mockResolvedValue(undefined) };
 
     const sut = new OrderEventsListener(
       {} as any,
       {} as any,
-      syncQueueService as any,
+      orchestratorPublisher as any,
     );
 
-    return { sut, syncQueueService };
+    return { sut, orchestratorPublisher };
   };
 
   it('enfileira sempre para source=sync quando ha produto afetado', async () => {
-    const { sut, syncQueueService } = makeSut();
+    const { sut, orchestratorPublisher } = makeSut();
 
     await sut.handleOrderProcessedEvent(baseEvent as any);
 
-    expect(syncQueueService.enqueue).toHaveBeenCalledTimes(1);
-    expect(syncQueueService.enqueue).toHaveBeenCalledWith({
+    expect(orchestratorPublisher.requestSync).toHaveBeenCalledTimes(1);
+    expect(orchestratorPublisher.requestSync).toHaveBeenCalledWith({
       productId: 'prod-1',
       reason: 'stock_deduction',
     });
   });
 
   it('enfileira sempre para source=webhook quando ha produto afetado', async () => {
-    const { sut, syncQueueService } = makeSut();
+    const { sut, orchestratorPublisher } = makeSut();
 
     await sut.handleOrderProcessedEvent({
       ...baseEvent,
       triggeredBy: 'webhook',
     } as any);
 
-    expect(syncQueueService.enqueue).toHaveBeenCalledTimes(1);
-    expect(syncQueueService.enqueue).toHaveBeenCalledWith({
+    expect(orchestratorPublisher.requestSync).toHaveBeenCalledTimes(1);
+    expect(orchestratorPublisher.requestSync).toHaveBeenCalledWith({
       productId: 'prod-1',
       reason: 'stock_deduction',
     });
   });
 
   it('nao enfileira publicacao para source=retry', async () => {
-    const { sut, syncQueueService } = makeSut();
+    const { sut, orchestratorPublisher } = makeSut();
 
     await sut.handleOrderProcessedEvent({
       ...baseEvent,
       triggeredBy: 'retry',
     } as any);
 
-    expect(syncQueueService.enqueue).not.toHaveBeenCalled();
+    expect(orchestratorPublisher.requestSync).not.toHaveBeenCalled();
   });
 });
