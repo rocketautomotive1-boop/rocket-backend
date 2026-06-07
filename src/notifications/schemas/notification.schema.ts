@@ -8,6 +8,9 @@ export class NotificationModel {
     @Prop({ required: true, index: true })
     category: string; // 'order' | 'question' | 'stock' | 'system' | 'marketplace'
 
+    @Prop({ index: true })
+    type: string; // evento canônico específico, ex: 'order.processed', 'question.received'
+
     @Prop({ required: true })
     title: string;
 
