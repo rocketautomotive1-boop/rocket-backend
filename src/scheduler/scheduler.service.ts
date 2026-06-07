@@ -86,9 +86,5 @@ export class SchedulerService implements OnModuleInit {
         }
     }
 
-    // Every 30 Minutes: ML compliance checks — migrated to orchestrator-ms
-    @Cron('0 */30 * * * *')
-    async handleItemModerationCheck() {
-        this.logger.log('Item Moderation/Compliance Check delegated to orchestrator-ms — skipping.');
-    }
+    // ML compliance / item-moderation checks live entirely in microservices/moderations now.
 }

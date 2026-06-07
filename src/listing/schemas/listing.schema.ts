@@ -48,7 +48,7 @@ export class ListingModel {
     lastSyncAt?: Date;
 
     // Distributed in-flight lock. Set when a publish job is dispatched to RabbitMQ.
-    // Cleared by ListingStatusListener when the job result arrives (success or failure).
+    // Cleared by SyncResultConsumer when the job result arrives (success or failure).
     // Acts as a per-listing mutex — prevents concurrent dispatches regardless of force flag.
     // TTL: 2 minutes (orchestrator enforces stale expiry before allowing re-lock).
     @Prop({ type: Date, default: null })

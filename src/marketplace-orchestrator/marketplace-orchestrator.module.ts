@@ -27,6 +27,24 @@ import { ProductModule } from '../product/product.module';
 import { GatewaysModule } from '../gateways/gateways.module';
 import { SyncResultConsumer } from './sync-result.consumer';
 
+/**
+ * Backend half of the marketplace-sync contract. This module is NOT the orchestrator itself —
+ * publication execution lives in `microservices/orchestrator` (RabbitMQ-only, no HTTP). This
+ * module owns the pieces the backend must keep because it owns the data and the HTTP surface:
+ *
+ *  - OrchestratorPublisherService  → publishes `product.sync.requested` (outbound contract).
+ *  - SyncResultConsumer            → consumes `rocket.marketplace.results`, writes ListingModel
+ *                                    + emits websocket. The data owner writes the data
+ *                                    (no shared-DB-write from the microservice).
+ *  - MarketplaceOrchestratorController + PublicationFlow/MarketplaceIssues/OperationalIssues
+ *                                    → HTTP APIs (/marketplace-orchestrator/*) consumed by the
+ *                                    mobile app; the microservice exposes no HTTP equivalent.
+ *  - OLXReconciliationService      → backend-only cron reconciling OLX imports in ListingModel.
+ *  - ListingRemovalService         → listing removal (used by product-title controller).
+ *
+ * Moderation (infractions/wrong-category/removal) lives entirely in `microservices/moderations`.
+ * The route prefix `/marketplace-orchestrator` is intentionally kept stable (frontend depends on it).
+ */
 @Module({
     imports: [
         RabbitMqModule,
