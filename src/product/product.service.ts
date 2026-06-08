@@ -14,7 +14,8 @@ import { PaginatedResponseDto, ProductFilterDto, ProductStatus } from './dto/pro
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
 import { ProductRepository } from './product.repository';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
-import { ProductMovementService, resolveMovementCondition } from './services/product-movement.service';
+import { StockService } from '../stock/stock.service';
+import { resolveMovementCondition, resolveMovementType } from '../stock/domain/movement-type';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 import { MarketplaceDocument } from '../marketplace/schemas/marketplace.schema';
 import { SearchService } from '../search/search.service';
@@ -65,7 +66,7 @@ export class ProductService {
     private readonly productCompatibilityService: ProductCompatibilityService,
     private readonly productFilterService: ProductFilterService,
     private readonly marketplaceRegistry: MarketplaceRegistryService,
-    private readonly productMovementService: ProductMovementService,
+    private readonly stockService: StockService,
     @Inject(forwardRef(() => MarketplaceDescriptionService))
     private readonly marketplaceDescriptionService: MarketplaceDescriptionService,
     @Inject(forwardRef(() => SearchService))
@@ -345,8 +346,8 @@ export class ProductService {
     const product = await this.findOne(id);
     if (!product) return { productMovements: [], boxItems: [] };
 
-    // Delegate to specialized service
-    const movements = await this.productMovementService.findByProduct(product._id);
+    // Movement history from the stock ledger (read side)
+    const movements = await this.stockQuery.listMovements(String(product._id), 200);
 
     // Map allocations to the expected 'boxItems' format for the WMS
     const boxItems = (product.allocations || []).map(alloc => ({
@@ -807,22 +808,17 @@ export class ProductService {
       const product = await this.findOne(productId);
       if (!product) throw new NotFoundException(`Produto com ID ${productId} não encontrado`);
 
-      return this.productMovementService.create({
-        productId: product._id,
-        type: (movementData.type === 'entrada' || movementData.type === 'inbound') ? 'inbound' :
-          (movementData.type === 'saida' || movementData.type === 'outbound') ? 'outbound' :
-            (movementData.type === 'transferencia' || movementData.type === 'transfer') ? 'transfer' : 'adjustment',
+      return this.stockService.move({
+        productId: String(product._id),
+        type: resolveMovementType(movementData.type),
         quantity: movementData.quantity,
-        price: movementData.price,
+        unitCost: movementData.costPrice ?? movementData.price,
         reason: movementData.reason,
         reference: movementData.reference,
-        condition: resolveMovementCondition(movementData.condition, movementData.conditionId),
-        situation: movementData.situation,
-        observation: movementData.observation,
-        // Forward new structure fields
+        condition: resolveMovementCondition(movementData.condition, movementData.conditionId) as any,
+        toBoxId: movementData.boxId ? String(movementData.boxId) : undefined,
         origin: movementData.origin,
-        metadata: movementData.metadata,
-        orderId: movementData.orderId
+        orderId: movementData.orderId,
       });
     } catch (error) {
       this.logger.error('Erro ao criar movimento:', error);
@@ -833,9 +829,10 @@ export class ProductService {
   @ValidateMongoId()
   async updateMovement(productId: string, movementId: string, movementData: any): Promise<any> {
     try {
-      const updatedMovement = await this.productMovementService.update(movementId, movementData);
-
-      // Queue trigger removed: product.movement_updated
+      // Ledger is append-only: a quantity correction creates a compensating adjustment.
+      const updatedMovement = movementData.quantity != null
+        ? await this.stockService.editMovementViaAdjustment(movementId, movementData.quantity)
+        : { message: 'Nada a corrigir.' };
 
       return updatedMovement;
     } catch (error) {
@@ -872,7 +869,7 @@ export class ProductService {
   async getMovements(productId: string): Promise<any[]> {
     const product = await this.findOne(productId);
     if (!product) return [];
-    return this.productMovementService.findByProduct(product._id as any);
+    return this.stockQuery.listMovements(String(product._id), 200);
   }
 
   @ValidateMongoId()

@@ -74,7 +74,6 @@ import { BoxController } from './controllers/box.controller';
 
 // Novos services
 import { ProductConditionService } from './services/product-condition.service';
-import { ProductMovementService } from './services/product-movement.service';
 import { WarehouseService } from './services/warehouse.service';
 import { BoxService } from './services/box.service';
 import { BoxItemService } from './services/box-item.service';
@@ -172,7 +171,7 @@ import { StockModule } from '../stock/stock.module';
     ProductMovementController,
     WarehouseController,
     BoxController,
-    BoxItemController,
+    BoxItemController,
     ProductPublicationLogController,
     MigrationController,
     CrossReferenceController
@@ -192,10 +191,9 @@ import { StockModule } from '../stock/stock.module';
     ProductFilterService,
     ProductCompatibilityService,
     ProductConditionService,
-    ProductMovementService,
     WarehouseService,
     BoxService,
-    BoxItemService,
+    BoxItemService,
     ProductPublicationLogService,
     ProductSyncService,
     OrderEventsListener, // Event listener for order sync
@@ -227,10 +225,9 @@ import { StockModule } from '../stock/stock.module';
     ProductCategoryService,
     ProductCompatibilityService,
     ProductConditionService,
-    ProductMovementService,
     WarehouseService,
     BoxService,
-    BoxItemService,
+    BoxItemService,
     ProductPublicationLogService,
     ProductSyncService,
     MigrationService,
