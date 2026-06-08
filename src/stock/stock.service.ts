@@ -91,4 +91,31 @@ export class StockService {
       if (ownSession) await session.endSession();
     }
   }
+
+  /**
+   * Signed inventory correction. The ledger stays append-only — corrections are new
+   * `adjustment` movements (never edits/deletes of past movements).
+   */
+  async adjust(
+    input: {
+      productId: string;
+      quantity: number;
+      condition?: 'new' | 'damaged' | 'used' | 'refurbished';
+      reason?: string;
+      reference?: string;
+    },
+    session?: ClientSession,
+  ): Promise<{ movementId: string; lotId: string }> {
+    return this.move(
+      {
+        productId: input.productId,
+        type: StockMovementType.ADJUSTMENT,
+        quantity: input.quantity,
+        condition: input.condition ?? 'new',
+        reason: input.reason,
+        reference: input.reference,
+      },
+      session,
+    );
+  }
 }

@@ -7,12 +7,14 @@ import { StockLotModel, StockLotSchema } from './schemas/stock-lot.schema';
 import { StockBalanceModel, StockBalanceSchema } from './schemas/stock-balance.schema';
 import { StockRepository } from './stock.repository';
 import { StockService } from './stock.service';
+import { StockQueryService } from './stock-query.service';
 import { StockMovementType } from './domain/movement-type';
 
 describe('StockService (integration)', () => {
   let mongo: MongoMemoryReplSet;
   let mod: TestingModule;
   let svc: StockService;
+  let query: StockQueryService;
   let repo: StockRepository;
   const PID = '650000000000000000000001';
 
@@ -27,9 +29,10 @@ describe('StockService (integration)', () => {
           { name: StockBalanceModel.name, schema: StockBalanceSchema },
         ]),
       ],
-      providers: [StockService, StockRepository],
+      providers: [StockService, StockQueryService, StockRepository],
     }).compile();
     svc = mod.get(StockService);
+    query = mod.get(StockQueryService);
     repo = mod.get(StockRepository);
 
     // Pre-create collections + indexes. MongoDB cannot create a collection inside a
@@ -73,5 +76,33 @@ describe('StockService (integration)', () => {
     const onHandAfter = rows.reduce((s, r) => s + r.onHand, 0);
     expect(reserved).toBe(2);
     expect(onHandAfter).toBe(onHandBefore); // reservation doesn't change physical stock
+  });
+
+  it('adjust applies a signed correction to onHand (append-only)', async () => {
+    const PID2 = '650000000000000000000777';
+    await svc.move({ productId: PID2, type: StockMovementType.INBOUND, quantity: 10, condition: 'new', reference: 'adj-seed' });
+    await svc.adjust({ productId: PID2, quantity: -2, condition: 'new', reason: 'inventory count', reference: 'adj-1' });
+    const rows = await repo.balanceModel.find({ productId: new Types.ObjectId(PID2) });
+    expect(rows.reduce((s, r) => s + r.onHand, 0)).toBe(8);
+    // ledger is append-only: 2 movements, none deleted
+    const count = await repo.movementModel.countDocuments({ productId: new Types.ObjectId(PID2) });
+    expect(count).toBe(2);
+  });
+
+  it('listMovements returns movements newest-first', async () => {
+    const PID3 = '650000000000000000000888';
+    await svc.move({ productId: PID3, type: StockMovementType.INBOUND, quantity: 4, condition: 'new', unitCost: 1, reference: 'lm1' });
+    const list = await query.listMovements(PID3, 10);
+    expect(list.length).toBeGreaterThanOrEqual(1);
+    expect(list[0].type).toBe('inbound');
+  });
+
+  it('getMovementStatistics aggregates by type', async () => {
+    const PID4 = '650000000000000000000999';
+    await svc.move({ productId: PID4, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 's1' });
+    await svc.move({ productId: PID4, type: StockMovementType.OUTBOUND, quantity: 2, condition: 'new', reference: 's2' });
+    const stats = await query.getMovementStatistics(PID4);
+    expect(stats['inbound'].quantity).toBe(5);
+    expect(stats['outbound'].quantity).toBe(2);
   });
 });

@@ -33,4 +33,13 @@ export interface StockQueryPort {
   getProductIdsWithMinStock(min: number): Promise<string[]>;
   /** Weighted-average cost across a product's lots (replaces Product.costPrice reads). */
   getProductCost(productId: string): Promise<number>;
+  /** Movement history for a product (most recent first). */
+  listMovements(
+    productId: string,
+    limit?: number,
+  ): Promise<Array<{ type: string; quantity: number; date: Date; unitCost?: number; reason?: string }>>;
+  /** Per-product movement stats keyed by type. */
+  getMovementStatistics(productId: string): Promise<Record<string, { count: number; quantity: number }>>;
+  /** Latest movement snapshot (condition) used by listing publication. */
+  getListingSnapshot(productId: string): Promise<{ condition: string } | null>;
 }

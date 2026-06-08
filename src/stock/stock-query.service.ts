@@ -76,4 +76,39 @@ export class StockQueryService implements StockQueryPort {
     }
     return totalQty > 0 ? totalCost / totalQty : 0;
   }
+
+  async listMovements(productId: string, limit = 50) {
+    const rows = await this.repo.movementModel
+      .find({ productId: new Types.ObjectId(productId) })
+      .sort({ date: -1 })
+      .limit(limit)
+      .lean()
+      .exec();
+    return rows.map((m: any) => ({
+      type: m.type,
+      quantity: m.quantity,
+      date: m.date,
+      unitCost: m.unitCost != null ? Number(m.unitCost.toString()) : undefined,
+      reason: m.reason,
+    }));
+  }
+
+  async getMovementStatistics(productId: string): Promise<Record<string, { count: number; quantity: number }>> {
+    const rows = await this.repo.movementModel.aggregate([
+      { $match: { productId: new Types.ObjectId(productId) } },
+      { $group: { _id: '$type', count: { $sum: 1 }, quantity: { $sum: '$quantity' } } },
+    ]);
+    const out: Record<string, { count: number; quantity: number }> = {};
+    for (const r of rows) out[r._id] = { count: r.count, quantity: r.quantity };
+    return out;
+  }
+
+  async getListingSnapshot(productId: string): Promise<{ condition: string } | null> {
+    const last = await this.repo.movementModel
+      .findOne({ productId: new Types.ObjectId(productId) })
+      .sort({ date: -1 })
+      .lean()
+      .exec();
+    return last ? { condition: (last as any).condition ?? 'new' } : null;
+  }
 }
