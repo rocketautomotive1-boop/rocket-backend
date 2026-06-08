@@ -9,6 +9,8 @@ import { ProductRepository } from '../../product/product.repository';
 import { PRODUCT_RESOLVER_PORT, ProductResolverPort } from '../ports/product-resolver.port';
 import { MARKETPLACE_ORDER_GATEWAY, MarketplaceOrderGateway } from '../ports/marketplace-order.gateway';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
+import { StockService } from '../../stock/stock.service';
+import { StockMovementType } from '../../stock/domain/movement-type';
 import { ORDER_EVENTS, OrderSyncedEvent } from '../events/order.events';
 
 /**
@@ -28,6 +30,7 @@ export class OrderFulfillmentService {
         @Inject(PRODUCT_RESOLVER_PORT) private readonly resolver: ProductResolverPort,
         @Inject(MARKETPLACE_ORDER_GATEWAY) private readonly gateway: MarketplaceOrderGateway,
         @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+        private readonly stockService: StockService,
         private readonly eventEmitter: EventEmitter2,
     ) { }
 
@@ -156,14 +159,14 @@ export class OrderFulfillmentService {
 
                 const productId = product._id || (product as any).id;
 
-                await this.productService.createMovement(String(productId), {
-                    type: 'outbound',
+                await this.stockService.move({
+                    productId: String(productId),
+                    type: StockMovementType.OUTBOUND,
                     quantity,
                     condition: 'new',
                     reason: 'Venda Marketplace',
                     reference: movementReference,
-                    status: 'completed',
-                } as any);
+                });
 
                 stockUpdated.push(productIdKey);
 

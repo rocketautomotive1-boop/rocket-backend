@@ -118,4 +118,39 @@ export class StockService {
       session,
     );
   }
+
+  /**
+   * "Delete" a movement → append a compensating adjustment that cancels its balance effect.
+   * The ledger stays append-only (audit/fiscal correctness). Returns the compensating movement id.
+   */
+  async reverseMovement(movementId: string): Promise<{ movementId: string; lotId: string }> {
+    const original = await this.repo.movementModel.findById(movementId).lean().exec();
+    if (!original) throw new BadRequestException(`Movement ${movementId} not found`);
+    const delta = computeBalanceDelta((original as any).type, (original as any).quantity);
+    // Compensate the net onHand effect with an adjustment of the opposite sign.
+    return this.adjust({
+      productId: String((original as any).productId),
+      quantity: -delta.onHand,
+      condition: (original as any).condition ?? 'new',
+      reason: `Estorno do movimento ${movementId}`,
+    });
+  }
+
+  /**
+   * "Edit" a movement's quantity → append an adjustment for the difference (no destructive edit).
+   * `newQuantity` is the intended absolute quantity of the original movement.
+   */
+  async editMovementViaAdjustment(movementId: string, newQuantity: number): Promise<{ movementId: string; lotId: string }> {
+    const original = await this.repo.movementModel.findById(movementId).lean().exec();
+    if (!original) throw new BadRequestException(`Movement ${movementId} not found`);
+    const oldDelta = computeBalanceDelta((original as any).type, (original as any).quantity);
+    const newDelta = computeBalanceDelta((original as any).type, newQuantity);
+    const diff = newDelta.onHand - oldDelta.onHand;
+    return this.adjust({
+      productId: String((original as any).productId),
+      quantity: diff,
+      condition: (original as any).condition ?? 'new',
+      reason: `Correção do movimento ${movementId} (qtd ${(original as any).quantity} → ${newQuantity})`,
+    });
+  }
 }

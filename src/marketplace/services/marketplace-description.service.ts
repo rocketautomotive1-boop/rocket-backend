@@ -6,7 +6,7 @@ import { ProductDocument } from '../../product/product-types';
 import { MarketplaceTemplateRepository } from './marketplace-template.repository';
 import { ProductFieldMapper } from './product-field-mapper.service';
 import { TemplateEngine } from './template-engine.service';
-import { ProductMovementService } from '../../product/services/product-movement.service';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
 
 /**
  * Orchestrator do sistema de templates de descrição.
@@ -39,8 +39,8 @@ export class MarketplaceDescriptionService {
     private readonly templateRepo: MarketplaceTemplateRepository,
     private readonly fieldMapper: ProductFieldMapper,
     private readonly engine: TemplateEngine,
-    @Inject(forwardRef(() => ProductMovementService))
-    private readonly productMovementService: ProductMovementService,
+    @Inject(STOCK_QUERY_PORT)
+    private readonly stockQuery: StockQueryPort,
   ) {}
 
   // ── Geração de descrição (core) ───────────────────────────────────────────
@@ -67,7 +67,8 @@ export class MarketplaceDescriptionService {
     let stockSnapshot: { condition: string; situation: string } | null = null;
     if (productId && Types.ObjectId.isValid(productId)) {
       try {
-        stockSnapshot = await this.productMovementService.getListingStockSnapshot(productId);
+        const snap = await this.stockQuery.getListingSnapshot(productId);
+        if (snap) stockSnapshot = { condition: snap.condition, situation: 'normal' };
       } catch (e: any) {
         this.logger.warn(`Descrição: snapshot de estoque ignorado: ${e?.message}`);
       }
