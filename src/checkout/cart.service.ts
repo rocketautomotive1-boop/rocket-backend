@@ -9,6 +9,7 @@ import { AddToCartDto } from './dto/add-to-cart.dto';
 import { CouponModel, CouponDocument } from './schemas/coupon.schema';
 import { CustomerService } from '../customer/customer.service'; // Assuming path for CustomerService
 import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
+import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 
 @Injectable()
 export class CartService {
@@ -19,6 +20,7 @@ export class CartService {
         private readonly productRepository: ProductRepository,
         private readonly customerService: CustomerService,
         @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+        @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     ) { }
 
     async applyCoupon(customerId: number | null, sessionId: string | null, code: string): Promise<CartDocument> {
@@ -128,7 +130,7 @@ export class CartService {
             cart.items.push({
                 productId: productId,
                 quantity: addToCartDto.quantity,
-                unitPrice: product.price || Types.Decimal128.fromString('0')
+                unitPrice: Types.Decimal128.fromString(String(await this.pricing.getBasePrice(productId)))
             });
         }
 

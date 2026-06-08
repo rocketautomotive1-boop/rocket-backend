@@ -32,14 +32,13 @@ describe('GeneralProductRepository (unified ProductModel, domain:general)', () =
       barcode: '7891000100103',
       name: 'Nescau 400g',
       tax: { ncm: '18069000' } as any,
-      price: '12.90' as any,
     });
     expect(created.barcode).toBe('7891000100103');
     expect((created as any).domain).toBe('general');
 
     const found = await repo.findByBarcode('7891000100103');
     expect(found?.name).toBe('Nescau 400g');
-    expect(typeof found?.price === 'string' || found?.price === undefined).toBe(true);
+    // sale price now lives in PricingModule, not on the product
   });
 
   it('findByBarcode does NOT return an autopeças product with the same barcode', async () => {
@@ -116,10 +115,6 @@ describe('GeneralProductRepository (unified ProductModel, domain:general)', () =
     expect(found?.name).toBe('Nescau Real'); // $setOnInsert only
   });
 
-  it('updateByBarcode stores the sale price and sanitizes Decimal128 to string on read', async () => {
-    await repo.updateByBarcode('7891000100103', { price: 12.9 } as any);
-    const found = await repo.findByBarcode('7891000100103');
-    expect(Number(found?.price)).toBeCloseTo(12.9, 2);
-    // cost is no longer a product field — it lives on the stock lot (StockModule).
-  });
+  // Sale price + cost are no longer product fields (PricingModule / StockModule own them) —
+  // the general-product repo no longer stores money fields.
 });

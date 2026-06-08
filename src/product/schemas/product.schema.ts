@@ -165,21 +165,8 @@ export class ProductModel {
     @Prop({ type: ProductTax })
     tax: ProductTax;
 
-    @Prop({ type: Types.Decimal128 })
-    @Transform(({ value }) => value?.toString())
-    price: Types.Decimal128; // SALE price (catalog). Cost lives on StockLot.
-
-    @Prop({ type: Types.Decimal128 })
-    @Transform(({ value }) => value?.toString())
-    listPrice: Types.Decimal128; // Original Price / De-Preco (sale display)
-
-    @Prop({ type: Object })
-    pricing: {
-        markup: number; // e.g., 1.5
-        profitMargin: number; // e.g., 0.33
-        autoUpdate: boolean;
-        strategy: string; // 'FIXED_MARKUP', 'COMPETITIVE', 'MANUAL'
-    };
+    // Sale price (basePrice + per-marketplace overrides + listPrice/markup meta) lives in
+    // PricingModule (product_pricing). Read via PRICING_PORT; cost lives on the StockLot.
 
     @Prop({ type: Object })
     lastPurchase: {

@@ -41,8 +41,8 @@ export class ListingModel {
     @Prop()
     sku?: string; // Algumas plataformas exigem SKU específico no anúncio
 
-    @Prop()
-    price?: number; // Override de preço opcional
+    // Per-marketplace price override lives in PricingModule (product_pricing.overrides), not on
+    // the listing — the listing is an integration artifact, not a pricing decision.
 
     @Prop()
     lastSyncAt?: Date;

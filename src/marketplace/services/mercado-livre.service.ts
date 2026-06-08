@@ -17,6 +17,7 @@ import { MercadoLivreCategoryAdapter } from '../adapters/mercado-livre/mercado-l
 import { MercadoLivreProductAdapter } from '../adapters/mercado-livre/mercado-livre-product.adapter';
 import { ListingService } from '../../listing/listing.service'; // [NEW]
 import { ListingDocument } from '../../listing/schemas/listing.schema'; // [NEW]
+import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 
 @Injectable()
 export class MercadoLivreService {
@@ -39,6 +40,7 @@ export class MercadoLivreService {
     @Inject(forwardRef(() => ProductService))
     private productService: ProductService,
     private listingService: ListingService, // [NEW]
+    @Inject(PRICING_PORT) private pricing: PricingPort,
   ) { }
 
   /**
@@ -218,6 +220,9 @@ export class MercadoLivreService {
       // Calcular estoque real baseado nas movimentações (inbound soma, outbound subtrai)
       const availableQty = await this.getAvailableQuantity(completeProduct);
 
+      // Preço de venda efetivo (override do ML > base) — PricingModule é o dono do preço.
+      const salePrice = await this.pricing.getEffectivePrice(String(completeProduct._id), String(marketplace._id));
+
       // Preparar dados para atualização
       const mlData = {
         // Dados básicos
@@ -225,12 +230,12 @@ export class MercadoLivreService {
         category_id: categoryId,
 
         // Dados de preço e estoque
-        price: completeProduct.price,
+        price: salePrice,
         available_quantity: availableQty,
 
         // Dados de inventário
         inventory: [{
-          price: completeProduct.price,
+          price: salePrice,
           quantity: availableQty,
           condition: 'new'
         }],
@@ -271,7 +276,7 @@ export class MercadoLivreService {
           // Se foi restrita, tentar atualizar apenas campos básicos
           if (response.status === 'restricted') {
             const basicUpdateData = {
-              price: completeProduct.price,
+              price: salePrice,
               available_quantity: availableQty,
               accessToken: token.accessToken
             };

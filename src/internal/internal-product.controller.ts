@@ -47,8 +47,6 @@ export class InternalProductController {
         normalized.stockQuantity = stock.onHand;
         normalized.basePrice = basePrice;
         normalized.effectivePrice = effectivePrice;
-        // Legacy mirror so any un-migrated reader keeps working during the transition.
-        normalized.price = effectivePrice ?? basePrice ?? 0;
 
         return normalized;
     }

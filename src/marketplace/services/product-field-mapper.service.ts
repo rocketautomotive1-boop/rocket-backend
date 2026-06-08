@@ -31,7 +31,8 @@ export class ProductFieldMapper {
       descricao_curta: product.description || '',
       detalhes:        p.details || '',
       condicao:        condicaoLabel,
-      preco:           product.price ? Number(product.price).toFixed(2) : '0.00',
+      // Sale price is owned by PricingModule; not templated here ({preco} unused). Kept as 0.00.
+      preco:           '0.00',
       codigo:          product.barcode || product.partNumber || '',
       peso:            product.weight ? String(product.weight) : '0',
       comprimento:     product.dimensions?.length ? String(product.dimensions.length) : '0',

@@ -8,6 +8,7 @@ import { MarketplaceIntegrationHelperService } from './marketplace-integration-h
 import { CategoryMappingService } from './category/category-mapping.service';
 import { MarketplaceDescriptionService } from './marketplace-description.service';
 import { ProductService } from '../../product/product.service';
+import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 
 @Injectable()
 export class ShopeeService {
@@ -24,6 +25,7 @@ export class ShopeeService {
     private descriptionService: MarketplaceDescriptionService,
     @Inject(forwardRef(() => ProductService))
     private productService: ProductService,
+    @Inject(PRICING_PORT) private pricing: PricingPort,
   ) { }
 
   /**
@@ -108,7 +110,7 @@ export class ShopeeService {
           shop_id: parseInt(token.additionalData.shopId),
           name: shopeeSpecificTitle || product.name,
           description: description,
-          price: (await this.getLatestPrice(product)) ?? product.price,
+          price: await this.getLatestPrice(product),
           stock: await this.getAvailableQuantity(product),
           condition: 'NEW',
           weight: (product.weight && Number(product.weight) > 0) ? (Number(product.weight) / 1000) : 0.1,
@@ -150,7 +152,7 @@ export class ShopeeService {
 
         // Separadamente, atualizar Estoque e Preço (Shopee V2 exige endpoints específicos)
         // Isso garante que mesmo na "primeira publicação" (que vira update), os valores peguem
-        const realPrice = (await this.getLatestPrice(product)) ?? product.price;
+        const realPrice = await this.getLatestPrice(product);
         const realStock = await this.getAvailableQuantity(product);
 
         try {
@@ -204,7 +206,7 @@ export class ShopeeService {
         category_id: normalizedCategoryId,
         name: shopeeSpecificTitle || product.name,
         description: description,
-        price: (await this.getLatestPrice(product)) ?? ((product.price && Number(product.price) > 0) ? product.price : 10),
+        price: (await this.getLatestPrice(product)) ?? 10,
         stock: await this.getAvailableQuantity(product),
         weight: (product.weight && Number(product.weight) > 0) ? (Number(product.weight) / 1000) : 0.1,
         dimension: {
@@ -315,7 +317,7 @@ export class ShopeeService {
       const effectiveName = shopeeSpecificTitle || product.name || product.partNumber || `Produto ${String(product._id)}`;
 
       // Calculate real values for specific updates
-      const realPrice = (await this.getLatestPrice(product)) ?? product.price;
+      const realPrice = await this.getLatestPrice(product);
       const realStock = await this.getAvailableQuantity(product);
 
       // Preparar dados para atualização
@@ -449,10 +451,10 @@ export class ShopeeService {
     return this.productService.getProductStock(String(String(product._id)));
   }
 
-  // TODO: Refactor to use ProductService or custom query
+  // Sale price comes from PricingModule (base price). Returns null when unpriced.
   private async getLatestPrice(product: ProductDocument): Promise<number | null> {
-    // If priced at product level, use that.
-    return product.price ? Number(product.price.toString()) : null;
+    const base = await this.pricing.getBasePrice(String((product as any)._id));
+    return base > 0 ? base : null;
   }
 
   // TODO: Completely refactor these methods to work without TypeORM repositories

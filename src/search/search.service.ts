@@ -7,6 +7,7 @@ import { ProductCompatibilityService } from '../product/services/product-compati
 import { CrossReferenceService } from '../product/services/cross-reference.service';
 import { ListingService } from '../listing/listing.service'; // [NEW] Import
 import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
+import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 
 @Injectable()
 export class SearchService implements OnModuleInit {
@@ -24,6 +25,7 @@ export class SearchService implements OnModuleInit {
         private readonly listingService: ListingService,
         private readonly productRepository: ProductRepository,
         @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+        @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     ) { }
 
     async onModuleInit() {
@@ -248,6 +250,9 @@ export class SearchService implements OnModuleInit {
             const listings = await this.listingService.findByProduct(product._id);
             const productTitles = listings.map(l => l.title);
 
+            // Sale price for the search index comes from PricingModule (base + listPrice display).
+            const pricingView = await this.pricing.getPricing(product._id.toString());
+
             // Index optimized fields only
             const body = {
                 partNumber: product.partNumber,
@@ -275,8 +280,8 @@ export class SearchService implements OnModuleInit {
                 brandImage: brandImage,
                 isGenuine: product.brand?.isGenuine || false,
                 quantity: (await this.stockQuery.getProductStock(product._id.toString())).onHand,
-                price: product.price ? Number(product.price.toString()) : 0,
-                listPrice: product.listPrice ? Number(product.listPrice.toString()) : 0, // NEW
+                price: pricingView?.basePrice ?? 0,
+                listPrice: pricingView?.listPrice ?? 0,
                 description: product.description || '' // NEW
             };
 
