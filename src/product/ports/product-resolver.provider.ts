@@ -1,15 +1,13 @@
-import { Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Inject, Injectable } from '@nestjs/common';
 import { ProductResolverPort, ResolveItemInput } from '../../order/ports/product-resolver.port';
 import { ProductMatcherService } from '../services/product-matcher.service';
-import { ProductModel } from '../schemas/product.schema';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
 
 @Injectable()
 export class ProductResolverProvider implements ProductResolverPort {
   constructor(
     private readonly matcher: ProductMatcherService,
-    @InjectModel(ProductModel.name) private readonly productModel: Model<ProductModel>,
+    @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
   ) {}
 
   async resolveProduct(
@@ -31,13 +29,9 @@ export class ProductResolverProvider implements ProductResolverPort {
   async getCostPrices(productIds: string[]): Promise<Map<string, number>> {
     const map = new Map<string, number>();
     if (!productIds.length) return map;
-    const products = await this.productModel
-      .find({ _id: { $in: productIds } } as any)
-      .select('_id costPrice')
-      .lean()
-      .exec();
-    for (const p of products) {
-      map.set(String((p as any)._id), Number((p as any).costPrice ?? 0));
+    // Cost now lives on the stock lot — read weighted-average lot cost via the port.
+    for (const id of productIds) {
+      map.set(id, await this.stockQuery.getProductCost(id));
     }
     return map;
   }
