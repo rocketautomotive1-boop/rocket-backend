@@ -70,7 +70,7 @@ import { MarketplaceModel, MarketplaceSchema } from './schemas/marketplace.schem
 import { IgnoredOrderModel, IgnoredOrderSchema } from './schemas/ignored-order.schema';
 import { MarketplaceCategoryModel, MarketplaceCategorySchema } from './schemas/marketplace-category.schema';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
-import { StockMovementModel, StockMovementSchema } from '../product/schemas/stock-movement.schema';
+import { StockMovementModel, StockMovementSchema } from '../stock/schemas/stock-movement.schema';
 import { MarketplaceRegistryModule } from './marketplace-registry.module';
 import { MarketplaceAuthModule } from './auth/marketplace-auth.module';
 import { SearchModule } from '../search/search.module';

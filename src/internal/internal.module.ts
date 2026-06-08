@@ -10,7 +10,7 @@ import { MarketplaceModule } from '../marketplace/marketplace.module';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
 import { ListingModel, ListingSchema } from '../listing/schemas/listing.schema';
 import { MarketplaceModel, MarketplaceSchema } from '../marketplace/schemas/marketplace.schema';
-import { StockMovementModel, StockMovementSchema } from '../product/schemas/stock-movement.schema';
+import { StockMovementModel, StockMovementSchema } from '../stock/schemas/stock-movement.schema';
 
 @Module({
     imports: [

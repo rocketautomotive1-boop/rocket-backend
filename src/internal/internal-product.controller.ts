@@ -5,7 +5,7 @@ import { InternalKeyGuard } from './internal-key.guard';
 import { ProductModel } from '../product/schemas/product.schema';
 import { ListingModel } from '../listing/schemas/listing.schema';
 import { MarketplaceModel } from '../marketplace/schemas/marketplace.schema';
-import { StockMovementModel } from '../product/schemas/stock-movement.schema';
+import { StockMovementModel } from '../stock/schemas/stock-movement.schema';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 
 @UseGuards(InternalKeyGuard)
