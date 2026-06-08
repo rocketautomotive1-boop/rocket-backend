@@ -230,18 +230,8 @@ export class ProductService {
     // 1. Calculate Trusted Stock from stock_movements aggregation (source of truth)
     const available_quantity = await this.getProductStock(productDoc.id || productDoc._id);
 
-    // 2. Fetch Latest Price/Cost from Movements if needed
-    // Use costPrice from document if available
-    let costPrice = Number(productDoc.costPrice);
-    let lastMovement = null;
-
-    if (!costPrice || costPrice === 0) {
-      lastMovement = await this.productRepository.findLatestMovementWithPrice(productDoc.id || productDoc._id);
-      // costPrice é a fonte do custo; `price` é fallback legado (lotes antigos
-      // gravavam o custo nesse campo antes da separação custo/venda).
-      const lastCost = (lastMovement as any)?.costPrice ?? lastMovement?.price;
-      costPrice = lastCost ? Number(lastCost) : 0;
-    }
+    // 2. Cost = weighted-average lot cost (single source of truth = StockModule).
+    const costPrice = await this.stockQuery.getProductCost(String(productDoc.id || productDoc._id));
 
     // 3. Normalize Attributes
     // Transform legacy/mongo attributes into a standard array if needed, though adapters usually handle this.
@@ -331,7 +321,7 @@ export class ProductService {
       stock: available_quantity,    // Standard alias
       available_quantity,           // Standard alias
       marketplaceDescription,       // Expose generated description
-      productMovements: lastMovement ? [lastMovement] : [], // Only need latest for price reference? Or maybe none? 
+      productMovements: [], // cost/stock now come from StockModule; adapters must not read movements here
       // Adapters shouldn't calc stock from this anymore.
       productImages: productDoc.images || [],
       // [REF] Fetch titles from service
@@ -493,7 +483,7 @@ export class ProductService {
           origin: data.origin
         },
         price: data.price ? Types.Decimal128.fromString(data.price.toString()) : Types.Decimal128.fromString('0'),
-        costPrice: data.costPrice ? Types.Decimal128.fromString(data.costPrice.toString()) : undefined,
+        // cost is no longer stored on the product — it lives on the stock lot (enters via inbound)
         weight: data.weight ? Types.Decimal128.fromString(data.weight.toString()) : undefined,
         dimensions: data.dimensions ? {
           length: Types.Decimal128.fromString(data.dimensions.length?.toString() || '0'),
@@ -640,7 +630,7 @@ export class ProductService {
       if (data.applicationSummary) product.applicationSummary = data.applicationSummary;
 
       if (data.price !== undefined) product.price = Types.Decimal128.fromString(data.price.toString());
-      if (data.costPrice !== undefined) product.costPrice = Types.Decimal128.fromString(data.costPrice.toString());
+      // cost is owned by the stock lot (enters via inbound) — not persisted on the product
       if (data.weight !== undefined) product.weight = Types.Decimal128.fromString(data.weight.toString());
 
       if (data.dimensions) {

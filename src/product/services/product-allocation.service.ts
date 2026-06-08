@@ -269,9 +269,12 @@ export class ProductAllocationService {
           const pid = String(p._id);
           const quantity = Math.max((await this.stockQuery.getProductStock(pid)).onHand, 1);
 
+          const lotCost = await this.stockQuery.getProductCost(pid);
           const movPrices = movementPriceMap.get(pid);
-          let price = movPrices?.price || movPrices?.costPrice || toNumber(p.price) || toNumber(p.costPrice) || toNumber(p.listPrice);
-          let costPrice = movPrices?.costPrice || toNumber(p.costPrice);
+          // Sale price: product.price (or listPrice display). Cost is NEVER used as price.
+          let price = toNumber(p.price) || toNumber(p.listPrice) || 0;
+          // Cost: weighted lot cost from StockModule (movement snapshot as legacy fallback).
+          let costPrice = lotCost || movPrices?.costPrice || 0;
 
           totalItems += quantity;
           totalValue += price * quantity;
