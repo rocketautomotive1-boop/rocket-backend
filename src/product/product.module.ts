@@ -71,14 +71,12 @@ import { ProductConditionController } from './controllers/product-condition.cont
 import { ProductMovementController } from './controllers/product-movement.controller';
 import { WarehouseController } from './controllers/warehouse.controller';
 import { BoxController } from './controllers/box.controller';
-import { MovementController } from './controllers/movement.controller';
 
 // Novos services
 import { ProductConditionService } from './services/product-condition.service';
 import { ProductMovementService } from './services/product-movement.service';
 import { WarehouseService } from './services/warehouse.service';
 import { BoxService } from './services/box.service';
-import { MovementService } from './services/movement.service';
 import { BoxItemService } from './services/box-item.service';
 import { BoxItemController } from './controllers/box-item.controller';
 import { ProductPublicationLogService } from './services/product-publication-log.service';
@@ -174,8 +172,7 @@ import { StockModule } from '../stock/stock.module';
     ProductMovementController,
     WarehouseController,
     BoxController,
-    BoxItemController,
-    MovementController,
+    BoxItemController,
     ProductPublicationLogController,
     MigrationController,
     CrossReferenceController
@@ -198,8 +195,7 @@ import { StockModule } from '../stock/stock.module';
     ProductMovementService,
     WarehouseService,
     BoxService,
-    BoxItemService,
-    MovementService,
+    BoxItemService,
     ProductPublicationLogService,
     ProductSyncService,
     OrderEventsListener, // Event listener for order sync
@@ -234,8 +230,7 @@ import { StockModule } from '../stock/stock.module';
     ProductMovementService,
     WarehouseService,
     BoxService,
-    BoxItemService,
-    MovementService,
+    BoxItemService,
     ProductPublicationLogService,
     ProductSyncService,
     MigrationService,
