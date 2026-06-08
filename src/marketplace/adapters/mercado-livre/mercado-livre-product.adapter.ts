@@ -591,7 +591,7 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
 
   private buildMercadoLivreCreateData(title: any, product: any): any {
     const availableQty = Number(product.quantity ?? 0);
-    const finalPrice = this.validateAndConvertPrice(product.price || (product as any).costPrice || 0);
+    const finalPrice = this.validateAndConvertPrice(product.price || 0); // never publish at cost
 
     return {
       title: title.title,
@@ -610,7 +610,7 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
 
   private buildMercadoLivreUpdateData(title: any, product: any): any {
     const availableQty = Number(product.quantity ?? 0);
-    const finalPrice = this.validateAndConvertPrice(product.price || (product as any).costPrice || 0);
+    const finalPrice = this.validateAndConvertPrice(product.price || 0); // never publish at cost
     const finalTitle = title.title || product.name;
 
     const updateData = {

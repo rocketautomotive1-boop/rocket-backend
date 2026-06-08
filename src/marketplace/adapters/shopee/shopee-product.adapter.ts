@@ -860,8 +860,8 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
       missingRequirements.push('Imagens do produto (mínimo 1)');
     }
 
-    // Validar preço
-    const priceVal = product.price || product.costPrice;
+    // Validar preço (custo NUNCA é usado como preço de venda)
+    const priceVal = product.price;
     if (!priceVal || Number(priceVal) <= 0) {
       missingRequirements.push('Preço do produto (maior que 0)');
     }
@@ -912,7 +912,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
     // 4. Final Default
     if (!categoryId) categoryId = 102284; // Outros cadastros
 
-    const priceVal = product.price || product.costPrice || product.inventory?.[0]?.priceSale;
+    const priceVal = product.price || product.inventory?.[0]?.priceSale; // never publish at cost
     const price = this.validateAndConvertPrice(priceVal);
     const originalPrice = price;
     const stock = Number(product.quantity ?? 0);

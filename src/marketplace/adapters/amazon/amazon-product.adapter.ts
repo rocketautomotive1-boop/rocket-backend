@@ -198,7 +198,7 @@ export class AmazonProductAdapter implements IMarketplaceProductAdapter {
       finalTitle = amazonTitle || product.name;
     }
 
-    const finalPrice = Number(product.price) || Number(product.costPrice) || 0;
+    const finalPrice = Number(product.price) || 0; // never publish at cost
 
     const customBrand = product.brand?.amazonName?.trim();
     let brandValue = 'Generic';
