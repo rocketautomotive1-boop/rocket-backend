@@ -58,6 +58,15 @@ export class StockQueryService implements StockQueryPort {
     return rows.map((r) => String(r._id));
   }
 
+  async getProductIdsWithMaxStock(max: number): Promise<string[]> {
+    const rows = await this.repo.balanceModel.aggregate([
+      { $group: { _id: '$productId', onHand: { $sum: '$onHand' } } },
+      { $match: { onHand: { $lte: max } } },
+      { $project: { _id: 1 } },
+    ]);
+    return rows.map((r) => String(r._id));
+  }
+
   async getProductCost(productId: string): Promise<number> {
     // Weighted-average cost across the product's lots, weighted by on-hand quantity.
     const rows = await this.repo.balanceModel.aggregate([

@@ -351,8 +351,8 @@ export class ProductFilterService {
   }
 
   async findLowStockProducts(threshold: number): Promise<ProductModel[]> {
-    const lowStockIds = await this.productRepository.getProductIdsWithMaxStock(threshold);
-    return this.productModel.find({ _id: { $in: lowStockIds.map(id => id.toString()) } as any }).lean().exec();
+    const lowStockIds = await this.stockQuery.getProductIdsWithMaxStock(threshold);
+    return this.productModel.find({ _id: { $in: lowStockIds } as any }).lean().exec();
   }
 
   async findProductsWithoutImages(): Promise<ProductModel[]> {
@@ -362,7 +362,7 @@ export class ProductFilterService {
   async getProductStats(): Promise<any> {
     const total = await this.productModel.countDocuments();
     const active = await this.productModel.countDocuments({ active: true });
-    const lowStockIds = await this.productRepository.getProductIdsWithMaxStock(5);
+    const lowStockIds = await this.stockQuery.getProductIdsWithMaxStock(5);
     const lowStock = lowStockIds.length;
     const noImages = await this.productModel.countDocuments({ images: { $size: 0 } });
     return { total, active, lowStock, noImages };

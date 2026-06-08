@@ -2,14 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel, InjectConnection } from '@nestjs/mongoose';
 import { Model, Types, Connection, ClientSession } from 'mongoose';
 import { ProductModel, ProductDocument } from './schemas/product.schema';
-import { StockMovementModel, StockMovementDocument } from './schemas/stock-movement.schema';
 import { ProductCompatibilityModel, ProductCompatibilityDocument } from './schemas/product-compatibility.schema';
 
 @Injectable()
 export class ProductRepository {
     constructor(
         @InjectModel(ProductModel.name) private productModel: Model<ProductDocument>,
-        @InjectModel(StockMovementModel.name) private stockMovementModel: Model<StockMovementDocument>,
         @InjectModel(ProductCompatibilityModel.name) private productCompatibilityModel: Model<ProductCompatibilityDocument>,
         @InjectConnection() private readonly connection: Connection,
     ) { }
@@ -167,207 +165,12 @@ export class ProductRepository {
         return this.productModel.countDocuments(query).exec();
     }
 
-    // Stock Movement Methods
-    async updateStockReserved(productId: string | Types.ObjectId, quantity: number, session?: ClientSession): Promise<void> {
-        const id = (typeof productId === 'string' && Types.ObjectId.isValid(productId)) ? new Types.ObjectId(productId) : productId;
-        await this.productModel.updateOne({ _id: id as any }, { $inc: { stockReserved: quantity } }, { session }).exec();
-    }
-
-    async updatePrice(productId: string | Types.ObjectId, price: number, session?: ClientSession): Promise<void> {
-        const id = (typeof productId === 'string' && Types.ObjectId.isValid(productId)) ? new Types.ObjectId(productId) : productId;
-        await this.productModel.updateOne(
-            { _id: id as any },
-            { $set: { price: Types.Decimal128.fromString(price.toString()) } },
-            { session }
-        ).exec();
-    }
-
-    async calculateStock(productId: string, session?: ClientSession): Promise<number> {
-        const id = new Types.ObjectId(productId);
-        const aggregation = this.stockMovementModel.aggregate([
-            { $match: { productId: id } },
-            {
-                $group: {
-                    _id: '$productId',
-                    total: {
-                        $sum: {
-                            $switch: {
-                                branches: [
-                                    { case: { $in: ['$type', ['inbound', 'purchase_return']] }, then: '$quantity' },
-                                    { case: { $in: ['$type', ['outbound', 'sale', 'transfer']] }, then: { $multiply: ['$quantity', -1] } },
-                                    { case: { $eq: ['$type', 'adjustment'] }, then: '$quantity' }
-                                ],
-                                default: 0
-                            }
-                        }
-                    }
-                }
-            }
-        ]);
-
-        if (session) {
-            aggregation.session(session);
-        }
-
-        const stats = await aggregation.exec();
-        return stats.length > 0 ? stats[0].total : 0;
-    }
-
-    async getProductIdsWithMinStock(minStock: number): Promise<Types.ObjectId[]> {
-        const results = await this.stockMovementModel.aggregate([
-            {
-                $group: {
-                    _id: '$productId',
-                    total: {
-                        $sum: {
-                            $switch: {
-                                branches: [
-                                    { case: { $in: ['$type', ['inbound', 'purchase_return']] }, then: '$quantity' },
-                                    { case: { $in: ['$type', ['outbound', 'sale', 'transfer']] }, then: { $multiply: ['$quantity', -1] } },
-                                    { case: { $eq: ['$type', 'adjustment'] }, then: '$quantity' }
-                                ],
-                                default: 0
-                            }
-                        }
-                    }
-                }
-            },
-            { $match: { total: { $gte: minStock } } },
-            { $project: { _id: 1 } }
-        ]);
-        return results.map(r => r._id);
-    }
-
-    async getProductIdsWithMaxStock(maxStock: number): Promise<Types.ObjectId[]> {
-        const results = await this.stockMovementModel.aggregate([
-            {
-                $group: {
-                    _id: '$productId',
-                    total: {
-                        $sum: {
-                            $switch: {
-                                branches: [
-                                    { case: { $in: ['$type', ['inbound', 'purchase_return']] }, then: '$quantity' },
-                                    { case: { $in: ['$type', ['outbound', 'sale', 'transfer']] }, then: { $multiply: ['$quantity', -1] } },
-                                    { case: { $eq: ['$type', 'adjustment'] }, then: '$quantity' }
-                                ],
-                                default: 0
-                            }
-                        }
-                    }
-                }
-            },
-            { $match: { total: { $lte: maxStock } } },
-            { $project: { _id: 1 } }
-        ]);
-        return results.map(r => r._id);
-    }
-
-    /**
-     * @deprecated NÃO sincroniza mais o preço de venda a partir de movimentos.
-     * O valor em `movement.price`/`costPrice` é o CUSTO do lote, não a venda —
-     * sincronizá-lo ao produto contaminava o preço publicado no marketplace.
-     * O preço de venda é definido explicitamente (updatePrice/PUT). Mantida
-     * inerte (retorna o preço de venda atual) para não quebrar callers legados.
-     */
-    async syncPriceFromMovements(productId: string, _session?: ClientSession): Promise<number> {
-        const current = await this.productModel
-            .findById(productId)
-            .select('price')
-            .lean()
-            .exec();
-        return current?.price != null ? Number(current.price.toString()) : 0;
-    }
-
-    async findLatestMovementWithPrice(productId: string): Promise<StockMovementDocument | null> {
-        const id = new Types.ObjectId(productId);
-        return (this.stockMovementModel as any).findOne(
-            { productId: id, price: { $ne: null } }
-        ).sort({ date: -1 }).exec();
-    }
-
-    async findMovements(query: any, limit: number = 0): Promise<StockMovementDocument[]> {
-        const mongoQuery: any = { ...query };
-        // Map legacy 'product' query to 'productId'
-        if (mongoQuery.product) {
-            mongoQuery.productId = typeof mongoQuery.product === 'string' && Types.ObjectId.isValid(mongoQuery.product)
-                ? new Types.ObjectId(mongoQuery.product) : mongoQuery.product;
-            delete mongoQuery.product;
-        }
-        // Map 'reference' to 'metadata.externalReference'
-        if (mongoQuery.reference) {
-            mongoQuery['metadata.externalReference'] = mongoQuery.reference;
-            delete mongoQuery.reference;
-        }
-
-        const q = this.stockMovementModel.find(mongoQuery).populate('productId', 'name partNumber').sort({ date: -1 });
-        if (limit > 0) q.limit(limit);
-        return q.exec();
-    }
-
-    async findMovementById(id: string): Promise<StockMovementDocument | null> {
-        return this.stockMovementModel.findById(id).populate('productId', 'name partNumber').exec();
-    }
-
-    /** Última entrada de estoque (lean — inclui campos legados `conditionId` no documento Mongo). */
-    async findLatestInboundMovement(productId: Types.ObjectId): Promise<Record<string, any> | null> {
-        return this.stockMovementModel
-            .findOne({ productId: productId as any, type: 'inbound' })
-            .sort({ date: -1 })
-            .lean()
-            .exec() as Promise<Record<string, any> | null>;
-    }
-
-    async createMovement(data: any, session?: ClientSession): Promise<StockMovementDocument> {
-        const movementData = { ...data };
-        if (movementData.product) {
-            movementData.productId = movementData.product;
-            delete movementData.product;
-        }
-        if (typeof movementData.productId === 'string' && Types.ObjectId.isValid(movementData.productId)) {
-            movementData.productId = new Types.ObjectId(movementData.productId);
-        }
-        const movement = new this.stockMovementModel(movementData);
-        return movement.save({ session });
-    }
-
-    async updateMovement(id: string, query: any, data: any): Promise<StockMovementDocument | null> {
-        const mongoQuery: any = { ...query };
-        if (mongoQuery.product) {
-            mongoQuery.productId = mongoQuery.product;
-            delete mongoQuery.product;
-        }
-        return this.stockMovementModel.findOneAndUpdate(
-            { _id: id, ...mongoQuery },
-            { $set: data },
-            { new: true }
-        ).exec();
-    }
-
-    async deleteMovement(id: string, session?: ClientSession): Promise<void> {
-        await this.stockMovementModel.deleteOne({ _id: id }, { session }).exec();
-    }
-
-    async aggregateMovements(pipeline: any[]): Promise<any[]> {
-        // Pipeline might explicitly use 'product' matching. Caller needs to check.
-        // But for safety, we assume caller (ProductMovementService) will handle pipeline field names 
-        // OR we can't easily auto-patch pipeline. 
-        return this.stockMovementModel.aggregate(pipeline).exec();
-    }
+    // Stock movement/cost/reserved methods removed — stock is owned by StockModule.
+    // Reads go through STOCK_QUERY_PORT; writes through StockService.
 
     async checkUniqueness(query: any): Promise<boolean> {
         const count = await this.productModel.countDocuments(query);
         return count === 0;
-    }
-
-    async existsMovementReference(reference: string): Promise<boolean> {
-        const count = await this.stockMovementModel.countDocuments({ 'metadata.externalReference': reference });
-        return count > 0;
-    }
-
-    async findMovementsByReferences(references: string[]): Promise<string[]> {
-        const movements = await this.stockMovementModel.find({ 'metadata.externalReference': { $in: references } }, { 'metadata.externalReference': 1 }).exec();
-        return movements.map(m => m.metadata?.externalReference).filter(Boolean);
     }
 
     // Compatibility Methods
@@ -399,24 +202,7 @@ export class ProductRepository {
         return this.productCompatibilityModel.findByIdAndUpdate(id, data, { new: true }).exec();
     }
 
-    async calculateTotalSold(productId: string): Promise<number> {
-        const id = new Types.ObjectId(productId);
-        const result = await this.stockMovementModel.aggregate([
-            {
-                $match: {
-                    productId: id,
-                    type: { $in: ['outbound', 'sale'] }
-                }
-            },
-            {
-                $group: {
-                    _id: null,
-                    total: { $sum: '$quantity' }
-                }
-            }
-        ]);
-        return result[0]?.total || 0;
-    }
+    // calculateTotalSold removed — derive from the stock ledger via StockQueryService if needed.
 
     async updateTotalSold(productId: string, quantity: number, session?: ClientSession): Promise<void> {
         const id = (typeof productId === 'string' && Types.ObjectId.isValid(productId)) ? new Types.ObjectId(productId) : productId;

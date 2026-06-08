@@ -7,7 +7,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { SearchModule } from '../search/search.module';
 
 import { ProductModel, ProductSchema } from './schemas/product.schema';
-import { StockMovementModel, StockMovementSchema } from './schemas/stock-movement.schema';
 import { ProductCompatibilityModel, ProductCompatibilitySchema } from './schemas/product-compatibility.schema';
 import { ProductUnitModel, ProductUnitSchema } from './schemas/product-unit.schema';
 import { ProductNCMModel, ProductNCMSchema } from './schemas/product-ncm.schema';
@@ -117,7 +116,6 @@ import { StockModule } from '../stock/stock.module';
     MongooseModule.forFeature([
       { name: ProductModel.name, schema: ProductSchema },
       { name: ReviewModel.name, schema: ReviewSchema },
-      { name: StockMovementModel.name, schema: StockMovementSchema },
       { name: ProductCompatibilityModel.name, schema: ProductCompatibilitySchema },
       { name: ProductUnitModel.name, schema: ProductUnitSchema },
       { name: ProductNCMModel.name, schema: ProductNCMSchema },
