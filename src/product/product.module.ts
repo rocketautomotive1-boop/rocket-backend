@@ -108,6 +108,7 @@ import { ProductResolverProvider } from './ports/product-resolver.provider';
 import { PRODUCT_RESOLVER_PORT } from '../order/ports/product-resolver.port';
 // STOCK_LEDGER_PORT is now owned by StockModule (single stock owner).
 import { StockModule } from '../stock/stock.module';
+import { PricingModule } from '../pricing/pricing.module';
 
 
 @Module({
@@ -147,6 +148,7 @@ import { StockModule } from '../stock/stock.module';
     AiModule,
     ListingModule,
     StockModule,
+    PricingModule,
     UserProductivityModule,
     forwardRef(() => MarketplaceOrchestratorModule),
   ],
@@ -233,9 +235,10 @@ import { StockModule } from '../stock/stock.module';
     CatalogMigrationService,
     ProductMatcherService,
     ProductDiscoveryService,
-    // Re-export StockModule so consumers of ProductModule can inject STOCK_QUERY_PORT
-    // without each importing StockModule directly.
+    // Re-export Stock/Pricing so consumers of ProductModule can inject their ports
+    // without each importing those modules directly.
     StockModule,
+    PricingModule,
     // Tokens consumed by OrderModule
     PRODUCT_RESOLVER_PORT,
   ],

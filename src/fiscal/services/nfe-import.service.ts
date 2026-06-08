@@ -8,6 +8,7 @@ import { ProductModel } from '../../product/schemas/product.schema';
 import { BrandModel } from '../../product/schemas/brand.schema';
 import { StockService } from '../../stock/stock.service';
 import { StockMovementType } from '../../stock/domain/movement-type';
+import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 import { ProductService } from '../../product/product.service';
 import { ProductDraftsService } from '../../ai/product-drafts.service';
 import { FinancialService } from '../../financial/services/financial.service';
@@ -24,6 +25,7 @@ export class NfeImportService {
         @InjectModel(ProductModel.name) private productModel: Model<ProductModel>,
         @InjectModel(BrandModel.name) private brandModel: Model<BrandModel>,
         private readonly stockService: StockService,
+        @Inject(PRICING_PORT) private readonly pricing: PricingPort,
         @Inject(forwardRef(() => ProductService))
         private readonly productService: ProductService,
         private readonly productDraftsService: ProductDraftsService,
@@ -597,22 +599,20 @@ export class NfeImportService {
                 code: xmlItem.unit,
                 name: xmlItem.unit
             },
-            // cost lives on the stock lot (set via inbound), not on the product
-            price: Types.Decimal128.fromString(((xmlItem.valueUnit || 0) * 1.5).toString()),
+            // cost lives on the stock lot (inbound); sale price lives in PricingModule (set below)
             active: true,
             schemaVersion: 1,
             images: [],
             titles: [],
             attributes: [],
             allocations: [],
-            pricing: {
-                markup: 1.5,
-                profitMargin: 0.33,
-                autoUpdate: false,
-                strategy: 'MANUAL'
-            }
         });
 
-        return await newProduct.save();
+        const saved = await newProduct.save();
+        // Provisional sale price (custo * 1.5) → PricingModule base price + markup metadata.
+        const provisional = (xmlItem.valueUnit || 0) * 1.5;
+        await this.pricing.setBasePrice(String(saved._id), provisional);
+        await this.pricing.setPricingMeta(String(saved._id), { markup: 1.5, profitMargin: 0.33, strategy: 'MANUAL' });
+        return saved;
     }
 }

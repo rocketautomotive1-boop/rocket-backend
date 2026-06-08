@@ -16,6 +16,7 @@ import { ProductRepository } from './product.repository';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
 import { StockService } from '../stock/stock.service';
 import { resolveMovementCondition, resolveMovementType } from '../stock/domain/movement-type';
+import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 import { MarketplaceDocument } from '../marketplace/schemas/marketplace.schema';
 import { SearchService } from '../search/search.service';
@@ -62,6 +63,7 @@ export class ProductService {
   constructor(
     private readonly productRepository: ProductRepository,
     @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+    @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     private readonly queueService: QueueService,
     private readonly productCompatibilityService: ProductCompatibilityService,
     private readonly productFilterService: ProductFilterService,
@@ -535,6 +537,20 @@ export class ProductService {
       };
 
       const savedProduct = await this.productRepository.create(newProductData);
+
+      // Sale price is owned by PricingModule (base price). Set it via the port on create.
+      if (data.price !== undefined && data.price !== null) {
+        await this.pricing.setBasePrice(String((savedProduct as any).id ?? (savedProduct as any)._id), Number(data.price));
+      }
+      if (data.listPrice !== undefined || data.pricing) {
+        await this.pricing.setPricingMeta(String((savedProduct as any).id ?? (savedProduct as any)._id), {
+          listPrice: data.listPrice !== undefined ? Number(data.listPrice) : undefined,
+          markup: data.pricing?.markup,
+          profitMargin: data.pricing?.profitMargin,
+          strategy: data.pricing?.strategy,
+        });
+      }
+
       const newProductClean = await this.productRepository.findByIdClean((savedProduct as any).id);
 
       // Update Category Counts
@@ -630,7 +646,16 @@ export class ProductService {
       if (data.oemCodes) product.oemCodes = data.oemCodes;
       if (data.applicationSummary) product.applicationSummary = data.applicationSummary;
 
-      if (data.price !== undefined) product.price = Types.Decimal128.fromString(data.price.toString());
+      // Sale price is owned by PricingModule — route to the port (not the product doc).
+      if (data.price !== undefined) await this.pricing.setBasePrice(String(product._id), Number(data.price));
+      if (data.listPrice !== undefined || data.pricing) {
+        await this.pricing.setPricingMeta(String(product._id), {
+          listPrice: data.listPrice !== undefined ? Number(data.listPrice) : undefined,
+          markup: data.pricing?.markup,
+          profitMargin: data.pricing?.profitMargin,
+          strategy: data.pricing?.strategy,
+        });
+      }
       // cost is owned by the stock lot (enters via inbound) — not persisted on the product
       if (data.weight !== undefined) product.weight = Types.Decimal128.fromString(data.weight.toString());
 
