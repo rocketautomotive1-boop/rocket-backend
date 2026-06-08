@@ -116,10 +116,10 @@ describe('GeneralProductRepository (unified ProductModel, domain:general)', () =
     expect(found?.name).toBe('Nescau Real'); // $setOnInsert only
   });
 
-  it('updateByBarcode stores money fields and sanitizes Decimal128 to string on read', async () => {
-    await repo.updateByBarcode('7891000100103', { price: 12.9, costPrice: 8 } as any);
+  it('updateByBarcode stores the sale price and sanitizes Decimal128 to string on read', async () => {
+    await repo.updateByBarcode('7891000100103', { price: 12.9 } as any);
     const found = await repo.findByBarcode('7891000100103');
     expect(Number(found?.price)).toBeCloseTo(12.9, 2);
-    expect(Number(found?.costPrice)).toBeCloseTo(8, 2);
+    // cost is no longer a product field — it lives on the stock lot (StockModule).
   });
 });

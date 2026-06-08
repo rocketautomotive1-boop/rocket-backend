@@ -167,15 +167,11 @@ export class ProductModel {
 
     @Prop({ type: Types.Decimal128 })
     @Transform(({ value }) => value?.toString())
-    price: Types.Decimal128;
+    price: Types.Decimal128; // SALE price (catalog). Cost lives on StockLot.
 
     @Prop({ type: Types.Decimal128 })
     @Transform(({ value }) => value?.toString())
-    costPrice: Types.Decimal128;
-
-    @Prop({ type: Types.Decimal128 })
-    @Transform(({ value }) => value?.toString())
-    listPrice: Types.Decimal128; // Original Price / De-Preco
+    listPrice: Types.Decimal128; // Original Price / De-Preco (sale display)
 
     @Prop({ type: Object })
     pricing: {
@@ -279,8 +275,7 @@ export class ProductModel {
     @Prop({ default: true, index: true })
     active: boolean;
 
-    @Prop({ default: 0 })
-    stockReserved: number; // Items reserved in orders not yet shipped
+    // stockReserved removed — reservations live in StockBalance.reserved (StockModule).
 
     @Prop({ type: Types.ObjectId, ref: 'CrossReferenceGroupModel' })
     crossReferenceGroupId: Types.ObjectId;
