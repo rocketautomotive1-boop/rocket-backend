@@ -1,12 +1,13 @@
-import { Controller, Get, Param, Patch, Body, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Param, Patch, Body, UseGuards, Query, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { InternalKeyGuard } from './internal-key.guard';
 import { ProductModel } from '../product/schemas/product.schema';
 import { ListingModel } from '../listing/schemas/listing.schema';
 import { MarketplaceModel } from '../marketplace/schemas/marketplace.schema';
-import { StockMovementModel } from '../stock/schemas/stock-movement.schema';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
+import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 
 @UseGuards(InternalKeyGuard)
 @Controller('internal/products')
@@ -15,12 +16,13 @@ export class InternalProductController {
         @InjectModel(ProductModel.name) private readonly productModel: Model<ProductModel>,
         @InjectModel(ListingModel.name) private readonly listingModel: Model<ListingModel>,
         @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceModel>,
-        @InjectModel(StockMovementModel.name) private readonly stockMovementModel: Model<StockMovementModel>,
         private readonly descriptionService: MarketplaceDescriptionService,
+        @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+        @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     ) {}
 
     @Get(':id')
-    async getProduct(@Param('id') id: string) {
+    async getProduct(@Param('id') id: string, @Query('marketplaceId') marketplaceId?: string) {
         const doc = await this.productModel
             .findById(id)
             .populate('category', '_id name mlCategoryId marketplaceMappings')
@@ -34,33 +36,19 @@ export class InternalProductController {
         // (externalId) mas não o mlCategoryId, e o orchestrator só lê mlCategoryId.
         await this.fillMlCategoryId(normalized.category);
 
-        // Compute stock from stock_movements — product schema has no stockQuantity field.
-        // Preço de VENDA vem só do produto (product.price); movimentos guardam o
-        // CUSTO do lote (costPrice), que NUNCA deve ser usado como preço de venda.
-        const [stockResult] = await Promise.all([
-            this.stockMovementModel.aggregate([
-                { $match: { productId: new Types.ObjectId(id) } },
-                {
-                    $group: {
-                        _id: null,
-                        total: {
-                            $sum: {
-                                $switch: {
-                                    branches: [
-                                        { case: { $in: ['$type', ['inbound', 'purchase_return']] }, then: '$quantity' },
-                                        { case: { $in: ['$type', ['outbound', 'sale', 'transfer']] }, then: { $multiply: ['$quantity', -1] } },
-                                        { case: { $eq: ['$type', 'adjustment'] }, then: '$quantity' },
-                                    ],
-                                    default: 0,
-                                },
-                            },
-                        },
-                    },
-                },
-            ]).exec(),
+        // Stock comes from StockModule (single source of truth). Sale price comes from
+        // PricingModule: effectivePrice = per-marketplace override > basePrice (null → no price).
+        const [stock, basePrice, effectivePrice] = await Promise.all([
+            this.stockQuery.getProductStock(id),
+            this.pricing.getBasePrice(id),
+            this.pricing.getEffectivePrice(id, marketplaceId),
         ]);
 
-        normalized.stockQuantity = stockResult[0]?.total ?? 0;
+        normalized.stockQuantity = stock.onHand;
+        normalized.basePrice = basePrice;
+        normalized.effectivePrice = effectivePrice;
+        // Legacy mirror so any un-migrated reader keeps working during the transition.
+        normalized.price = effectivePrice ?? basePrice ?? 0;
 
         return normalized;
     }
