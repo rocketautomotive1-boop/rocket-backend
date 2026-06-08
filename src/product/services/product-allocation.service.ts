@@ -5,6 +5,7 @@ import { AllocationModel, AllocationDocument } from '../schemas/allocation.schem
 import { ProductModel, ProductDocument } from '../schemas/product.schema';
 import { ProductRepository } from '../product.repository';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
+import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 import { CreateProductAllocationDto } from '../dto/create-product-allocation.dto';
 import { UpdateProductAllocationDto } from '../dto/update-product-allocation.dto';
 
@@ -25,6 +26,7 @@ export class ProductAllocationService {
     @InjectModel(ProductModel.name) private productModel: Model<ProductDocument>,
     private readonly productRepository: ProductRepository,
     @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+    @Inject(PRICING_PORT) private readonly pricing: PricingPort,
   ) { }
 
   private escapeRegex(str: string): string {
@@ -245,8 +247,8 @@ export class ProductAllocationService {
           const quantity = Math.max((await this.stockQuery.getProductStock(pid)).onHand, 1);
 
           const lotCost = await this.stockQuery.getProductCost(pid);
-          // Sale price: product.price (or listPrice display). Cost is NEVER used as price.
-          let price = toNumber(p.price) || toNumber(p.listPrice) || 0;
+          // Sale price from PricingModule (base price). Cost is NEVER used as price.
+          let price = await this.pricing.getBasePrice(pid);
           // Cost: weighted lot cost from StockModule (single source of truth).
           let costPrice = lotCost || 0;
 

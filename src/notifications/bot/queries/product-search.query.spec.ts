@@ -15,12 +15,17 @@ describe('ProductSearchQuery', () => {
     getProductStock: jest.fn().mockResolvedValue({ onHand: 3, reserved: 0, available: 3, productId: 'p1' }),
   };
 
+  const pricing = {
+    getBasePrice: jest.fn().mockResolvedValue(199.9),
+  };
+
   let query: ProductSearchQuery;
 
   beforeEach(() => {
     jest.clearAllMocks();
     stockQuery.getProductStock.mockResolvedValue({ onHand: 3, reserved: 0, available: 3, productId: 'p1' });
-    query = new ProductSearchQuery(productModel as any, stockMovementModel as any, stockQuery as any);
+    pricing.getBasePrice.mockResolvedValue(199.9);
+    query = new ProductSearchQuery(productModel as any, stockMovementModel as any, stockQuery as any, pricing as any);
   });
 
   it('retorna produto com estoque quando encontra por match exato', async () => {

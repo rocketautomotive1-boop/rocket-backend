@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { ProductModel } from '../../../product/schemas/product.schema';
 import { StockMovementModel } from '../../../stock/schemas/stock-movement.schema';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../../../stock/ports/stock-query.port';
+import { PRICING_PORT, PricingPort } from '../../../pricing/ports/pricing.port';
 
 interface ProductListRow {
   _id: Types.ObjectId | string;
@@ -22,6 +23,7 @@ export class ProductSearchQuery {
     @InjectModel('ProductModel') private readonly productModel: Model<ProductModel>,
     @InjectModel(StockMovementModel.name) private readonly stockMovementModel: Model<StockMovementModel>,
     @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+    @Inject(PRICING_PORT) private readonly pricing: PricingPort,
   ) {}
 
   async execute(searchTerm: string): Promise<string> {
@@ -43,7 +45,7 @@ export class ProductSearchQuery {
       for (const product of products) {
         const stock = (await this.stockQuery.getProductStock(String((product as any)._id))).onHand;
         const lastMovement = await this.getLastMovement(String((product as any)._id));
-        const price = this.formatPrice(product.price);
+        const price = this.formatPrice(await this.pricing.getBasePrice(String((product as any)._id)));
         const status = product.active === false ? 'inativo' : 'ativo';
 
         lines.push(

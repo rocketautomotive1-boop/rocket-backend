@@ -169,7 +169,7 @@ export class ProductService {
     const category = !!product.category;
 
     const stockQty = (await this.stockQuery.getProductStock(id)).onHand;
-    const priceRaw = product.price ? Number(product.price) : 0;
+    const priceRaw = await this.pricing.getBasePrice(id);
     const inventory = stockQty > 0 && priceRaw > 0;
 
     // Títulos por marketplace são EXIGIDOS para general também (mesmo fluxo de
@@ -235,6 +235,13 @@ export class ProductService {
 
     // 2. Cost = weighted-average lot cost (single source of truth = StockModule).
     const costPrice = await this.stockQuery.getProductCost(String(productDoc.id || productDoc._id));
+
+    // 2b. Sale price = PricingModule (single source of truth). Per-marketplace override
+    // when a marketplace is provided, otherwise the base price. NEVER cost.
+    const salePrice = await this.pricing.getEffectivePrice(
+      String(productDoc.id || productDoc._id),
+      marketplace ? String(marketplace.id || marketplace._id) : undefined,
+    );
 
     // 3. Normalize Attributes
     // Transform legacy/mongo attributes into a standard array if needed, though adapters usually handle this.
@@ -318,7 +325,7 @@ export class ProductService {
     return {
       ...productDoc,
       _id: productDoc._id, // Ensure _id is accessible
-      price: productDoc.price ? Number(productDoc.price) : 0,
+      price: salePrice ?? 0,
       costPrice,
       quantity: available_quantity, // TRUSTED STOCK
       stock: available_quantity,    // Standard alias
