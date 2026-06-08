@@ -418,7 +418,7 @@ export class ProductService {
   }
 
   async existsMovementReference(reference: string): Promise<boolean> {
-    return this.productRepository.existsMovementReference(reference);
+    return this.stockQuery.referenceExists(reference);
   }
 
   async create(data: Partial<any>, userId?: string): Promise<ProductModel> {

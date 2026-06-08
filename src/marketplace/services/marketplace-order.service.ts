@@ -314,7 +314,7 @@ export class MarketplaceOrderService {
         for (const order of orders) {
             const orderId = String(order.id || '');
             // Order-level check for skipping already processed orders
-            const alreadySynced = await this.productRepository.existsMovementReference(orderId);
+            const alreadySynced = await this.productService.existsMovementReference(orderId);
             if (alreadySynced) {
                 results.push({ orderId, status: 'skipped', reason: 'already_synced' });
                 continue;

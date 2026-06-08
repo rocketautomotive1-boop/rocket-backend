@@ -140,7 +140,7 @@ export class OrderFulfillmentService {
         const skipped: string[] = [];
 
         const movementReference = String(order.externalId || order._id);
-        const existingMovement = await this.productRepository.existsMovementReference(movementReference);
+        const existingMovement = await this.stockQuery.referenceExists(movementReference);
         if (existingMovement) {
             this.logger.log(`Order ${order._id} picking already completed (reference: ${movementReference})`);
             return Result.ok({ stockUpdated: [], published: [], skipped: Object.keys(pickedItems) });

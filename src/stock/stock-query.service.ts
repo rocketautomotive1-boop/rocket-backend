@@ -111,4 +111,18 @@ export class StockQueryService implements StockQueryPort {
       .exec();
     return last ? { condition: (last as any).condition ?? 'new' } : null;
   }
+
+  async referenceExists(reference: string): Promise<boolean> {
+    const c = await this.repo.movementModel.countDocuments({ 'metadata.externalReference': reference });
+    return c > 0;
+  }
+
+  async findExistingReferences(references: string[]): Promise<string[]> {
+    if (!references.length) return [];
+    const rows = await this.repo.movementModel
+      .find({ 'metadata.externalReference': { $in: references } }, { 'metadata.externalReference': 1 })
+      .lean()
+      .exec();
+    return rows.map((m: any) => m.metadata?.externalReference).filter(Boolean);
+  }
 }

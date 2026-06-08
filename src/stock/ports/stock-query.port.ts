@@ -42,4 +42,8 @@ export interface StockQueryPort {
   getMovementStatistics(productId: string): Promise<Record<string, { count: number; quantity: number }>>;
   /** Latest movement snapshot (condition) used by listing publication. */
   getListingSnapshot(productId: string): Promise<{ condition: string } | null>;
+  /** True if any movement exists with the given idempotency reference. */
+  referenceExists(reference: string): Promise<boolean>;
+  /** Subset of the given references that already have at least one movement. */
+  findExistingReferences(references: string[]): Promise<string[]>;
 }

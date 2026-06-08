@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Body, Param, Query, NotFoundException, BadRequestException, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, NotFoundException, BadRequestException, HttpCode, Inject } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { ProductRepository } from '../product/product.repository';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
 import { OrderRepository } from './order.repository';
 import { OrderQueryService } from './query/order-query.service';
 import { OrderLifecycleService } from './lifecycle/order-lifecycle.service';
@@ -22,6 +23,7 @@ export class OrderController {
         private readonly productRepository: ProductRepository,
         private readonly metrics: OrderMetricsService,
         private readonly marketplaceOrderService: MarketplaceOrderService,
+        @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
     ) { }
 
     /**
@@ -100,8 +102,8 @@ export class OrderController {
     @Get('debug-stock/:externalId')
     async debugStock(@Param('externalId') externalId: string) {
         const trimmedId = externalId.trim();
-        const movements = await this.productRepository.findMovementsByReferences([trimmedId]);
-        const directFind = await this.productRepository.existsMovementReference(trimmedId);
+        const movements = await this.stockQuery.findExistingReferences([trimmedId]);
+        const directFind = await this.stockQuery.referenceExists(trimmedId);
         return {
             input: externalId,
             trimmed: trimmedId,

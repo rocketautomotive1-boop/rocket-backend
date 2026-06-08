@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OrderDocument } from '../schemas/order.schema';
 import { OrderRepository } from '../order.repository';
 import { ProductRepository } from '../../product/product.repository';
 import { MarketplaceRegistryService } from '../../marketplace/services/marketplace-registry.service';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
 import { Result } from '../../common/utils/result.util';
 
 /**
@@ -17,6 +18,7 @@ export class OrderQueryService {
         private readonly orderRepository: OrderRepository,
         private readonly productRepository: ProductRepository,
         private readonly marketplaceRegistry: MarketplaceRegistryService,
+        @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
     ) { }
 
     /** Find by Mongo _id or external id. */
@@ -58,7 +60,7 @@ export class OrderQueryService {
         if (pendingOrders.length > 0) {
             const externalIds = pendingOrders.map(o => (o.externalId || '').trim()).filter(id => !!id);
             if (externalIds.length > 0) {
-                const movements = await this.productRepository.findMovementsByReferences(externalIds);
+                const movements = await this.stockQuery.findExistingReferences(externalIds);
                 const movementSet = new Set(movements);
                 for (const order of pendingOrders) {
                     const extId = (order.externalId || '').trim();
