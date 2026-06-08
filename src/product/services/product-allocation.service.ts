@@ -3,7 +3,6 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AllocationModel, AllocationDocument } from '../schemas/allocation.schema';
 import { ProductModel, ProductDocument } from '../schemas/product.schema';
-import { StockMovementModel, StockMovementDocument } from '../schemas/stock-movement.schema';
 import { ProductRepository } from '../product.repository';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
 import { CreateProductAllocationDto } from '../dto/create-product-allocation.dto';
@@ -24,7 +23,6 @@ export class ProductAllocationService {
   constructor(
     @InjectModel(AllocationModel.name) private allocationModel: Model<AllocationDocument>,
     @InjectModel(ProductModel.name) private productModel: Model<ProductDocument>,
-    @InjectModel(StockMovementModel.name) private stockMovementModel: Model<StockMovementDocument>,
     private readonly productRepository: ProductRepository,
     @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
   ) { }
@@ -233,29 +231,6 @@ export class ProductAllocationService {
 
     const productMap = new Map(products.map(p => [String(p._id), p]));
 
-    // Always fetch latest movement price/costPrice for all products
-    const movementPriceMap = new Map<string, { price: number; costPrice: number }>();
-    if (uniqueIds.length > 0) {
-      const latestMovements = await this.stockMovementModel.aggregate([
-        { $match: { productId: { $in: uniqueIds.map(id => new Types.ObjectId(id)) } } },
-        { $sort: { date: -1 } },
-        {
-          $group: {
-            _id: '$productId',
-            price: { $first: '$price' },
-            costPrice: { $first: '$costPrice' },
-          },
-        },
-      ]).exec();
-
-      for (const m of latestMovements) {
-        movementPriceMap.set(String(m._id), {
-          price: toNumber(m.price),
-          costPrice: toNumber(m.costPrice),
-        });
-      }
-    }
-
     let totalItems = 0;
     let totalValue = 0;
 
@@ -270,11 +245,10 @@ export class ProductAllocationService {
           const quantity = Math.max((await this.stockQuery.getProductStock(pid)).onHand, 1);
 
           const lotCost = await this.stockQuery.getProductCost(pid);
-          const movPrices = movementPriceMap.get(pid);
           // Sale price: product.price (or listPrice display). Cost is NEVER used as price.
           let price = toNumber(p.price) || toNumber(p.listPrice) || 0;
-          // Cost: weighted lot cost from StockModule (movement snapshot as legacy fallback).
-          let costPrice = lotCost || movPrices?.costPrice || 0;
+          // Cost: weighted lot cost from StockModule (single source of truth).
+          let costPrice = lotCost || 0;
 
           totalItems += quantity;
           totalValue += price * quantity;
