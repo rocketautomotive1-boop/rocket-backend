@@ -36,6 +36,7 @@ import { OrderQueryService } from './query/order-query.service';
 import { OrderLifecycleService } from './lifecycle/order-lifecycle.service';
 import { OrderCancellationService } from './lifecycle/order-cancellation.service';
 import { OrderFulfillmentService } from './fulfillment/order-fulfillment.service';
+import { OrderSyncFlowService } from './services/order-sync-flow.service';
 
 // Observability
 import { OrderMetricsService } from './observability/order-metrics.service';
@@ -90,6 +91,7 @@ import { OrderFinancialSummaryService } from './services/order-financial-summary
         OrderLifecycleService,
         OrderCancellationService,
         OrderFulfillmentService,
+        OrderSyncFlowService,
         // observability
         OrderMetricsService,
         // marketplace-detail / label / messaging
@@ -117,6 +119,7 @@ import { OrderFinancialSummaryService } from './services/order-financial-summary
         OrderRectifyService,
         OrderCancellationService,
         OrderFulfillmentService,
+        OrderSyncFlowService,
         OrderMarketplaceDetailsService,
         OrderPricingService,
         PricingCalculatorRegistry,
