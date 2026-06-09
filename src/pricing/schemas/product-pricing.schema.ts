@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+import { StockCondition } from '../domain/condition';
 
 export type ProductPricingDocument = HydratedDocument<ProductPricingModel>;
 

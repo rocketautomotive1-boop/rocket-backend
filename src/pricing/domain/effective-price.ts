@@ -1,4 +1,4 @@
-import { isNewCondition } from './condition';
+import { isNewCondition, StockCondition } from './condition';
 
 export interface PriceOverride {
   marketplaceId: string;
@@ -6,12 +6,12 @@ export interface PriceOverride {
 }
 
 export interface ConditionPrice {
-  condition: string;
+  condition: StockCondition;
   price: number;
 }
 
 export interface ConditionOverride {
-  condition: string;
+  condition: StockCondition;
   marketplaceId: string;
   price: number;
 }
