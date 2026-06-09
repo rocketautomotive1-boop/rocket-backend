@@ -118,9 +118,12 @@ describe('StockService (integration)', () => {
 
   it('getProductCost returns the weighted-average lot cost (surfaced as balance.avgCost)', async () => {
     const P2 = '650000000000000000000abc';
-    await svc.move({ productId: P2, type: StockMovementType.INBOUND, quantity: 10, condition: 'new', unitCost: 4, reference: 'ac-1' });
-    await svc.move({ productId: P2, type: StockMovementType.INBOUND, quantity: 10, condition: 'new', unitCost: 6, reference: 'ac-2' });
+    // Two distinct lots (different conditions) with unequal quantities:
+    //   30 @ 2 (new) + 10 @ 6 (used) → weighted avg = (30*2 + 10*6) / 40 = 120/40 = 3.0
+    // A simple unweighted mean would be (2+6)/2 = 4.0, so this pins the WEIGHTING.
+    await svc.move({ productId: P2, type: StockMovementType.INBOUND, quantity: 30, condition: 'new', unitCost: 2, reference: 'ac-1' });
+    await svc.move({ productId: P2, type: StockMovementType.INBOUND, quantity: 10, condition: 'used', unitCost: 6, reference: 'ac-2' });
     const cost = await query.getProductCost(P2);
-    expect(cost).toBeCloseTo(5, 2);
+    expect(cost).toBeCloseTo(3, 2);
   });
 });

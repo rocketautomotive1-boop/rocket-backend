@@ -39,7 +39,7 @@ export interface StockQueryPort {
   listMovements(
     productId: string,
     limit?: number,
-  ): Promise<Array<{ type: string; quantity: number; date: Date; unitCost?: number; reason?: string }>>;
+  ): Promise<Array<{ id: string; type: string; quantity: number; date: Date; unitCost?: number; condition: string; reason?: string }>>;
   /** Per-product movement stats keyed by type. */
   getMovementStatistics(productId: string): Promise<Record<string, { count: number; quantity: number }>>;
   /** Latest movement snapshot (condition) used by listing publication. */
