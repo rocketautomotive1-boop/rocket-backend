@@ -117,10 +117,10 @@ describe('StockService (integration)', () => {
   });
 
   it('getProductCost returns the weighted-average lot cost (surfaced as balance.avgCost)', async () => {
-    const P2 = '650000000000000000000777';
+    const P2 = '650000000000000000000abc';
     await svc.move({ productId: P2, type: StockMovementType.INBOUND, quantity: 10, condition: 'new', unitCost: 4, reference: 'ac-1' });
     await svc.move({ productId: P2, type: StockMovementType.INBOUND, quantity: 10, condition: 'new', unitCost: 6, reference: 'ac-2' });
     const cost = await query.getProductCost(P2);
-    expect(cost).toBeCloseTo(3.5714285714285716, 2);
+    expect(cost).toBeCloseTo(5, 2);
   });
 });
