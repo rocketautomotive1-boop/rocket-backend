@@ -94,10 +94,12 @@ export class StockQueryService implements StockQueryPort {
       .lean()
       .exec();
     return rows.map((m: any) => ({
+      id: String(m._id),
       type: m.type,
       quantity: m.quantity,
       date: m.date,
       unitCost: m.unitCost != null ? Number(m.unitCost.toString()) : undefined,
+      condition: m.condition ?? 'new',
       reason: m.reason,
     }));
   }

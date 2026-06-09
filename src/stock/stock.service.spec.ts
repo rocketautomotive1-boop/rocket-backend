@@ -105,4 +105,14 @@ describe('StockService (integration)', () => {
     expect(stats['inbound'].quantity).toBe(5);
     expect(stats['outbound'].quantity).toBe(2);
   });
+
+  it('listMovements exposes id, condition and date for the UI', async () => {
+    const r = await svc.move({ productId: PID, type: StockMovementType.INBOUND, quantity: 4, condition: 'used', unitCost: 9, reference: 'lm-1' });
+    const list = await query.listMovements(PID, 50);
+    const found = list.find((m: any) => m.id === r.movementId);
+    expect(found).toBeTruthy();
+    expect(found.condition).toBe('used');
+    expect(found.date).toBeInstanceOf(Date);
+    expect(found.unitCost).toBe(9);
+  });
 });
