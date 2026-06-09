@@ -24,6 +24,7 @@ import { SearchService } from '../search/search.service';
 // import { calculatePublishPriority } from '../queue/publish-priority';
 import { BoxItemService } from './services/box-item.service';
 import { BoxService } from './services/box.service';
+import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 
 @ApiTags('Products')
 @UseInterceptors(ClassSerializerInterceptor)
@@ -45,6 +46,7 @@ export class ProductController {
     private readonly searchService: SearchService,
     private readonly discoveryService: ProductDiscoveryService,
     private readonly categorySnapshotService: CategorySnapshotService,
+    @Inject(PRICING_PORT) private readonly pricing: PricingPort,
   ) { }
 
   @Post('pre-register')
@@ -1539,6 +1541,7 @@ export class ProductController {
     if (!product) {
       throw new BadRequestException(`Produto com ID ${id} não encontrado`);
     }
-    return product;
+    const basePrice = await this.pricing.getBasePrice(id);
+    return { ...(product as any), basePrice };
   }
 }
