@@ -20,8 +20,12 @@ export class StockController {
   }
 
   @Get(':productId/balance')
-  balance(@Param('productId') productId: string) {
-    return this.query.getProductStock(productId);
+  async balance(@Param('productId') productId: string) {
+    const [summary, avgCost] = await Promise.all([
+      this.query.getProductStock(productId),
+      this.query.getProductCost(productId),
+    ]);
+    return { ...summary, avgCost };
   }
 
   @Get(':productId/balance/by-condition')
