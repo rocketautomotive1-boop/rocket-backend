@@ -5,6 +5,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProductRepository } from '../product.repository';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
+import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 import { ProductTitleService } from './product-title.service';
 import { normalizeCompletedAt } from './product-readiness.normalize';
 import {
@@ -35,6 +36,7 @@ export class ProductReadinessService {
   constructor(
     private readonly productRepository: ProductRepository,
     @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+    @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     private readonly productTitleService: ProductTitleService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
@@ -96,7 +98,8 @@ export class ProductReadinessService {
     const category = !!(product as any).category;
 
     const stockQty = (await this.stockQuery.getProductStock(productId)).onHand;
-    const priceRaw = (product as any).price ? Number((product as any).price) : 0;
+    // Sale price lives in PricingModule (removed from Product in the pricing refactor).
+    const priceRaw = await this.pricing.getBasePrice(productId);
     const inventory = stockQty > 0 && priceRaw > 0;
 
     const w = this.parseNum((product as any).weight);
