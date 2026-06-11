@@ -4,8 +4,6 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { QueueRecordModel, QueueRecordDocument } from '../schemas/queue-record.schema';
 import { QueueService } from '../queue.service';
-import { MarketplaceOrderService } from '../../marketplace/services/marketplace-order.service';
-import { globalThrottle } from '../../common/utils/throttle.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Controller()
@@ -16,7 +14,6 @@ export class OrderProcessor {
         @InjectModel(QueueRecordModel.name)
         private queueRecordModel: Model<QueueRecordDocument>,
         private readonly queueService: QueueService,
-        private readonly marketplaceOrderService: MarketplaceOrderService,
         private readonly eventEmitter: EventEmitter2
     ) { }
 
@@ -67,22 +64,15 @@ export class OrderProcessor {
                 return;
             }
 
-            // --- Bulk Sync Logic ---
-
-            if (!marketplaceId) {
-                throw new Error('Marketplace ID undefined');
-            }
-
-            // Throttle order sync per marketplace
-            await globalThrottle.throttle(`orders-sync-${marketplaceId}`, 2000); // 1 req / 2 sec
-
-            const result = await this.marketplaceOrderService.syncOrdersToMovements(String(marketplaceId), { orderIds, batchSize });
-
+            // Bulk orders-sync aposentado: a descoberta agendada agora é feita pelo
+            // OrderReconciler, que ingere cada pedido pelo pipeline transacional (cria
+            // Order + deduz estoque atomicamente). Um job sem externalId é no-op.
+            this.logger.warn(`[Processor] Ignoring bulk orders-sync job ${queueRecordId} (no externalId) — legacy bulk path retired`);
             await this.queueService.updateQueueRecord(queueRecordId, {
-                status: 'completed', completedAt: new Date(), result: result
+                status: 'completed', completedAt: new Date(), result: { skipped: 'legacy_bulk_retired' },
             });
-
             channel.ack(originalMsg);
+            return;
         } catch (error) {
             this.logger.error(`Erro sync pedidos: ${error.message}`);
             await this.queueService.handleProcessFailure(queueRecordId, error.message);
