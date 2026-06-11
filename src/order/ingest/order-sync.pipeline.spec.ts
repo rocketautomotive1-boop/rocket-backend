@@ -11,6 +11,7 @@ import { OrderSyncPipeline } from './order-sync.pipeline';
 import { MARKETPLACE_ORDER_GATEWAY } from '../ports/marketplace-order.gateway';
 import { STOCK_LEDGER_PORT } from '../ports/stock-ledger.port';
 import { PRODUCT_RESOLVER_PORT } from '../ports/product-resolver.port';
+import { OrchestratorPublisherService } from '../../marketplace-orchestrator/orchestrator-publisher.service';
 import { ORDER_EVENTS } from '../events/order.events';
 
 describe('OrderSyncPipeline (integration)', () => {
@@ -27,6 +28,7 @@ describe('OrderSyncPipeline (integration)', () => {
     getCostPrices: jest.fn().mockResolvedValue(new Map([['650000000000000000000001', 10]])),
   };
   const amqp = { publish: jest.fn() };
+  const orchestratorPublisher = { requestSync: jest.fn().mockResolvedValue(undefined) };
 
   beforeAll(async () => {
     mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
@@ -44,6 +46,7 @@ describe('OrderSyncPipeline (integration)', () => {
         { provide: STOCK_LEDGER_PORT, useValue: stock },
         { provide: PRODUCT_RESOLVER_PORT, useValue: resolver },
         { provide: AmqpConnection, useValue: amqp },
+        { provide: OrchestratorPublisherService, useValue: orchestratorPublisher },
       ],
     }).compile();
 
@@ -86,5 +89,25 @@ describe('OrderSyncPipeline (integration)', () => {
     gateway.fetchOrder.mockResolvedValue(null);
     await pipeline.execute('MISSING', '650000000000000000000099', 'reconcile');
     expect(stock.deductAndLink).not.toHaveBeenCalled();
+  });
+
+  it('enfileira outbox sync para cada produto deduzido (mesma sessão da TX)', async () => {
+    gateway.fetchOrder.mockResolvedValue({
+      id: 'EXT-TX',
+      marketplaceId: '650000000000000000000099',
+      marketplaceName: 'ML',
+      status: 'paid',
+      date_created: new Date().toISOString(),
+      total_amount: 100,
+      items: [{ id: 'i1', sku: 'S1', title: 'X', quantity: 1, unit_price: 100 }],
+    });
+    stock.deductAndLink.mockResolvedValue({ movementIds: ['650000000000000000000abc'] });
+
+    await pipeline.execute('EXT-TX', '650000000000000000000099', 'webhook');
+
+    expect(orchestratorPublisher.requestSync).toHaveBeenCalledWith(
+      { productId: expect.any(String), reason: 'stock_deduction' },
+      expect.anything(), // the ClientSession
+    );
   });
 });

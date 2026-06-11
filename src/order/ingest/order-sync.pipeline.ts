@@ -10,6 +10,7 @@ import { ORDER_EVENTS, OrderProcessedEvent, OrderCancelledEvent } from '../event
 import { decideIngestAction, CONFIRMED_STATUSES, IngestSource } from './order-ingest.decision';
 import { MARKETPLACE_ORDER_GATEWAY, MarketplaceOrderGateway } from '../ports/marketplace-order.gateway';
 import { STOCK_LEDGER_PORT, StockLedgerPort } from '../ports/stock-ledger.port';
+import { OrchestratorPublisherService } from '../../marketplace-orchestrator/orchestrator-publisher.service';
 
 @Injectable()
 export class OrderSyncPipeline {
@@ -26,6 +27,7 @@ export class OrderSyncPipeline {
         private readonly stock: StockLedgerPort,
         private readonly eventEmitter: EventEmitter2,
         private readonly amqpConnection: AmqpConnection,
+        private readonly orchestratorPublisher: OrchestratorPublisherService,
     ) { }
 
     async execute(externalId: string, marketplaceId: string, source: IngestSource = 'sync'): Promise<void> {
@@ -180,6 +182,19 @@ export class OrderSyncPipeline {
                         const hasAnyResolved = savedOrder.items.some(i => i.productId != null);
                         savedOrder.logisticsStatus = hasAnyResolved ? 'deducted' : 'unresolved';
                         savedOrder.processingStatus = 'completed';
+                    }
+
+                    // 2d. Enqueue outbox sync within the same transaction (atomic with stock deduction)
+                    if (movementIds.length > 0) {
+                        const affected = [...new Set(
+                            savedOrder.items.map(i => i.productId?.toString()).filter((id): id is string => !!id),
+                        )];
+                        for (const productId of affected) {
+                            await this.orchestratorPublisher.requestSync(
+                                { productId, reason: 'stock_deduction' },
+                                session,
+                            );
+                        }
                     }
                 }
 

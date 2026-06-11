@@ -13,6 +13,7 @@ import { MarketplaceModule } from '../marketplace/marketplace.module';
 import { ProductModule } from '../product/product.module';
 import { QueueModule } from '../queue/queue.module';
 import { StockModule } from '../stock/stock.module';
+import { OutboxModule } from '../outbox/outbox.module';
 import { OrderSyncProcessor } from './processors/order-sync.processor';
 
 import { OrderRepository } from './order.repository';
@@ -72,6 +73,7 @@ import { OrderFinancialSummaryService } from './services/order-financial-summary
         ProductModule,
         QueueModule,
         StockModule,
+        OutboxModule,
     ],
     controllers: [OrderController, OrderSyncController, OrderTestController],
     providers: [
