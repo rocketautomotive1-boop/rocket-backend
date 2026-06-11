@@ -81,21 +81,4 @@ export class QueueController {
     return { success: true, message: 'Registro adicionado à fila novamente' };
   }
 
-  @Post('orders/sync')
-  @ApiOperation({ summary: 'Sincronizar pedidos via fila' })
-  @ApiResponse({ status: 201, description: 'Sincronização agendada com sucesso' })
-  async syncOrders(
-    @Body() body: { marketplaceId: number; orderIds?: string[]; batchSize?: number }
-  ): Promise<any> {
-    await this.queueService.addToQueue({
-      type: 'orders-sync',
-      priority: 2,
-      metadata: {
-        marketplaceId: body.marketplaceId,
-        orderIds: body.orderIds,
-        batchSize: body.batchSize || 20
-      }
-    });
-    return { success: true, message: 'Sincronização agendada' };
-  }
 }
