@@ -9,7 +9,7 @@ import { OLXReconciliationService } from './services/olx-reconciliation.service'
 import { MarketplaceIssuesService } from './services/marketplace-issues.service';
 import { PublicationFlowService } from './services/publication-flow.service';
 import { OperationalIssuesService } from './services/operational-issues.service';
-import { OrchestratorPublisherService } from './orchestrator-publisher.service';
+import { OutboxModule } from '../outbox/outbox.module';
 
 import { CategoryModel, CategorySchema } from '../product/schemas/category.schema';
 import { MarketplaceModel, MarketplaceSchema } from '../marketplace/schemas/marketplace.schema';
@@ -62,6 +62,7 @@ import { SyncResultConsumer } from './sync-result.consumer';
         ]),
         UserProductivityModule,
         GatewaysModule,
+        OutboxModule,
     ],
     controllers: [MarketplaceOrchestratorController],
     providers: [
@@ -72,14 +73,13 @@ import { SyncResultConsumer } from './sync-result.consumer';
         OLXReconciliationService,
         MarketplaceIssuesService,
         OperationalIssuesService,
-        OrchestratorPublisherService,
         SyncResultConsumer,
     ],
     exports: [
         ListingRemovalService,
         MarketplaceIssuesService,
         OperationalIssuesService,
-        OrchestratorPublisherService,
+        OutboxModule,
     ],
 })
 export class MarketplaceOrchestratorModule { }

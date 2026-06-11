@@ -44,6 +44,7 @@ import { VehicleDiscoveryModule } from './vehicle-discovery/vehicle-discovery.mo
 import { VehicleCompatibilityModule } from './vehicle-compatibility/vehicle-compatibility.module';
 import { InternalModule } from './internal/internal.module';
 import { GeneralProductModule } from './general-product/general-product.module';
+import { OutboxModule } from './outbox/outbox.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
@@ -131,6 +132,7 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
     VehicleCompatibilityModule,
     VehicleDiscoveryModule,
     InternalModule,
+    OutboxModule,
   ],
   controllers: [],
   providers: [
