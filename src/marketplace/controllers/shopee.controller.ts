@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Put, Body, Param, Query, BadRequestException, HttpException, Logger } from '@nestjs/common'
 import axios from 'axios'
-import { getShopeeBaseUrl, buildSignedParams, buildHeaders } from '../adapters/shopee/shopee-utils'
+import { getShopeeBaseUrl, buildHeaders } from '../adapters/shopee/shopee-utils'
+import { MarketplaceSignerService } from '../auth/services/marketplace-signer.service'
 import { MarketplaceAuthService } from '../auth/services/marketplace-auth.service'
 import { MarketplaceOrderService } from '../services/marketplace-order.service'
 import { StandardOrder } from '../model/order.interface'
@@ -20,6 +21,7 @@ export class ShopeeController {
     private readonly orders: ShopeeOrderAdapter,
     private readonly marketplaceAuth: MarketplaceAuthService,
     private readonly marketplaceOrder: MarketplaceOrderService,
+    private readonly signer: MarketplaceSignerService,
   ) { }
 
   private async getShopeeToken() {
@@ -100,7 +102,7 @@ export class ShopeeController {
       const token = await this.getShopeeToken()
       const timestamp = Math.floor(Date.now() / 1000)
       const path = '/logistics/get_channel_list'
-      const params = buildSignedParams(path, timestamp, token.accessToken, token.additionalData.shopId)
+      const params = (await this.signer.sign('shopee', { path, timestamp, accessToken: token.accessToken, shopId: token.additionalData.shopId })).params
       const response = await axios.get(`${getShopeeBaseUrl()}${path}`, {
         headers: buildHeaders(),
         params,

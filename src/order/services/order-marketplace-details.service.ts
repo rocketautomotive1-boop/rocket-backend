@@ -4,9 +4,10 @@ import { Model } from 'mongoose';
 import axios from 'axios';
 import { OrderDocument, OrderModel } from '../schemas/order.schema';
 import { MarketplaceModel, MarketplaceDocument } from '../../marketplace/schemas/marketplace.schema';
-import { buildSignedParams, buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
+import { buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
 import { MarketplaceOrderService } from '../../marketplace/services/marketplace-order.service';
 import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
+import { MarketplaceSignerService } from '../../marketplace/auth/services/marketplace-signer.service';
 
 // ── Shared types ────────────────────────────────────────────────────────────────
 
@@ -166,6 +167,7 @@ export class OrderMarketplaceDetailsService {
         @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceDocument>,
         private readonly marketplaceOrderService: MarketplaceOrderService,
         private readonly auth: MarketplaceAuthService,
+        private readonly signer: MarketplaceSignerService,
     ) {}
 
     async getDetails(orderId: string): Promise<MarketplaceOrderDetails> {
@@ -635,7 +637,7 @@ export class OrderMarketplaceDetailsService {
             response_optional_fields: extraFields,
         };
 
-        const signedParams = buildSignedParams(path, timestamp, token.accessToken, Number(shopId), queryParams);
+        const signedParams = (await this.signer.sign('shopee', { path, timestamp, accessToken: token.accessToken, shopId: Number(shopId), extra: queryParams })).params;
 
         this.logger.log(`[Shopee Details] Fetching order ${orderSn}`);
 

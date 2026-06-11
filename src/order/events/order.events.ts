@@ -50,7 +50,7 @@ export class OrderProcessedEvent {
             sku: string;
         }>,
         public readonly totalAmount: number,
-        public readonly triggeredBy: 'webhook' | 'sync' | 'retry' | 'manual',
+        public readonly triggeredBy: 'webhook' | 'sync' | 'retry' | 'manual' | 'reconcile',
     ) { }
 }
 
@@ -61,6 +61,6 @@ export class OrderPricingCalculatedEvent {
         public readonly marketplaceId: string,
         public readonly marketplaceName: string,
         public readonly pricing: any, // OrderPricingDetailDto
-        public readonly triggeredBy: 'webhook' | 'sync' | 'retry' | 'manual' = 'sync',
+        public readonly triggeredBy: 'webhook' | 'sync' | 'retry' | 'manual' | 'reconcile' = 'sync',
     ) { }
 }

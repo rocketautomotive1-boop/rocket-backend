@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { MongooseModule, getConnectionToken } from '@nestjs/mongoose';
-import { Connection } from 'mongoose';
+import { MongooseModule, getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { Connection, Model } from 'mongoose';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { EventEmitter2, EventEmitterModule } from '@nestjs/event-emitter';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
@@ -49,6 +49,14 @@ describe('OrderSyncPipeline (integration)', () => {
 
     pipeline = moduleRef.get(OrderSyncPipeline);
     emitter = moduleRef.get(EventEmitter2);
+
+    // Build the Order collection + indexes up front so the first transactional write
+    // doesn't lazily mutate the catalog while a multi-document transaction is open
+    // (MongoServerError "catalog changes; please retry"). Deterministic across co-runs
+    // with other replset-backed specs. See [[jest-mongo-memory-server-contention]].
+    const orderModel = moduleRef.get<Model<any>>(getModelToken(OrderModel.name));
+    await orderModel.createCollection();
+    await orderModel.init();
   });
 
   afterAll(async () => {

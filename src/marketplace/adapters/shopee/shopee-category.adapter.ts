@@ -1,31 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
-import { getShopeeBaseUrl, generateSignature, getPartnerId } from './shopee-utils'
+import { getShopeeBaseUrl } from './shopee-utils'
+import { MarketplaceSignerService } from '../../auth/services/marketplace-signer.service';
 
 @Injectable()
 export class ShopeeCategoryAdapter {
   private readonly logger = new Logger(ShopeeCategoryAdapter.name);
   private baseUrl = getShopeeBaseUrl();
-  
+
+  constructor(private readonly signer: MarketplaceSignerService) {}
+
   async getCategories(accessToken: string, shopId: string, parentId?: string): Promise<any[]> {
     this.logger.log(`Buscando categorias da Shopee${parentId ? ` para categoria pai ${parentId}` : ''}`);
-    
+
     try {
       const timestamp = Math.floor(Date.now() / 1000);
       const path = '/product/get_category';
-      const sign = generateSignature(path, timestamp, accessToken, shopId);
-      
-      const params: any = {
-        partner_id: getPartnerId(),
-        timestamp,
-        sign,
-        access_token: accessToken,
-        shop_id: shopId,
-      };
-      
-      if (parentId) {
-        params.parent_id = parseInt(parentId);
-      }
+      const { params } = await this.signer.sign('shopee', { path, timestamp, accessToken, shopId });
+      if (parentId) params.parent_id = parseInt(parentId);
       
       const response = await axios.get(`${this.baseUrl}${path}`, {
         headers: {
