@@ -15,6 +15,11 @@ describe('OutboxRepository', () => {
     conn = m.connection;
     model = conn.model(OutboxMessage.name, OutboxMessageSchema) as any;
     repo = new OutboxRepository(model);
+    // Create the collection and build indexes (incl. the TTL partial index) UP FRONT.
+    // Otherwise the first write lazily mutates the catalog, which races a concurrent
+    // multi-document transaction → MongoServerError "catalog changes; please retry".
+    await model.createCollection();
+    await model.init();
   });
 
   afterAll(async () => {
