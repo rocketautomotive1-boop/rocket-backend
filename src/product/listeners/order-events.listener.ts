@@ -1,9 +1,8 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ORDER_EVENTS, OrderSyncedEvent, OrderProcessedEvent } from '../../order/events/order.events';
 import { ProductService } from '../product.service';
 import { STOCK_LEDGER_PORT, StockLedgerPort } from '../../order/ports/stock-ledger.port';
-import { OrchestratorPublisherService } from '../../marketplace-orchestrator/orchestrator-publisher.service';
 
 @Injectable()
 export class OrderEventsListener {
@@ -15,8 +14,6 @@ export class OrderEventsListener {
         // imports only ORDER_EVENTS *types* + the port token — no domain-module cycle.
         @Inject(STOCK_LEDGER_PORT)
         private readonly stockLedger: StockLedgerPort,
-        @Inject(forwardRef(() => OrchestratorPublisherService))
-        private readonly orchestratorPublisher: OrchestratorPublisherService,
     ) { }
 
     @OnEvent(ORDER_EVENTS.PROCESSED)
@@ -36,33 +33,13 @@ export class OrderEventsListener {
         // already-processed orders. They must not enqueue new publication syncs.
         if (event.triggeredBy === 'retry') {
             this.logger.log(
-                `[OrderProcessed] Skipping publication enqueue for order ${event.externalId} (trigger=retry).`,
+                `[OrderProcessed] Skipping for order ${event.externalId} (trigger=retry).`,
             );
             return;
         }
 
-        // After stock deduction, enqueue marketplace publish for each affected product
-        // so listing stock quantities are updated across all marketplaces.
-        const productIds = [...new Set(
-            event.items.map(i => i.productId).filter(id => !!id),
-        )];
-
-        if (productIds.length > 0) {
-            this.logger.log(
-                `[OrderProcessed] Enqueuing stock sync for ${productIds.length} product(s): ${productIds.join(', ')}`,
-            );
-        }
-
-        for (const productId of productIds) {
-            try {
-                await this.orchestratorPublisher.requestSync({
-                    productId,
-                    reason: 'stock_deduction',
-                });
-            } catch (err) {
-                this.logger.error(`[OrderProcessed] Failed to enqueue sync for product ${productId}: ${(err as Error).message}`);
-            }
-        }
+        // Sync enqueue is now handled inside the order pipeline transaction (outbox relay).
+        // This listener no longer publishes — doing so here was the old lossy fire-and-forget path.
     }
 
     @OnEvent(ORDER_EVENTS.SYNCED)

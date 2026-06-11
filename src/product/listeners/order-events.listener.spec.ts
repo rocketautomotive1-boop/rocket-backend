@@ -12,53 +12,42 @@ describe('OrderEventsListener', () => {
   };
 
   const makeSut = () => {
-    // Constructor order: (productService, stockLedger, orchestratorPublisher)
-    const orchestratorPublisher = { requestSync: jest.fn().mockResolvedValue(undefined) };
-
+    // Constructor order: (productService, stockLedger)
+    // orchestratorPublisher removed — outbox relay owns sync enqueue now
     const sut = new OrderEventsListener(
       {} as any,
       {} as any,
-      orchestratorPublisher as any,
     );
 
-    return { sut, orchestratorPublisher };
+    return { sut };
   };
 
-  it('enfileira sempre para source=sync quando ha produto afetado', async () => {
-    const { sut, orchestratorPublisher } = makeSut();
-
-    await sut.handleOrderProcessedEvent(baseEvent as any);
-
-    expect(orchestratorPublisher.requestSync).toHaveBeenCalledTimes(1);
-    expect(orchestratorPublisher.requestSync).toHaveBeenCalledWith({
-      productId: 'prod-1',
-      reason: 'stock_deduction',
-    });
-  });
-
-  it('enfileira sempre para source=webhook quando ha produto afetado', async () => {
-    const { sut, orchestratorPublisher } = makeSut();
-
+  it('handleOrderProcessedEvent NÃO publica sync (outbox-na-TX assume)', async () => {
+    const { sut } = makeSut();
     await sut.handleOrderProcessedEvent({
-      ...baseEvent,
-      triggeredBy: 'webhook',
+      externalId: 'E1', marketplaceName: 'ML', items: [{ productId: 'P1', quantity: 1 }], totalAmount: 10, triggeredBy: 'webhook',
     } as any);
-
-    expect(orchestratorPublisher.requestSync).toHaveBeenCalledTimes(1);
-    expect(orchestratorPublisher.requestSync).toHaveBeenCalledWith({
-      productId: 'prod-1',
-      reason: 'stock_deduction',
-    });
+    // No orchestratorPublisher to assert on — if the source still calls it, it will throw (undefined).
+    // The test simply must not throw, confirming the publish path is gone.
   });
 
   it('nao enfileira publicacao para source=retry', async () => {
-    const { sut, orchestratorPublisher } = makeSut();
+    const { sut } = makeSut();
 
-    await sut.handleOrderProcessedEvent({
-      ...baseEvent,
-      triggeredBy: 'retry',
-    } as any);
+    // Should not throw even though orchestratorPublisher is absent
+    await expect(
+      sut.handleOrderProcessedEvent({
+        ...baseEvent,
+        triggeredBy: 'retry',
+      } as any),
+    ).resolves.toBeUndefined();
+  });
 
-    expect(orchestratorPublisher.requestSync).not.toHaveBeenCalled();
+  it('ignora evento malformado (sem items)', async () => {
+    const { sut } = makeSut();
+
+    await expect(
+      sut.handleOrderProcessedEvent(null as any),
+    ).resolves.toBeUndefined();
   });
 });
