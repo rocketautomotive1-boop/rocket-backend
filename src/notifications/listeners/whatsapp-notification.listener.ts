@@ -25,6 +25,13 @@ export class WhatsAppNotificationListener {
   async handlePricingCalculated(event: OrderPricingCalculatedEvent): Promise<void> {
     const { orderId, externalId, pricing, triggeredBy = 'sync' } = event;
 
+    // Reconcile (backfill histórico) nunca notifica — evita spam de vendas antigas
+    // e a chamada cara à billing API. O estoque/Order/pricing seguem normalmente.
+    if (triggeredBy === 'reconcile') {
+      this.logger.debug(`Order ${externalId} reconciled (historical) — skipping WhatsApp notification`);
+      return;
+    }
+
     try {
       const order = await this.orderModel.findById(orderId).exec();
       if (!order) {
