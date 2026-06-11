@@ -1,9 +1,10 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import axios from 'axios';
-import { getShopeeBaseUrl, buildSignedParams, buildHeaders, generateSignature, getPartnerId } from './shopee-utils'
+import { getShopeeBaseUrl, buildHeaders } from './shopee-utils'
 import { ShopeeAuthAdapter } from './shopee-auth.adapter'
 import { IMarketplaceOrderAdapter } from '../../interfaces/marketplace-order-adapter.interface';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
+import { MarketplaceSignerService } from '../../auth/services/marketplace-signer.service';
 import { StandardOrder } from '../../model/order.interface';
 
 @Injectable()
@@ -14,7 +15,8 @@ export class ShopeeOrderAdapter implements IMarketplaceOrderAdapter, OnModuleIni
 
   constructor(
     private readonly auth: ShopeeAuthAdapter,
-    private readonly registry: MarketplaceAdapterRegistry
+    private readonly registry: MarketplaceAdapterRegistry,
+    private readonly signer: MarketplaceSignerService,
   ) { }
 
   onModuleInit() {
@@ -76,7 +78,7 @@ export class ShopeeOrderAdapter implements IMarketplaceOrderAdapter, OnModuleIni
         queryParams.order_status = this.mapOrderStatus(params.status);
       }
 
-      const paramsSigned = buildSignedParams(path, timestamp, currentToken.accessToken, parseInt(currentToken.additionalData.shopId), queryParams);
+      const { params: paramsSigned } = await this.signer.sign('shopee', { path, timestamp, accessToken: currentToken.accessToken, shopId: parseInt(currentToken.additionalData.shopId), extra: queryParams });
 
       const response = await axios.get(`${this.baseUrl}${path}`, {
         headers: buildHeaders(currentToken.accessToken),
@@ -95,10 +97,10 @@ export class ShopeeOrderAdapter implements IMarketplaceOrderAdapter, OnModuleIni
       const detailsPath = '/order/get_order_detail';
       const detailsTimestamp = Math.floor(Date.now() / 1000);
 
-      const detailsSignedParams = buildSignedParams(detailsPath, detailsTimestamp, currentToken.accessToken, parseInt(currentToken.additionalData.shopId), {
+      const { params: detailsSignedParams } = await this.signer.sign('shopee', { path: detailsPath, timestamp: detailsTimestamp, accessToken: currentToken.accessToken, shopId: parseInt(currentToken.additionalData.shopId), extra: {
         order_sn_list: orderSns,
         response_optional_fields: 'buyer_user_id,buyer_username,estimated_shipping_fee,recipient_address,actual_shipping_fee,goods_to_declare,note,pay_time,pickup_done_time,item_list,invoice_data,checkout_shipping_carrier,reverse_shipping_fee,order_chargeable_weight_gram,etc_check_field,payment_method,shipping_carrier'
-      });
+      } });
 
       const detailsResponse = await axios.get(`${this.baseUrl}${detailsPath}`, {
         headers: buildHeaders(currentToken.accessToken),
@@ -139,10 +141,10 @@ export class ShopeeOrderAdapter implements IMarketplaceOrderAdapter, OnModuleIni
 
       const timestamp = Math.floor(Date.now() / 1000);
       const path = '/order/get_order_detail';
-      const paramsSignedDetail = buildSignedParams(path, timestamp, currentToken.accessToken, currentToken.additionalData.shopId, {
+      const { params: paramsSignedDetail } = await this.signer.sign('shopee', { path, timestamp, accessToken: currentToken.accessToken, shopId: currentToken.additionalData.shopId, extra: {
         order_sn_list: orderId,
         response_optional_fields: 'buyer_user_id,buyer_username,estimated_shipping_fee,recipient_address,actual_shipping_fee,goods_to_declare,note,pay_time,pickup_done_time,item_list,invoice_data,checkout_shipping_carrier,reverse_shipping_fee,order_chargeable_weight_gram,etc_check_field,payment_method,shipping_carrier'
-      })
+      } })
 
       const response = await axios.get(`${this.baseUrl}${path}`, {
         headers: buildHeaders(currentToken.accessToken),
@@ -184,7 +186,7 @@ export class ShopeeOrderAdapter implements IMarketplaceOrderAdapter, OnModuleIni
 
       const timestamp = Math.floor(Date.now() / 1000);
       const path = this.getOrderStatusUpdatePath(status);
-      const paramsSignedUpdate = buildSignedParams(path, timestamp, currentToken.accessToken, currentToken.additionalData.shopId)
+      const { params: paramsSignedUpdate } = await this.signer.sign('shopee', { path, timestamp, accessToken: currentToken.accessToken, shopId: currentToken.additionalData.shopId })
 
       const response = await axios.post(`${this.baseUrl}${path}`, {
         order_sn: orderId,
