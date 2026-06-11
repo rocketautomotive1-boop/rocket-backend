@@ -3,7 +3,6 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { QueueService } from '../queue/queue.service';
 import { MarketplaceTokenBrokerService } from '../marketplace/auth/services/marketplace-token-broker.service';
 import { QuestionsService } from '../questions/questions.service';
-import { OrderSyncFlowService } from '../order/services/order-sync-flow.service';
 
 @Injectable()
 export class SchedulerService implements OnModuleInit {
@@ -15,19 +14,10 @@ export class SchedulerService implements OnModuleInit {
         private readonly tokenBroker: MarketplaceTokenBrokerService,
         @Inject(forwardRef(() => QuestionsService))
         private readonly questionsService: QuestionsService,
-        @Inject(forwardRef(() => OrderSyncFlowService))
-        private readonly orderSyncFlowService: OrderSyncFlowService,
     ) { }
 
-    // On startup: immediately reconcile orders that may have arrived while offline
     async onModuleInit() {
-        // Small delay to let other modules (auth, tokens) initialize first
-        setTimeout(() => {
-            this.logger.log('Startup reconciliation: syncing recent orders from all marketplaces...');
-            this.handleCronOrdersSync().catch(err =>
-                this.logger.error(`Startup orders reconciliation failed: ${err.message}`),
-            );
-        }, 10_000);
+        this.logger.log('Scheduler init — orders discovery handled by OrderReconciler');
     }
 
     // Every 10 Minutes: Refresh tokens that are about to expire (Proactive Refresh)
@@ -41,24 +31,6 @@ export class SchedulerService implements OnModuleInit {
             );
         } catch (error) {
             this.logger.error('Error in Scheduled Token Refresh:', error);
-        }
-    }
-
-    // Hourly Sync: Orders (Safety Net for missed webhooks)
-    @Cron(CronExpression.EVERY_HOUR)
-    async handleCronOrdersSync() {
-        this.logger.log('Starting Hourly Orders Sync Job...');
-
-        try {
-            const result = await this.orderSyncFlowService.queueScheduledOrdersSync({
-                reason: 'hourly_schedule',
-                batchSize: 50,
-            });
-            this.logger.log(
-                `Hourly orders sync queued=${result.queued} skipped=${result.skipped.length}`,
-            );
-        } catch (error) {
-            this.logger.error('Error in Hourly Orders Sync:', error);
         }
     }
 
