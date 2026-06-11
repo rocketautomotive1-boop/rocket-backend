@@ -45,6 +45,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     await Promise.all(batch.map(async (msg) => {
       const id = String(msg._id);
       try {
+        // Delivery guarantee: amqp-connection-manager's ChannelWrapper uses a confirm
+        // channel by default, so this publish() resolves ONLY after the broker acks the
+        // message. Combined with persistent:true + the durable `rocket.orchestrator`
+        // exchange, a resolved publish means the message is safely on the broker. We mark
+        // published only after that ack — never before. Do not "optimize" this await away.
         await this.amqp.publish(msg.exchange, msg.routingKey, msg.payload, { persistent: true });
         await this.repo.markPublished(id);
       } catch (err: any) {
