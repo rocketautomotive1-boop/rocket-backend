@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import * as WebSocket from 'ws';
-import { ProcessedImageService } from './processed-image.service';
+import { ProcessedImageService } from '../processed-image/processed-image.service';
 import { RembgEnqueueService } from './rembg-enqueue.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
