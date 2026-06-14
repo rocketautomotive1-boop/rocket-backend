@@ -1,4 +1,4 @@
-import { computeDirect } from './cost-engine';
+import { computeDirect, computeReverse } from './cost-engine';
 
 describe('computeDirect', () => {
   it('decompõe o preço e calcula lucro/margem/viabilidade', () => {
@@ -31,5 +31,27 @@ describe('computeDirect', () => {
     });
     // 100-80-12-3 = 5 → 5%
     expect(r.status).toBe('tight');
+  });
+});
+
+describe('computeReverse', () => {
+  it('resolve o preço para a margem-alvo', () => {
+    // Pv = (cost + shipping + opex) / (1 - commissionRate - taxRate - margin)
+    // = (35 + 19 + 0) / (1 - 0.12 - 0.06 - 0.15) = 54 / 0.67 = 80.597
+    const r = computeReverse(0.15, {
+      cost: 35, saleFeeAmount: 0, commissionRate: 0.12,
+      shipping: 19, taxRate: 0.06, opexPerUnit: 0,
+    });
+    expect(r.suggestedPrice).toBeCloseTo(80.6, 1);
+    expect(r.warning).toBeUndefined();
+  });
+
+  it('retorna inatingível quando taxas + margem >= 100%', () => {
+    const r = computeReverse(0.9, {
+      cost: 35, saleFeeAmount: 0, commissionRate: 0.12,
+      shipping: 19, taxRate: 0.06, opexPerUnit: 0,
+    });
+    expect(r.suggestedPrice).toBeNull();
+    expect(r.warning).toMatch(/inating/i);
   });
 });

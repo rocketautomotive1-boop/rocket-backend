@@ -1,5 +1,5 @@
 import {
-  CostLine, DirectResult, EngineInputs, ViabilityStatus,
+  CostLine, DirectResult, EngineInputs, ReverseResult, ViabilityStatus,
   VIABILITY_TIGHT_THRESHOLD,
 } from './cost-simulation.types';
 
@@ -26,4 +26,13 @@ export function computeDirect(salePrice: number, i: EngineInputs): DirectResult 
   ];
 
   return { salePrice, breakdown, netProfit, marginPct, status: status(marginPct) };
+}
+
+export function computeReverse(targetMargin: number, i: EngineInputs): ReverseResult {
+  const denom = 1 - i.commissionRate - i.taxRate - targetMargin;
+  if (denom <= 0) {
+    return { targetMargin, suggestedPrice: null, warning: 'Margem inatingível com as taxas atuais.' };
+  }
+  const suggestedPrice = (i.cost + i.shipping + i.opexPerUnit) / denom;
+  return { targetMargin, suggestedPrice: Math.round(suggestedPrice * 100) / 100 };
 }
