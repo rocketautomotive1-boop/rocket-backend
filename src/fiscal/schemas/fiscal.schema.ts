@@ -68,6 +68,13 @@ export class FiscalIssuerModel {
     difalExempt: boolean;
 
     /**
+     * Alíquota efetiva sobre a receita (fração 0..1) usada pelo simulador de custos.
+     * Simples Nacional → DAS efetivo (ex.: 0.04). Vazio/0 → impostos não calculados por padrão.
+     */
+    @Prop({ default: 0 })
+    effectiveTaxRate: number;
+
+    /**
      * IDs do vendedor em cada marketplace, usados no campo idCadIntTran (infIntermed).
      * Chaves: 'mercado_livre', 'amazon', 'shopee', 'magalu', 'americanas'
      * Valores: ID numérico do vendedor na plataforma (ex: ML → '2417879606')

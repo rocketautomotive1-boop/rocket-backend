@@ -5,7 +5,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as WebSocket from 'ws';
 import { RembgJob, RembgJobDocument } from './schemas/rembg-job.schema';
-import { ProcessedImageService } from './processed-image.service';
+import { ProcessedImageService } from '../processed-image/processed-image.service';
 import { RembgGateway } from './rembg.gateway';
 import { S3Service } from '../common/s3/s3.service';
 

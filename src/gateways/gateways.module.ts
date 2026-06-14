@@ -6,13 +6,12 @@ import { OrderGateway } from './order.gateway';
 import { RembgGateway } from './rembg.gateway';
 import { SyncGateway } from './sync.gateway';
 import { RembgController } from './rembg.controller';
-import { ProcessedImage, ProcessedImageSchema } from './schemas/processed-image.schema';
-import { ProcessedImageService } from './processed-image.service';
 import { RembgJob, RembgJobSchema } from './schemas/rembg-job.schema';
 import { RembgEnqueueService } from './rembg-enqueue.service';
 import { RembgJobConsumer } from './rembg-job.consumer';
 import { S3Module } from '../common/s3/s3.module';
 import { AuthModule } from '../auth/auth.module';
+import { ProcessedImageModule } from '../processed-image/processed-image.module';
 import { ProductDiscoveryModel, ProductDiscoverySchema } from '../product/schemas/product-discovery.schema';
 
 @Module({
@@ -23,12 +22,12 @@ import { ProductDiscoveryModel, ProductDiscoverySchema } from '../product/schema
             },
         }),
         MongooseModule.forFeature([
-            { name: ProcessedImage.name, schema: ProcessedImageSchema },
             { name: RembgJob.name, schema: RembgJobSchema },
             { name: ProductDiscoveryModel.name, schema: ProductDiscoverySchema },
         ]),
         S3Module,
         AuthModule,
+        ProcessedImageModule,
     ],
     controllers: [RembgController],
     providers: [
@@ -36,10 +35,9 @@ import { ProductDiscoveryModel, ProductDiscoverySchema } from '../product/schema
         OrderGateway,
         RembgGateway,
         SyncGateway,
-        ProcessedImageService,
         RembgEnqueueService,
         RembgJobConsumer,
     ],
-    exports: [DiscoveryGateway, OrderGateway, RembgGateway, SyncGateway, ProcessedImageService, RembgEnqueueService],
+    exports: [DiscoveryGateway, OrderGateway, RembgGateway, SyncGateway, ProcessedImageModule, RembgEnqueueService],
 })
 export class GatewaysModule { }
