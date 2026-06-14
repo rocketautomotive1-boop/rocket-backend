@@ -21,6 +21,7 @@ import { GatewaysModule } from './gateways/gateways.module';
 import { QuestionsModule } from './questions/questions.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { FiscalModule } from './fiscal/fiscal.module';
+import { CostSimulationModule } from './cost-simulation/cost-simulation.module';
 import { LogisticsModule } from './logistics/logistics.module';
 import { CustomerModule } from './customer/customer.module';
 import { CheckoutModule } from './checkout/checkout.module';
@@ -90,6 +91,7 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
     // PublishModule,
     QuestionsModule,
     FiscalModule,
+    CostSimulationModule,
     LogisticsModule,
     OrderModule,
     CustomerModule,
