@@ -21,15 +21,3 @@ describe('MlFeesAdapter.parseCommission', () => {
     expect(out.saleFeeAmount).toBe(12);
   });
 });
-
-describe('MlFeesAdapter.parseShipping', () => {
-  it('usa promoted_amount quando presente', () => {
-    expect(MlFeesAdapter.parseShipping({ coverage: { all_country: { list_cost: 0.5, discount: { promoted_amount: 8.5 } } } })).toBeCloseTo(8.5, 2);
-  });
-  it('cai para list_cost sem promoted_amount', () => {
-    expect(MlFeesAdapter.parseShipping({ coverage: { all_country: { list_cost: 11 } } })).toBe(11);
-  });
-  it('retorna 0 sem coverage', () => {
-    expect(MlFeesAdapter.parseShipping({})).toBe(0);
-  });
-});

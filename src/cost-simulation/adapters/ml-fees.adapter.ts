@@ -4,6 +4,7 @@ import { MarketplaceAuthService } from '../../marketplace/auth/services/marketpl
 import { MarketplaceService } from '../../marketplace/services/marketplace.service';
 import { ListingTypeId, LogisticType } from '../cost-simulation.types';
 import { Commission, MarketplaceFeesPort } from '../ports';
+import { lookupShipping, reputationBucket, shippingModeFor, ShippingReputation } from '../ml-shipping-table';
 
 const ML_BASE = 'https://api.mercadolibre.com';
 
@@ -11,6 +12,7 @@ const ML_BASE = 'https://api.mercadolibre.com';
 export class MlFeesAdapter implements MarketplaceFeesPort {
   private readonly logger = new Logger(MlFeesAdapter.name);
   private sellerIdCache: string | null = null;
+  private reputationCache: ShippingReputation | null = null;
   private commissionCache = new Map<string, { value: Commission; exp: number }>();
 
   constructor(
@@ -31,14 +33,6 @@ export class MlFeesAdapter implements MarketplaceFeesPort {
     };
   }
 
-  static parseShipping(payload: any): number {
-    const cov = payload?.coverage?.all_country;
-    if (!cov) return 0;
-    const promoted = cov?.discount?.promoted_amount;
-    if (promoted != null) return Number(promoted);
-    return Number(cov.list_cost ?? 0);
-  }
-
   private async token(): Promise<string> {
     const mp = await this.marketplaceService.findByName('Mercado Livre');
     if (!mp) throw new Error('Marketplace Mercado Livre não encontrado');
@@ -46,18 +40,28 @@ export class MlFeesAdapter implements MarketplaceFeesPort {
     return t.accessToken;
   }
 
-  async resolveSellerId(): Promise<string | null> {
-    if (this.sellerIdCache) return this.sellerIdCache;
+  /** Uma chamada /users/me popula sellerId + reputação. */
+  private async loadMe(): Promise<void> {
+    if (this.sellerIdCache && this.reputationCache) return;
     try {
       const { data } = await axios.get(`${ML_BASE}/users/me`, {
         headers: { Authorization: `Bearer ${await this.token()}`, Accept: 'application/json' },
       });
       this.sellerIdCache = data?.id ? String(data.id) : null;
-      return this.sellerIdCache;
+      this.reputationCache = reputationBucket(data?.seller_reputation?.level_id);
     } catch (e: any) {
-      this.logger.warn(`resolveSellerId falhou: ${e.message}`);
-      return null;
+      this.logger.warn(`/users/me falhou: ${e.message}`);
     }
+  }
+
+  async resolveSellerId(): Promise<string | null> {
+    await this.loadMe();
+    return this.sellerIdCache;
+  }
+
+  async resolveReputation(): Promise<ShippingReputation> {
+    await this.loadMe();
+    return this.reputationCache ?? 'green';
   }
 
   async getCommission(params: { price: number; listingTypeId: ListingTypeId; categoryId?: string }): Promise<Commission> {
@@ -75,18 +79,17 @@ export class MlFeesAdapter implements MarketplaceFeesPort {
     return parsed;
   }
 
-  async getShipping(params: { sellerId: string; dimensions?: string; logisticType: LogisticType }): Promise<number> {
-    if (!params.dimensions || !params.sellerId) return 0;
-    const qs = new URLSearchParams({ dimensions: params.dimensions, logistic_type: params.logisticType });
-    const url = `${ML_BASE}/users/${params.sellerId}/shipping_options/free?${qs.toString()}`;
-    try {
-      const { data } = await axios.get(url, {
-        headers: { Authorization: `Bearer ${await this.token()}`, Accept: 'application/json' },
-      });
-      return MlFeesAdapter.parseShipping(data);
-    } catch (e: any) {
-      this.logger.warn(`Frete ML indisponível (${params.logisticType}): ${e.message}`);
-      return 0;
-    }
+  /**
+   * Frete pela TABELA oficial do ML. O endpoint shipping_options retorna valor
+   * inconsistente (R$0,50 fixo) e não recebe preço — por isso usamos a tabela.
+   * fulfillment → tabela Full Super; demais → tabela Tradicional (por reputação).
+   */
+  async getShipping(params: { weightKg: number; price: number; reputation: ShippingReputation; logisticType: LogisticType }): Promise<number | null> {
+    return lookupShipping({
+      mode: shippingModeFor(params.logisticType),
+      reputation: params.reputation,
+      weightKg: params.weightKg,
+      price: params.price,
+    });
   }
 }

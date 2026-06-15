@@ -16,8 +16,13 @@ export interface Commission {
 export interface MarketplaceFeesPort {
   resolveSellerId(): Promise<string | null>;
   getCommission(params: { price: number; listingTypeId: ListingTypeId; categoryId?: string }): Promise<Commission>;
-  /** Retorna 0 quando não há dimensões/seller (caller marca a linha como 'estimate'). */
-  getShipping(params: { sellerId: string; dimensions?: string; logisticType: LogisticType }): Promise<number>;
+  /** Reputação de frete do vendedor (tabela ML). 'green'|'yellow'|'red'. */
+  resolveReputation(): Promise<'green' | 'yellow' | 'red'>;
+  /**
+   * Frete oficial do ML (tabela) por peso×preço×reputação.
+   * Retorna null quando falta peso (caller mostra aviso p/ preencher dimensões).
+   */
+  getShipping(params: { weightKg: number; price: number; reputation: 'green' | 'yellow' | 'red'; logisticType: LogisticType }): Promise<number | null>;
 }
 
 export interface FiscalRate {
@@ -33,7 +38,7 @@ export interface FiscalRatePort {
 export interface ProductData {
   cost: number;                 // costPrice/avgCost (0 se indisponível)
   categoryId: string | null;    // externalId ML resolvido de category.marketplaceMappings (ex.: MLB44379)
-  dimensions: string | null;    // "CxLxA,pesoG" pronto p/ shipping_options; null se faltar peso/dim
+  weightKg: number;             // peso em kg (0 se não cadastrado) — usado na tabela de frete
 }
 
 export interface ProductDataPort {

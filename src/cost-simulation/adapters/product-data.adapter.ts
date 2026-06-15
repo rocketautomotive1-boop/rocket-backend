@@ -27,15 +27,11 @@ export class ProductDataAdapter implements ProductDataPort {
   ) {}
 
   // ── parsing puro (testável) ──
-  /** Monta "CxLxA,pesoG" para shipping_options. null se faltar peso. */
-  static buildDimensions(dimensions: any, weightKgOrG: number): string | null {
-    if (!weightKgOrG || weightKgOrG <= 0) return null;
-    // weight no schema é Decimal128 em kg (padrão ML usa g no shipping_options) — normalizamos p/ g.
-    const grams = weightKgOrG < 50 ? Math.round(weightKgOrG * 1000) : Math.round(weightKgOrG);
-    const L = Math.round(num(dimensions?.length)) || 20;
-    const W = Math.round(num(dimensions?.width)) || 15;
-    const H = Math.round(num(dimensions?.height)) || 10;
-    return `${L}x${W}x${H},${grams}`;
+  /** Normaliza o peso do produto para kg. O schema guarda em kg (Decimal128);
+   *  defensivo: valores absurdos (>1000) provavelmente vieram em gramas. */
+  static normalizeWeightKg(rawWeight: number): number {
+    if (!rawWeight || rawWeight <= 0) return 0;
+    return rawWeight > 1000 ? rawWeight / 1000 : rawWeight;
   }
 
   async getProductData(productId: string): Promise<ProductData> {
@@ -44,13 +40,12 @@ export class ProductDataAdapter implements ProductDataPort {
       p = await this.productService.findOne(productId, { lean: true });
     } catch (e: any) {
       this.logger.warn(`Produto indisponível (${productId}): ${e.message}`);
-      return { cost: 0, categoryId: null, dimensions: null };
+      return { cost: 0, categoryId: null, weightKg: 0 };
     }
-    if (!p) return { cost: 0, categoryId: null, dimensions: null };
+    if (!p) return { cost: 0, categoryId: null, weightKg: 0 };
 
     const cost = num(p.avgCost ?? p.costPrice ?? p.cost);
-    const weight = num(p.weight);
-    const dimensions = ProductDataAdapter.buildDimensions(p.dimensions, weight);
+    const weightKg = ProductDataAdapter.normalizeWeightKg(num(p.weight));
 
     let categoryId: string | null = null;
     try {
@@ -63,7 +58,7 @@ export class ProductDataAdapter implements ProductDataPort {
       this.logger.warn(`Resolução de categoria ML falhou (${productId}): ${e.message}`);
     }
 
-    return { cost, categoryId, dimensions };
+    return { cost, categoryId, weightKg };
   }
 
   private async mercadoLivreId(): Promise<string | null> {

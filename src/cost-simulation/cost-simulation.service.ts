@@ -17,7 +17,8 @@ export interface PreviewInput {
   includeTax: boolean;
   taxRate?: number;          // override da alíquota efetiva (0..1); senão usa FiscalIssuer
   opexPerUnit?: number;
-  dimensions?: string;
+  weightKg?: number;         // override de peso; senão usa o do produto
+  reputation?: 'green' | 'yellow' | 'red'; // override da reputação; senão a real da conta
 }
 
 export interface PreviewResult {
@@ -27,7 +28,7 @@ export interface PreviewResult {
   marginPct: number;
   status: string;
   suggestion?: { targetMargin: number; suggestedPrice: number | null; warning?: string };
-  meta: { listingTypeId: string; logisticType: string; categoryId: string | null; taxRegime: string | null; warnings: string[] };
+  meta: { listingTypeId: string; logisticType: string; categoryId: string | null; taxRegime: string | null; reputation: string; shippingMissing: boolean; warnings: string[] };
 }
 
 @Injectable()
@@ -51,22 +52,36 @@ export class CostSimulationService {
 
     // categoria ML: override do input; senão resolvida do produto
     const categoryId = input.categoryId ?? pdata.categoryId ?? undefined;
-    // dimensões: override do input; senão do produto
-    const dimensions = input.dimensions ?? pdata.dimensions ?? undefined;
+    // peso: override do input; senão do produto
+    const weightKg = (input.weightKg != null && input.weightKg > 0) ? input.weightKg : pdata.weightKg;
+    // reputação: override do input; senão a real da conta
+    const reputation = input.reputation ?? await this.fees.resolveReputation();
 
-    const sellerId = await this.fees.resolveSellerId();
     const commission = await this.fees.getCommission({
       price: anchor > 0 ? anchor : 100, // âncora p/ reverso
       listingTypeId: input.listingTypeId,
       categoryId,
     });
 
+    // Frete pela tabela oficial do ML (peso × preço × reputação/modalidade).
     let shipping = 0;
-    if (dimensions && sellerId) {
-      shipping = await this.fees.getShipping({ sellerId, dimensions, logisticType: input.logisticType });
-      if (shipping === 0) warnings.push('Frete estimado em R$0 (verifique dimensões/peso).');
+    let shippingMissing = false;
+    if (weightKg > 0) {
+      const s = await this.fees.getShipping({
+        weightKg,
+        price: anchor > 0 ? anchor : 100,
+        reputation,
+        logisticType: input.logisticType,
+      });
+      if (s == null) {
+        shippingMissing = true;
+        warnings.push('Frete não calculado: cadastre peso e dimensões do produto.');
+      } else {
+        shipping = s;
+      }
     } else {
-      warnings.push('Frete não calculado: informe o peso do produto.');
+      shippingMissing = true;
+      warnings.push('Frete não calculado: cadastre peso e dimensões do produto.');
     }
 
     let taxRate = 0;
@@ -92,6 +107,8 @@ export class CostSimulationService {
       logisticType: input.logisticType,
       categoryId: categoryId ?? null,
       taxRegime,
+      reputation,
+      shippingMissing,
       warnings,
     };
 
