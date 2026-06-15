@@ -2,8 +2,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import { computeDirect, computeReverse } from './cost-engine';
 import { CostLine, EngineInputs, ListingTypeId, LogisticType } from './cost-simulation.types';
 import {
-  MARKETPLACE_FEES_PORT, FISCAL_RATE_PORT, STOCK_COST_PORT,
-  MarketplaceFeesPort, FiscalRatePort, StockCostPort,
+  MARKETPLACE_FEES_PORT, FISCAL_RATE_PORT, PRODUCT_DATA_PORT,
+  MarketplaceFeesPort, FiscalRatePort, ProductDataPort,
 } from './ports';
 
 export interface PreviewInput {
@@ -15,6 +15,7 @@ export interface PreviewInput {
   logisticType: LogisticType;
   categoryId?: string;
   includeTax: boolean;
+  taxRate?: number;          // override da alíquota efetiva (0..1); senão usa FiscalIssuer
   opexPerUnit?: number;
   dimensions?: string;
 }
@@ -34,41 +35,47 @@ export class CostSimulationService {
   constructor(
     @Inject(MARKETPLACE_FEES_PORT) private readonly fees: MarketplaceFeesPort,
     @Inject(FISCAL_RATE_PORT) private readonly fiscal: FiscalRatePort,
-    @Inject(STOCK_COST_PORT) private readonly stock: StockCostPort,
+    @Inject(PRODUCT_DATA_PORT) private readonly product: ProductDataPort,
   ) {}
 
   async preview(input: PreviewInput): Promise<PreviewResult> {
     const warnings: string[] = [];
     const anchor = input.salePrice ?? 0;
 
-    // custo: override do frontend tem prioridade; senão via porta
-    const cost = (input.cost != null && input.cost > 0)
-      ? input.cost
-      : await this.stock.getUnitCost(input.productId);
+    // Resolve dados do produto (custo + categoria ML + dimensões) numa leitura.
+    const pdata = await this.product.getProductData(input.productId);
+
+    // custo: override do frontend tem prioridade; senão do produto
+    const cost = (input.cost != null && input.cost > 0) ? input.cost : pdata.cost;
     if (cost === 0) warnings.push('Custo do produto 0 — registre uma entrada de estoque com custo.');
+
+    // categoria ML: override do input; senão resolvida do produto
+    const categoryId = input.categoryId ?? pdata.categoryId ?? undefined;
+    // dimensões: override do input; senão do produto
+    const dimensions = input.dimensions ?? pdata.dimensions ?? undefined;
 
     const sellerId = await this.fees.resolveSellerId();
     const commission = await this.fees.getCommission({
       price: anchor > 0 ? anchor : 100, // âncora p/ reverso
       listingTypeId: input.listingTypeId,
-      categoryId: input.categoryId,
+      categoryId,
     });
 
     let shipping = 0;
-    if (input.dimensions && sellerId) {
-      shipping = await this.fees.getShipping({ sellerId, dimensions: input.dimensions, logisticType: input.logisticType });
+    if (dimensions && sellerId) {
+      shipping = await this.fees.getShipping({ sellerId, dimensions, logisticType: input.logisticType });
       if (shipping === 0) warnings.push('Frete estimado em R$0 (verifique dimensões/peso).');
     } else {
-      warnings.push('Frete não calculado: faltam dimensões/peso ou conta ML.');
+      warnings.push('Frete não calculado: informe o peso do produto.');
     }
 
     let taxRate = 0;
     let taxRegime: string | null = null;
     if (input.includeTax) {
-      const f = await this.fiscal.getRate();
+      const f = await this.fiscal.getRate(input.taxRate);
       taxRate = f.rate;
       taxRegime = f.taxRegime;
-      if (taxRate === 0) warnings.push('Alíquota fiscal 0 — configure o regime/efetiva no cadastro fiscal.');
+      if (taxRate === 0) warnings.push('Alíquota fiscal 0 — informe a alíquota efetiva (%) no simulador ou no cadastro fiscal.');
     }
 
     const engineInputs: EngineInputs = {
@@ -83,7 +90,7 @@ export class CostSimulationService {
     const meta = {
       listingTypeId: commission.listingTypeId,
       logisticType: input.logisticType,
-      categoryId: input.categoryId ?? null,
+      categoryId: categoryId ?? null,
       taxRegime,
       warnings,
     };

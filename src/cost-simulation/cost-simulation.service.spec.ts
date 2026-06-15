@@ -1,5 +1,5 @@
 import { CostSimulationService } from './cost-simulation.service';
-import { MarketplaceFeesPort, FiscalRatePort, StockCostPort } from './ports';
+import { MarketplaceFeesPort, FiscalRatePort, ProductDataPort } from './ports';
 
 const mkSvc = () => {
   const fees: jest.Mocked<MarketplaceFeesPort> = {
@@ -10,10 +10,10 @@ const mkSvc = () => {
   const fiscal: jest.Mocked<FiscalRatePort> = {
     getRate: jest.fn().mockResolvedValue({ rate: 0.06, taxRegime: 'SIMPLES_NACIONAL' }),
   };
-  const stock: jest.Mocked<StockCostPort> = {
-    getUnitCost: jest.fn().mockResolvedValue(35),
+  const product: jest.Mocked<ProductDataPort> = {
+    getProductData: jest.fn().mockResolvedValue({ cost: 35, categoryId: 'MLB44379', dimensions: '20x15x10,300' }),
   };
-  return { svc: new CostSimulationService(fees, fiscal, stock), fees, fiscal, stock };
+  return { svc: new CostSimulationService(fees, fiscal, product), fees, fiscal, product };
 };
 
 describe('CostSimulationService.preview', () => {
@@ -29,16 +29,23 @@ describe('CostSimulationService.preview', () => {
     expect(r.meta.taxRegime).toBe('SIMPLES_NACIONAL');
   });
 
-  it('usa custo via STOCK_COST_PORT quando não há override', async () => {
-    const { svc, stock } = mkSvc();
-    await svc.preview({ productId: 'p1', salePrice: 99, listingTypeId: 'gold_special', logisticType: 'drop_off', includeTax: false, dimensions: '1x1x1,100' });
-    expect(stock.getUnitCost).toHaveBeenCalledWith('p1');
+  it('usa custo do produto (ProductDataPort) quando não há override', async () => {
+    const { svc, product } = mkSvc();
+    const r = await svc.preview({ productId: 'p1', salePrice: 99, listingTypeId: 'gold_special', logisticType: 'drop_off', includeTax: false });
+    expect(product.getProductData).toHaveBeenCalledWith('p1');
+    expect(r.breakdown.find((l) => l.key === 'cost')!.amount).toBe(35);
   });
 
-  it('override de custo (frontend) tem prioridade sobre a porta', async () => {
-    const { svc, stock } = mkSvc();
-    const r = await svc.preview({ productId: 'p1', cost: 50, salePrice: 99, listingTypeId: 'gold_special', logisticType: 'drop_off', includeTax: false, dimensions: '1x1x1,100' });
-    expect(stock.getUnitCost).not.toHaveBeenCalled();
+  it('resolve categoria ML e dimensões do produto automaticamente', async () => {
+    const { svc, fees } = mkSvc();
+    await svc.preview({ productId: 'p1', salePrice: 99, listingTypeId: 'gold_special', logisticType: 'drop_off', includeTax: false });
+    expect(fees.getCommission).toHaveBeenCalledWith(expect.objectContaining({ categoryId: 'MLB44379' }));
+    expect(fees.getShipping).toHaveBeenCalledWith(expect.objectContaining({ dimensions: '20x15x10,300' }));
+  });
+
+  it('override de custo (frontend) tem prioridade sobre o produto', async () => {
+    const { svc } = mkSvc();
+    const r = await svc.preview({ productId: 'p1', cost: 50, salePrice: 99, listingTypeId: 'gold_special', logisticType: 'drop_off', includeTax: false });
     expect(r.breakdown.find((l) => l.key === 'cost')!.amount).toBe(50);
   });
 

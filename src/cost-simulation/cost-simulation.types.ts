@@ -15,7 +15,7 @@ export interface CostLine {
 
 /** Entradas já resolvidas (comissão/frete/fiscal/custo já buscados via portas) para a engine pura. */
 export interface EngineInputs {
-  cost: number;              // custo unitário do produto (via STOCK_COST_PORT)
+  cost: number;              // custo unitário do produto (via PRODUCT_DATA_PORT)
   saleFeeAmount: number;     // comissão absoluta para o preço-âncora (modo direto)
   commissionRate: number;    // percentage_fee/100 (para modo reverso)
   shipping: number;          // frete absoluto
