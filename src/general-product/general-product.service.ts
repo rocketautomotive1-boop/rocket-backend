@@ -1,6 +1,7 @@
 // backend/src/general-product/general-product.service.ts
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
 import { GeneralProductRepository } from './general-product.repository';
+import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { ProductModel } from '../product/schemas/product.schema';
 import { isValidEan13 } from './validation/ean13';
 import { deriveGeneralCompletion, GeneralCompletion } from '../product/completion/derive-general-completion';
@@ -13,7 +14,10 @@ import { UpdateGeneralProductPatch } from './dto/update-general-product.schema';
  */
 @Injectable()
 export class GeneralProductService {
-  constructor(private readonly repo: GeneralProductRepository) {}
+  constructor(
+    private readonly repo: GeneralProductRepository,
+    @Inject(PRICING_PORT) private readonly pricing: PricingPort,
+  ) {}
 
   async register(data: Partial<ProductModel>): Promise<ProductModel> {
     this.assertValidBarcode(data.barcode);
@@ -31,7 +35,10 @@ export class GeneralProductService {
   async getCompletion(barcode: string): Promise<GeneralCompletion> {
     this.assertValidBarcode(barcode);
     const product = await this.repo.findByBarcode(barcode);
-    return deriveGeneralCompletion(product);
+    const effectivePrice = product
+      ? await this.pricing.getEffectivePrice(product._id)
+      : null;
+    return deriveGeneralCompletion(product, { effectivePrice });
   }
 
   /** Salva (upsert) os campos confirmados de uma seção. Não toca draftData. */

@@ -8,6 +8,13 @@ import { ProductModel, ProductDocument } from '../product/schemas/product.schema
 const GENERAL_DOMAIN = 'general';
 
 /**
+ * Produto geral lido do banco. Espelha o runtime do `toDto`: o documento `.lean()`
+ * sempre carrega `_id` (sanitizado para string no boundary), que `ProductModel`
+ * (classe do schema) não declara. Tipar aqui evita acessos `as any` nos callers.
+ */
+export type GeneralProductDto = ProductModel & { _id: string };
+
+/**
  * Persistência de itens gerais (saúde, beleza, bebidas, alimentos) sobre o
  * ProductModel unificado (banco único). Todo registro carrega `domain:'general'`
  * e a identidade é o `barcode` (itens gerais não têm partNumber). Toda query
@@ -21,12 +28,12 @@ export class GeneralProductRepository {
     private readonly model: Model<ProductDocument>,
   ) {}
 
-  async create(data: Partial<ProductModel>): Promise<ProductModel> {
+  async create(data: Partial<ProductModel>): Promise<GeneralProductDto> {
     const doc = await this.model.create({ ...data, domain: GENERAL_DOMAIN });
     return this.toDto(doc)!;
   }
 
-  async findByBarcode(barcode: string): Promise<ProductModel | null> {
+  async findByBarcode(barcode: string): Promise<GeneralProductDto | null> {
     const doc = await this.model.findOne({ barcode, domain: GENERAL_DOMAIN }).lean().exec();
     return this.toDto(doc);
   }
@@ -47,7 +54,7 @@ export class GeneralProductRepository {
       )
       .lean()
       .exec();
-    return { productId: String((doc as any)._id) };
+    return { productId: String(doc!._id) };
   }
 
   /**
@@ -72,7 +79,7 @@ export class GeneralProductRepository {
   async updateByBarcode(
     barcode: string,
     patch: Partial<ProductModel>,
-  ): Promise<ProductModel | null> {
+  ): Promise<GeneralProductDto | null> {
     // Defesa extra: jamais deixar draftData/barcode/domain entrar no $set.
     const { draftData, barcode: _b, domain: _d, ...safe } = (patch ?? {}) as Record<string, any>;
 
@@ -88,10 +95,10 @@ export class GeneralProductRepository {
     return this.toDto(doc);
   }
 
-  private toDto(doc: any): ProductModel | null {
+  private toDto(doc: any): GeneralProductDto | null {
     if (!doc) return null;
     const obj = typeof doc.toObject === 'function' ? doc.toObject() : doc;
-    return this.sanitize(obj);
+    return this.sanitize(obj) as GeneralProductDto;
   }
 
   private sanitize(value: any): any {
