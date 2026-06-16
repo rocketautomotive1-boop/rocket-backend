@@ -11,7 +11,7 @@ const full = {
 
 describe('deriveGeneralCompletion', () => {
   it('all sections complete + readyToPublish when everything present', () => {
-    expect(deriveGeneralCompletion(full)).toEqual({
+    expect(deriveGeneralCompletion(full, { effectivePrice: 49.9 })).toEqual({
       dados: true, imagens: true, precoEstoque: true, fiscal: true, readyToPublish: true,
     });
   });
@@ -25,9 +25,12 @@ describe('deriveGeneralCompletion', () => {
     expect(deriveGeneralCompletion({ ...full, brand: { shortName: 'ACME' } }).dados).toBe(true);
   });
 
-  it('precoEstoque requires price > 0 (string or number)', () => {
-    expect(deriveGeneralCompletion({ ...full, price: 0 }).precoEstoque).toBe(false);
-    expect(deriveGeneralCompletion({ ...full, price: 12.5 }).precoEstoque).toBe(true);
+  it('precoEstoque usa o effectivePrice passado (não product.price)', () => {
+    // product.price não importa mais; vale o effectivePrice do PricingModule
+    expect(deriveGeneralCompletion({ ...full, price: undefined }, { effectivePrice: 12.5 }).precoEstoque).toBe(true);
+    expect(deriveGeneralCompletion({ ...full, price: 99 }, { effectivePrice: 0 }).precoEstoque).toBe(false);
+    expect(deriveGeneralCompletion({ ...full, price: 99 }, { effectivePrice: null }).precoEstoque).toBe(false);
+    expect(deriveGeneralCompletion({ ...full }).precoEstoque).toBe(false); // sem opts → sem preço
   });
 
   it('fiscal reads ncm top-level or tax.ncm', () => {

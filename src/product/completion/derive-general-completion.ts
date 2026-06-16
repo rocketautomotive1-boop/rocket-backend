@@ -1,11 +1,9 @@
 /**
- * Completude por seção de um produto de domínio 'general' (saúde, beleza,
- * bebidas, alimentos), derivada SOMENTE dos campos finais do produto (nunca do
- * draftData). Função PURA e testável. Itens gerais não têm part number, títulos
- * por marketplace, categoria interna nem dimensões obrigatórias — por isso a
- * completude difere da de autopeças (ProductReadinessService).
+ * Completude por seção de um produto de domínio 'general'. Função PURA e testável.
+ * O preço NÃO vem de product.price (removido pelo pricing refactor) — é o preço
+ * efetivo do PricingModule, passado em opts.effectivePrice pelo caller.
  *
- * Seções: dados (nome + marca), imagens, precoEstoque (preço > 0), fiscal (ncm).
+ * Seções: dados (nome + marca), imagens, precoEstoque (effectivePrice > 0), fiscal (ncm).
  */
 export interface GeneralCompletion {
   dados: boolean;
@@ -15,7 +13,11 @@ export interface GeneralCompletion {
   readyToPublish: boolean;
 }
 
-export function deriveGeneralCompletion(product: any): GeneralCompletion {
+export interface GeneralCompletionOpts {
+  effectivePrice?: number | null;
+}
+
+export function deriveGeneralCompletion(product: any, opts: GeneralCompletionOpts = {}): GeneralCompletion {
   const p = product ?? {};
 
   const brandName = p.brand?.name ?? p.brand?.shortName;
@@ -23,7 +25,7 @@ export function deriveGeneralCompletion(product: any): GeneralCompletion {
 
   const imagens = Array.isArray(p.images) && p.images.length > 0;
 
-  const priceNum = p.price != null ? Number(p.price) : NaN;
+  const priceNum = opts.effectivePrice != null ? Number(opts.effectivePrice) : NaN;
   const precoEstoque = Number.isFinite(priceNum) && priceNum > 0;
 
   const ncm = p.ncm ?? p.tax?.ncm;
