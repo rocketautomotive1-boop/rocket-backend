@@ -77,6 +77,11 @@ export class DiscoveryMsResponseConsumer {
                     items: results?.serp?.items ?? [],
                     confidence: results?.serp?.items?.length > 0 ? 'medium' : 'none',
                 },
+                menorPreco: {
+                    stats: results?.menorPreco?.stats ?? null,
+                    offers: results?.menorPreco?.offers ?? [],
+                    confidence: (results?.menorPreco?.offers?.length ?? 0) > 0 ? 'high' : 'none',
+                },
             };
 
             const mlPrices = results?.mercadolivre?.prices ?? results?.ai?.prices ?? null;
