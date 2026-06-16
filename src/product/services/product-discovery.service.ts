@@ -347,6 +347,13 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
         const sources = (doc?.sources && typeof doc.sources === 'object') ? doc.sources : {};
         const mlSource = (sources?.mercadolivre && typeof sources.mercadolivre === 'object') ? sources.mercadolivre : {};
         const serpSource = (sources?.serp && typeof sources.serp === 'object') ? sources.serp : {};
+        const menorPreco = (sources?.menorPreco && typeof sources.menorPreco === 'object')
+            ? {
+                stats: sources.menorPreco.stats ?? null,
+                offers: Array.isArray(sources.menorPreco.offers) ? sources.menorPreco.offers : [],
+                confidence: sources.menorPreco.confidence,
+              }
+            : null;
 
         const rawVehicles = Array.isArray(finalPayload?.vehicles) ? finalPayload.vehicles : [];
         const vehicles: DiscoveryVehicleSuggestion[] = rawVehicles
@@ -393,6 +400,7 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
                 : (Array.isArray(serpSource?.items) ? serpSource.items : []),
             resolvedCategoryId: doc?.resolvedCategoryId ? String(doc.resolvedCategoryId) : null,
             timing: finalPayload?.timing ?? null,
+            menorPreco,
         };
 
         return {
