@@ -8,6 +8,25 @@ export interface DiscoveryPriceRange {
     max: number;
 }
 
+export interface MenorPrecoOfferDto {
+    seller_name: string | null;
+    legal_name: string | null;
+    address: string | null;
+    bairro: string | null;
+    mun: string | null;
+    uf: string | null;
+    price: number | null;
+    list_price: number | null;
+    sold_at: string | null;
+    dist_km: number | null;
+}
+
+export interface MenorPrecoDto {
+    stats: { min: number | null; avg: number | null; max: number | null; count: number } | null;
+    offers: MenorPrecoOfferDto[];
+    confidence?: string;
+}
+
 export interface DiscoveryAppData {
     titles: string[];
     prices: DiscoveryPriceRange | null;
@@ -25,6 +44,7 @@ export interface DiscoveryAppData {
     rawItems: any[];
     resolvedCategoryId: string | null;
     timing: { serp: number; mercadolivre: number; ai: number; total: number } | null;
+    menorPreco: MenorPrecoDto | null;
 }
 
 export interface DiscoveryAppDocument {
