@@ -17,6 +17,9 @@ import { ProductTitle } from './schemas/product.schema';
 
 import { ProductTitleService } from './services/product-title.service';
 import { ProductDiscoveryService } from './services/product-discovery.service';
+import { SourceRefreshService } from './services/source-refresh.service';
+import { parseSourceName } from './dto/source-refresh.dto';
+import { ZodError } from 'zod';
 import { CategorySnapshotService } from './services/category-snapshot.service';
 import { CreateFromDiscoveryDto } from './dto/create-from-discovery.dto';
 import { SearchService } from '../search/search.service';
@@ -45,6 +48,7 @@ export class ProductController {
     private readonly boxService: BoxService,
     private readonly searchService: SearchService,
     private readonly discoveryService: ProductDiscoveryService,
+    private readonly sourceRefreshService: SourceRefreshService,
     private readonly categorySnapshotService: CategorySnapshotService,
     @Inject(PRICING_PORT) private readonly pricing: PricingPort,
   ) { }
@@ -124,6 +128,25 @@ export class ProductController {
     return { jobId };
   }
 
+  @Post(':id/sources/:source/refresh')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Atualiza isoladamente UMA fonte de descoberta do produto (ex.: Menor Preço)' })
+  @ApiParam({ name: 'source', enum: ['menorPreco', 'ml', 'serp'] })
+  async refreshSource(
+    @Param('id') id: string,
+    @Param('source') source: string,
+  ): Promise<{ jobId: string }> {
+    let parsedSource;
+    try {
+      parsedSource = parseSourceName(source);
+    } catch (error) {
+      if (error instanceof ZodError) {
+        throw new BadRequestException(error.issues[0]?.message ?? 'Fonte inválida.');
+      }
+      throw error;
+    }
+    return this.sourceRefreshService.requestRefresh({ productId: id, source: parsedSource });
+  }
 
   @Get('discovery/status/:jobId')
   @ApiOperation({ summary: 'Obter status de um job de descoberta' })

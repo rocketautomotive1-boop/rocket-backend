@@ -99,6 +99,8 @@ import { ProductAliasModel, ProductAliasSchema } from './schemas/product-alias.s
 import { ProductMatcherService } from './services/product-matcher.service';
 import { StockSyncConsumer } from './consumers/stock-sync.consumer';
 import { DiscoveryMsResponseConsumer } from './consumers/discovery-ms-response.consumer';
+import { SourceRefreshService } from './services/source-refresh.service';
+import { SourceRefreshResponseConsumer } from './consumers/source-refresh-response.consumer';
 import { ProductReadinessService } from './services/product-readiness.service';
 import { PublicationTriggerListener } from './listeners/publication-trigger.listener';
 import { ReadinessRecoveryJob } from './jobs/readiness-recovery.job';
@@ -204,8 +206,10 @@ import { PricingModule } from '../pricing/pricing.module';
     ProductMatcherService,
     StockSyncConsumer, // [NEW] RabbitMQ Consumer
     ProductDiscoveryService,
+    SourceRefreshService,
     CategoryResolutionService,
     DiscoveryMsResponseConsumer,
+    SourceRefreshResponseConsumer,
     ProductReadinessService,
     PublicationTriggerListener,
     ReadinessRecoveryJob,
