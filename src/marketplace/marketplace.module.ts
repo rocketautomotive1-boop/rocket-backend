@@ -22,6 +22,7 @@ import { ShopeeAuthAdapter } from './adapters/shopee/shopee-auth.adapter';
 import { ShopeeProductAdapter } from './adapters/shopee/shopee-product.adapter';
 import { ShopeeOrderAdapter } from './adapters/shopee/shopee-order.adapter';
 import { ShopeeCategoryAdapter } from './adapters/shopee/shopee-category.adapter';
+import { ShopeeSignerService } from './adapters/shopee/shopee-signer.service';
 import { CategoryQueryService, CategorySyncService, CategoryMappingService } from './services/category';
 import { MarketplaceIntegrationService } from './services/marketplace-integration.service';
 import { MarketplaceIntegrationHelperService } from './services/marketplace-integration-helper.service';
@@ -168,6 +169,7 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
     ShopeeProductAdapter,
     ShopeeOrderAdapter,
     ShopeeCategoryAdapter,
+    ShopeeSignerService,
     AmazonAdapter,
     AmazonService,
     AmazonProductAdapter,
@@ -217,6 +219,7 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
     MercadoLivreService,
     MercadoLivreAttributesService,
     ShopeeService,
+    ShopeeSignerService,
     AmazonAdapter,
     AmazonService,
     AmazonProductAdapter,
