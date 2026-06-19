@@ -74,7 +74,8 @@ export class MarketplaceTokenBrokerService {
     return chosen ? this.toRef(marketplaceId, (mp as any).tag, chosen) : null;
   }
 
-  private async accountById(marketplaceId: string, accountId: string): Promise<AccountRef | null> {
+  /** Resolve uma conta multi-client pelo accountId (público — usado por forceRefresh por conta). */
+  async accountById(marketplaceId: string, accountId: string): Promise<AccountRef | null> {
     const mp = await this.marketplaceModel.findById(marketplaceId).lean().exec();
     if (!mp) return null;
     const acc = ((mp as any).accounts ?? []).find((a: any) => String(a._id) === String(accountId));

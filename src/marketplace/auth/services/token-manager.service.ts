@@ -142,12 +142,22 @@ export class TokenManagerService {
     }
 
     /** Força a renovação do token oauth2 (ignora buffer) e devolve o renovado. */
-    async forceRefresh(marketplaceId: string, domain?: string): Promise<ResolvedToken> {
-        const account = await this.broker.accountFor(marketplaceId, domain);
+    async forceRefresh(
+        marketplaceId: string,
+        selector?: string | { domain?: string; accountId?: string },
+    ): Promise<ResolvedToken> {
+        const { domain, accountId } =
+            typeof selector === 'string' ? { domain: selector, accountId: undefined } : (selector ?? {});
+
+        // accountId tem PRECEDÊNCIA (conta de entrada já determinada); senão resolve por domínio.
+        const account = accountId
+            ? await this.broker.accountById(marketplaceId, accountId)
+            : await this.broker.accountFor(marketplaceId, domain);
+
         if (account?.accountId) {
             await this.broker.refreshToken(marketplaceId, account.accountId, domain);
         }
-        return this.resolveToken(marketplaceId, domain);
+        return this.resolveToken(marketplaceId, accountId ? { accountId, domain } : domain);
     }
 
     private async resolveOAuthToken(marketplace: MarketplaceDocument, domain?: string, accountId?: string): Promise<ResolvedToken> {
