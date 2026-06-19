@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { QuestionRepository } from '../question.repository';
 import { MarketplaceRegistryService } from '../../marketplace/services/marketplace-registry.service';
 import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
+import { MarketplaceTokenBrokerService } from '../../marketplace/auth/services/marketplace-token-broker.service';
 import { MercadoLivreAdapter } from '../../marketplace/adapters/mercado-livre/mercado-livre.adapter';
 import { QuestionProductResolver } from '../resolve/question-product.resolver';
 import { NOTIFICATION_EVENTS } from '../../notifications/events/notification.events';
@@ -16,19 +17,28 @@ export class QuestionIngestService {
     private readonly questionRepository: QuestionRepository,
     private readonly marketplaceRegistry: MarketplaceRegistryService,
     private readonly marketplaceAuth: MarketplaceAuthService,
+    private readonly broker: MarketplaceTokenBrokerService,
     private readonly mercadoLivreAdapter: MercadoLivreAdapter,
     private readonly resolver: QuestionProductResolver,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  async ingest(externalQuestionId: string, source: QuestionIngestSource = 'webhook'): Promise<void> {
+  async ingest(
+    externalQuestionId: string,
+    source: QuestionIngestSource = 'webhook',
+    accountId?: string,
+  ): Promise<void> {
     const marketplaces = await this.marketplaceRegistry.findAll();
     const mkt = marketplaces.find((m: any) => m.enabled && m.name === 'Mercado Livre');
     if (!mkt) return;
 
+    // Multi-client: token da conta que originou a pergunta (accountId) quando
+    // conhecido; senão conta default (legado/single-account).
     let token: string | undefined;
     try {
-      const active = await this.marketplaceAuth.ensureValidToken(mkt._id);
+      const active = accountId
+        ? await this.broker.ensureValidTokenByAccount(String(mkt._id), accountId)
+        : await this.marketplaceAuth.ensureValidToken(mkt._id);
       token = active?.accessToken;
     } catch { return; }
     if (!token) return;
