@@ -4,7 +4,8 @@ import { Model } from 'mongoose';
 import axios from 'axios';
 import { OrderDocument, OrderModel } from '../schemas/order.schema';
 import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
-import { buildSignedParams, buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
+import { buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
+import { ShopeeSignerService } from '../../marketplace/adapters/shopee/shopee-signer.service';
 import { MarketplaceOrderService } from '../../marketplace/services/marketplace-order.service';
 import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
 
@@ -166,6 +167,7 @@ export class OrderMarketplaceDetailsService {
         private readonly configCache: MarketplaceConfigCacheService,
         private readonly marketplaceOrderService: MarketplaceOrderService,
         private readonly auth: MarketplaceAuthService,
+        private readonly signer: ShopeeSignerService,
     ) {}
 
     async getDetails(orderId: string): Promise<MarketplaceOrderDetails> {
@@ -635,7 +637,7 @@ export class OrderMarketplaceDetailsService {
             response_optional_fields: extraFields,
         };
 
-        const signedParams = buildSignedParams(path, timestamp, token.accessToken, Number(shopId), queryParams);
+        const signedParams = await this.signer.buildSignedParams(path, timestamp, token.accessToken, Number(shopId), queryParams);
 
         this.logger.log(`[Shopee Details] Fetching order ${orderSn}`);
 

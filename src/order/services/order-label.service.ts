@@ -5,7 +5,8 @@ import axios from 'axios';
 import { OrderDocument, OrderModel } from '../schemas/order.schema';
 import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
 import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
-import { buildSignedParams, buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
+import { buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
+import { ShopeeSignerService } from '../../marketplace/adapters/shopee/shopee-signer.service';
 
 export interface LabelResult {
     format: 'zpl' | 'pdf' | 'url';
@@ -22,6 +23,7 @@ export class OrderLabelService {
         @InjectModel(OrderModel.name) private readonly orderModel: Model<OrderDocument>,
         private readonly configCache: MarketplaceConfigCacheService,
         private readonly auth: MarketplaceAuthService,
+        private readonly signer: ShopeeSignerService,
     ) {}
 
     async getLabel(orderId: string): Promise<LabelResult> {
@@ -127,7 +129,7 @@ export class OrderLabelService {
             shipping_document_type: 'THERMAL_AIR_WAYBILL',
         };
 
-        const params = buildSignedParams(path, timestamp, token.accessToken, Number(shopId));
+        const params = await this.signer.buildSignedParams(path, timestamp, token.accessToken, Number(shopId));
 
         this.logger.log(`[Shopee Label] Requesting THERMAL_AIR_WAYBILL for order ${orderSn}`);
 
