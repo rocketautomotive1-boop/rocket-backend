@@ -5,7 +5,8 @@ describe('MarketplaceTemplateRepository.findDefault (domain selection)', () => {
     const marketplace = { _id: 'mp1', name: 'Mercado Livre', templates };
     // findMarketplaceByName chains findOne(...) — first call resolves the marketplace.
     const model: any = { findOne: jest.fn().mockResolvedValue(marketplace) };
-    return new MarketplaceTemplateRepository(model);
+    const configCache: any = { invalidate: jest.fn() };
+    return new MarketplaceTemplateRepository(model, configCache);
   };
 
   const classic = { name: 'Autopeças', isDefault: true, isActive: true };

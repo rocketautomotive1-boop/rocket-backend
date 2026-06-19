@@ -4,6 +4,7 @@ import { MarketplaceModel } from '../../schemas/marketplace.schema';
 import { MarketplaceTokenBrokerService, canonicalDomain } from './marketplace-token-broker.service';
 import { MarketplaceCredentialsService } from '../../credentials/marketplace-credentials.service';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
+import { MarketplaceConfigCacheService } from '../../services/marketplace-config-cache.service';
 import { encrypt } from '../../credentials/credentials-crypto.helper';
 
 /**
@@ -53,6 +54,7 @@ describe('MarketplaceTokenBrokerService', () => {
         { provide: getModelToken(MarketplaceModel.name), useValue: modelMock },
         { provide: MarketplaceCredentialsService, useValue: { get: jest.fn().mockResolvedValue(undefined) } },
         { provide: MarketplaceAdapterRegistry, useValue: registry },
+        { provide: MarketplaceConfigCacheService, useValue: { resolveId: jest.fn().mockResolvedValue(null), invalidate: jest.fn() } },
       ],
     }).compile();
 

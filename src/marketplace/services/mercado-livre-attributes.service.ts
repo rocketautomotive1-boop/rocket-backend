@@ -1,19 +1,11 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import axios from 'axios';
 import { CategoryAttribute, CategoryDetails } from '../interfaces/category-attribute.interface';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { MarketplaceModel, MarketplaceDocument } from '../schemas/marketplace.schema';
 
 @Injectable()
 export class MercadoLivreAttributesService {
   private readonly logger = new Logger(MercadoLivreAttributesService.name);
   private readonly baseUrl = 'https://api.mercadolibre.com';
-
-  constructor(
-    @InjectModel(MarketplaceModel.name)
-    private marketplaceModel: Model<MarketplaceDocument>,
-  ) { }
 
   async getCategoryAttributes(categoryId: string, marketplaceId: string): Promise<CategoryAttribute[]> {
     try {
@@ -116,12 +108,8 @@ export class MercadoLivreAttributesService {
     }
   }
 
-  async saveCategoriesAttributes(marketplaceId: string, attributes: CategoryAttribute[]) {
-    try {
-      const marketplace = await this.marketplaceModel.findById(marketplaceId).exec();
-    } catch (error) {
-      this.logger.error(`Erro ao salvar atributos das categorias do Mercado Livre:`, error);
-      throw error;
-    }
+  async saveCategoriesAttributes(_marketplaceId: string, _attributes: CategoryAttribute[]) {
+    // No-op: persistência de atributos de categoria não é responsabilidade deste service.
+    // (Removida leitura morta do marketplace que apenas era descartada.)
   }
 }

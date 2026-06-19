@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { MarketplaceModel, MarketplaceDocument } from '../schemas/marketplace.schema';
 import { encrypt, decrypt, isEncrypted } from './credentials-crypto.helper';
+import { MarketplaceConfigCacheService } from '../services/marketplace-config-cache.service';
 
 interface CacheEntry {
   values: Record<string, string>;
@@ -30,6 +31,7 @@ export class MarketplaceCredentialsService {
   constructor(
     @InjectModel(MarketplaceModel.name)
     private marketplaceModel: Model<MarketplaceDocument>,
+    private readonly configCache: MarketplaceConfigCacheService,
   ) {}
 
   /**
@@ -145,6 +147,8 @@ export class MarketplaceCredentialsService {
     for (const [k, v] of this.cache.entries()) {
       if (v.expiresAt < Date.now()) this.cache.delete(k);
     }
+    // `marketplaces.credentials` também vive no config cache (doc inteiro) → invalidar.
+    this.configCache.invalidate();
     // Em ambiente multi-instância, cache eventual converge via TTL de 60s
   }
 

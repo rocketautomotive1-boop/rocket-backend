@@ -1,12 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { MarketplaceDocument, MarketplaceModel } from '../../schemas/marketplace.schema';
 import { MarketplaceCategoryDocument, MarketplaceCategoryModel } from '../../schemas/marketplace-category.schema';
 import { MercadoLivreAdapter } from '../../adapters/mercado-livre/mercado-livre.adapter';
 import { ShopeeAdapter } from '../../adapters/shopee/shopee.adapter';
 import { MarketplaceAuthService } from '../../auth/services/marketplace-auth.service';
 import { CategoryQueryService } from './category-query.service';
+import { MarketplaceConfigCacheService, MarketplaceConfig } from '../marketplace-config-cache.service';
 
 @Injectable()
 export class CategorySyncService {
@@ -15,18 +15,17 @@ export class CategorySyncService {
   constructor(
     @InjectModel(MarketplaceCategoryModel.name)
     private marketplaceCategoryModel: Model<MarketplaceCategoryDocument>,
-    @InjectModel(MarketplaceModel.name)
-    private marketplaceModel: Model<MarketplaceDocument>,
     private mercadoLivreAdapter: MercadoLivreAdapter,
     private shopeeAdapter: ShopeeAdapter,
     private marketplaceAuthService: MarketplaceAuthService,
     private categoryQueryService: CategoryQueryService,
+    private configCache: MarketplaceConfigCacheService,
   ) { }
 
   async syncCategories(marketplaceId: string | number | any, parentId?: string): Promise<MarketplaceCategoryDocument[]> {
     this.logger.log(`Sincronizando categorias para marketplace ID ${marketplaceId}`);
 
-    const marketplace = await this.marketplaceModel.findById(marketplaceId).exec();
+    const marketplace = await this.configCache.getById(String(marketplaceId));
 
     if (!marketplace) {
       throw new Error(`Marketplace ID ${marketplaceId} não encontrado`);
@@ -51,7 +50,7 @@ export class CategorySyncService {
     return categories;
   }
 
-  private async syncMercadoLivreCategories(marketplace: MarketplaceDocument, token: any, parentId?: string): Promise<MarketplaceCategoryDocument[]> {
+  private async syncMercadoLivreCategories(marketplace: MarketplaceConfig, token: any, parentId?: string): Promise<MarketplaceCategoryDocument[]> {
     this.logger.log(`Sincronizando categorias do Mercado Livre${parentId ? ` para categoria pai ${parentId}` : ''}`);
 
     try {
@@ -127,7 +126,7 @@ export class CategorySyncService {
    * Persiste uma categoria do Mercado Livre (detalhes completos da API) na coleção interna.
    */
   private async upsertMercadoLivreCategory(
-    marketplace: MarketplaceDocument,
+    marketplace: MarketplaceConfig,
     category: any,
   ): Promise<MarketplaceCategoryDocument> {
     const existingCategory = await this.categoryQueryService.findCategoryByExternalId(marketplace.id, category.id);
@@ -165,7 +164,7 @@ export class CategorySyncService {
   ): Promise<{ chain: MarketplaceCategoryDocument[]; category: MarketplaceCategoryDocument }> {
     this.logger.log(`Importando categoria externa ${externalCategoryId} para marketplace ${marketplaceId}`);
 
-    const marketplace = await this.marketplaceModel.findById(marketplaceId).exec();
+    const marketplace = await this.configCache.getById(String(marketplaceId));
     if (!marketplace) {
       throw new Error(`Marketplace ID ${marketplaceId} não encontrado`);
     }
@@ -212,7 +211,7 @@ export class CategorySyncService {
     return { chain: saved, category: leaf };
   }
 
-  private async syncShopeeCategories(marketplace: MarketplaceDocument, token: any, parentId?: string): Promise<MarketplaceCategoryDocument[]> {
+  private async syncShopeeCategories(marketplace: MarketplaceConfig, token: any, parentId?: string): Promise<MarketplaceCategoryDocument[]> {
     this.logger.log(`Sincronizando categorias da Shopee${parentId ? ` para categoria pai ${parentId}` : ''}`);
 
     try {
@@ -267,7 +266,7 @@ export class CategorySyncService {
   }
 
   // Método para sincronizar recursivamente as subcategorias da Shopee
-  private async syncShopeeCategoryChildren(marketplace: MarketplaceDocument, token: any, parentId: string): Promise<void> {
+  private async syncShopeeCategoryChildren(marketplace: MarketplaceConfig, token: any, parentId: string): Promise<void> {
     this.logger.log(`Sincronizando subcategorias da Shopee para categoria pai ${parentId}`);
 
     try {
@@ -318,7 +317,7 @@ export class CategorySyncService {
   async saveDiscoveredCategory(marketplaceId: string | number, category: any): Promise<MarketplaceCategoryDocument> {
     this.logger.log(`Salvando categoria descoberta: ${category.id} - ${category.name}`);
 
-    const marketplace = await this.marketplaceModel.findById(marketplaceId).exec();
+    const marketplace = await this.configCache.getById(String(marketplaceId));
     if (!marketplace) {
       throw new Error(`Marketplace ID ${marketplaceId} não encontrado`);
     }

@@ -3,8 +3,8 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ProductModel, ProductDocument } from '../../product/schemas/product.schema';
-import { MarketplaceModel, MarketplaceDocument } from '../schemas/marketplace.schema';
 import { MlDimensionsCalculatorService } from '../services/ml-dimensions-calculator.service';
+import { MarketplaceConfigCacheService } from '../services/marketplace-config-cache.service';
 import { PRODUCT_EVENTS, ProductUpdatedEvent } from '../../product/events/product.events';
 
 const ML_DIMENSION_KEYS = [
@@ -21,8 +21,7 @@ export class MlDimensionsAttributeHandler {
   constructor(
     @InjectModel(ProductModel.name)
     private readonly productModel: Model<ProductDocument>,
-    @InjectModel(MarketplaceModel.name)
-    private readonly marketplaceModel: Model<MarketplaceDocument>,
+    private readonly configCache: MarketplaceConfigCacheService,
     private readonly calculator: MlDimensionsCalculatorService,
   ) {}
 
@@ -42,10 +41,7 @@ export class MlDimensionsAttributeHandler {
 
       if (!product) return;
 
-      const mlMarketplace = await this.marketplaceModel
-        .findOne({ name: 'Mercado Livre' })
-        .lean()
-        .exec();
+      const mlMarketplace = await this.configCache.getByName('Mercado Livre');
 
       if (!mlMarketplace) return;
 

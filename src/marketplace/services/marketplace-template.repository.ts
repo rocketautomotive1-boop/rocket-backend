@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { MarketplaceModel, MarketplaceDocument, MarketplaceDescriptionTemplateSnapshot } from '../schemas/marketplace.schema';
+import { MarketplaceConfigCacheService } from './marketplace-config-cache.service';
 
 /**
  * Responsabilidade única: acesso ao MongoDB para templates de descrição.
@@ -18,6 +19,7 @@ export class MarketplaceTemplateRepository {
   constructor(
     @InjectModel(MarketplaceModel.name)
     private readonly marketplaceModel: Model<MarketplaceDocument>,
+    private readonly configCache: MarketplaceConfigCacheService,
   ) {}
 
   // ── Consultas ──────────────────────────────────────────────────────────────
@@ -93,6 +95,7 @@ export class MarketplaceTemplateRepository {
     if (!marketplace.templates) marketplace.templates = [];
     marketplace.templates.push(newTemplate);
     await marketplace.save();
+    this.configCache.invalidate(); // templates vivem no doc cacheado
 
     return marketplace.templates[marketplace.templates.length - 1];
   }
@@ -122,6 +125,7 @@ export class MarketplaceTemplateRepository {
 
     marketplace.markModified('templates');
     await marketplace.save();
+    this.configCache.invalidate(); // templates vivem no doc cacheado
 
     return marketplace.templates[idx];
   }
@@ -132,6 +136,7 @@ export class MarketplaceTemplateRepository {
 
     marketplace.templates = marketplace.templates.filter((t: any) => t._id.toString() !== id);
     await marketplace.save();
+    this.configCache.invalidate(); // templates vivem no doc cacheado
     return true;
   }
 

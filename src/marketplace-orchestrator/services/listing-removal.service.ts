@@ -4,8 +4,8 @@ import { Model } from 'mongoose';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { v4 as uuidv4 } from 'uuid';
 import { ListingModel, ListingDocument } from '../../listing/schemas/listing.schema';
-import { MarketplaceModel, MarketplaceDocument } from '../../marketplace/schemas/marketplace.schema';
 import { PublicationLogService } from '../../marketplace/services/publication-log.service';
+import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
 import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
 import { MarketplaceSyncPayload } from '../dto/marketplace-sync.dto';
 
@@ -15,7 +15,7 @@ export class ListingRemovalService {
 
     constructor(
         @InjectModel(ListingModel.name) private readonly listingModel: Model<ListingDocument>,
-        @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceDocument>,
+        private readonly configCache: MarketplaceConfigCacheService,
         private readonly amqpConnection: AmqpConnection,
         private readonly publicationLogService: PublicationLogService,
         private readonly auth: MarketplaceAuthService,
@@ -45,7 +45,7 @@ export class ListingRemovalService {
         }
 
         // Published listing — need to unpublish from marketplace first
-        const marketplace = await this.marketplaceModel.findById(listing.marketplaceId).exec();
+        const marketplace = await this.configCache.getById(String(listing.marketplaceId));
         if (!marketplace) {
             throw new NotFoundException(`Marketplace ${listing.marketplaceId} not found for listing ${listingId}`);
         }

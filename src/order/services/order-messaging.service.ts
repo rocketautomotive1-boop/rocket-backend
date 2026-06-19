@@ -4,8 +4,8 @@ import { Model } from 'mongoose';
 import axios from 'axios';
 import * as FormData from 'form-data';
 import { OrderDocument, OrderModel } from '../schemas/order.schema';
-import { MarketplaceModel, MarketplaceDocument } from '../../marketplace/schemas/marketplace.schema';
 import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
+import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
 import { buildSignedParams, buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
 
 export interface ChatMessage {
@@ -32,7 +32,7 @@ export class OrderMessagingService {
 
     constructor(
         @InjectModel(OrderModel.name) private readonly orderModel: Model<OrderDocument>,
-        @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceDocument>,
+        private readonly configCache: MarketplaceConfigCacheService,
         private readonly auth: MarketplaceAuthService,
     ) {}
 
@@ -362,10 +362,7 @@ export class OrderMessagingService {
         const order = await this.orderModel.findById(orderId).lean().exec();
         if (!order) throw new NotFoundException(`Order ${orderId} not found`);
 
-        const marketplace = await this.marketplaceModel
-            .findById((order as any).marketplaceId)
-            .lean()
-            .exec();
+        const marketplace = await this.configCache.getById(String((order as any).marketplaceId));
         if (!marketplace) throw new NotFoundException(`Marketplace not found for order ${orderId}`);
 
         const token = await this.auth.ensureValidToken(String(marketplace._id));

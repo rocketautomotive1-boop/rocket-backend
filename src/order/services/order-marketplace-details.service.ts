@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import axios from 'axios';
 import { OrderDocument, OrderModel } from '../schemas/order.schema';
-import { MarketplaceModel, MarketplaceDocument } from '../../marketplace/schemas/marketplace.schema';
+import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
 import { buildSignedParams, buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
 import { MarketplaceOrderService } from '../../marketplace/services/marketplace-order.service';
 import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
@@ -163,7 +163,7 @@ export class OrderMarketplaceDetailsService {
 
     constructor(
         @InjectModel(OrderModel.name) private readonly orderModel: Model<OrderDocument>,
-        @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceDocument>,
+        private readonly configCache: MarketplaceConfigCacheService,
         private readonly marketplaceOrderService: MarketplaceOrderService,
         private readonly auth: MarketplaceAuthService,
     ) {}
@@ -700,10 +700,7 @@ export class OrderMarketplaceDetailsService {
         const order = await this.orderModel.findById(orderId).lean().exec();
         if (!order) throw new NotFoundException(`Order ${orderId} not found`);
 
-        const marketplace = await this.marketplaceModel
-            .findById((order as any).marketplaceId)
-            .lean()
-            .exec();
+        const marketplace = await this.configCache.getById(String((order as any).marketplaceId));
         if (!marketplace) throw new NotFoundException(`Marketplace not found for order ${orderId}`);
 
         const token = await this.auth.ensureValidToken(String(marketplace._id));

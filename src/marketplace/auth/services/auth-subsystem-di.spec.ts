@@ -7,6 +7,7 @@ import { MarketplaceAuthService } from './marketplace-auth.service';
 import { MarketplaceCredentialsService } from '../../credentials/marketplace-credentials.service';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
 import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
+import { MarketplaceConfigCacheService } from '../../services/marketplace-config-cache.service';
 
 /**
  * Boot test de DI do subsistema de auth/token: prova que o grafo
@@ -28,6 +29,7 @@ describe('Auth subsystem DI graph (no forwardRef cycles)', () => {
         { provide: getModelToken(MarketplaceModel.name), useValue: { findById: jest.fn(), findOne: jest.fn(), find: jest.fn(), updateOne: jest.fn() } },
         { provide: MarketplaceCredentialsService, useValue: { get: jest.fn() } },
         { provide: MarketplaceRegistryService, useValue: { findOne: jest.fn(), findByName: jest.fn(), findByTag: jest.fn() } },
+        { provide: MarketplaceConfigCacheService, useValue: { resolveId: jest.fn(), invalidate: jest.fn() } },
       ],
     }).compile();
 

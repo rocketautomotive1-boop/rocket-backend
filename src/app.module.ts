@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ProductModule } from './product/product.module';
 import { MarketplaceModule } from './marketplace/marketplace.module';
 import { MarketplaceCredentialsModule } from './marketplace/credentials/marketplace-credentials.module';
+import { MarketplaceConfigCacheModule } from './marketplace/services/marketplace-config-cache.module';
 
 import { QueueModule } from './queue/queue.module';
 import { RabbitMqModule } from './common/rabbitmq/rabbitmq.module';
@@ -54,6 +55,7 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
   imports: [
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
+    MarketplaceConfigCacheModule,
     MarketplaceCredentialsModule,
     ConfigModule.forRoot({
       isGlobal: true,

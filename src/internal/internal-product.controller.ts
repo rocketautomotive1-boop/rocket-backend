@@ -4,8 +4,8 @@ import { Model, Types } from 'mongoose';
 import { InternalKeyGuard } from './internal-key.guard';
 import { ProductModel } from '../product/schemas/product.schema';
 import { ListingModel } from '../listing/schemas/listing.schema';
-import { MarketplaceModel } from '../marketplace/schemas/marketplace.schema';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
+import { MarketplaceConfigCacheService } from '../marketplace/services/marketplace-config-cache.service';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 
@@ -15,7 +15,7 @@ export class InternalProductController {
     constructor(
         @InjectModel(ProductModel.name) private readonly productModel: Model<ProductModel>,
         @InjectModel(ListingModel.name) private readonly listingModel: Model<ListingModel>,
-        @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceModel>,
+        private readonly configCache: MarketplaceConfigCacheService,
         private readonly descriptionService: MarketplaceDescriptionService,
         @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
         @Inject(PRICING_PORT) private readonly pricing: PricingPort,
@@ -79,14 +79,9 @@ export class InternalProductController {
         const mappings = category.marketplaceMappings;
         if (!Array.isArray(mappings) || mappings.length === 0) return;
 
-        const ml = await this.marketplaceModel
-            .findOne({ tag: 'mercadolivre' })
-            .select('_id')
-            .lean()
-            .exec();
-        if (!ml) return;
+        const mlId = await this.configCache.resolveId('mercadolivre');
+        if (!mlId) return;
 
-        const mlId = String((ml as any)._id);
         const mapping = mappings.find((m: any) => String(m.marketplaceId) === mlId);
         const externalId = mapping?.externalId ?? mapping?.categoryResult?.category_id;
         if (externalId) category.mlCategoryId = String(externalId);
@@ -100,12 +95,12 @@ export class InternalProductController {
             .exec();
 
         const marketplaceIds = [...new Set(listings.map((l) => String(l.marketplaceId)))];
-        const marketplaces = await this.marketplaceModel
-            .find({ _id: { $in: marketplaceIds } })
-            .select('_id tag')
-            .lean()
-            .exec();
-        const tagMap = new Map(marketplaces.map((m: any) => [String(m._id), m.tag as string]));
+        const resolved = await Promise.all(marketplaceIds.map((mid) => this.configCache.getById(mid)));
+        const tagMap = new Map(
+            resolved
+                .filter((m): m is NonNullable<typeof m> => !!m)
+                .map((m: any) => [String(m._id), m.tag as string]),
+        );
 
         return listings.map((l) => ({
             ...l,

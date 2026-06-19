@@ -1,9 +1,9 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
-import { MarketplaceModel, MarketplaceDocument, MarketplaceDescriptionTemplateSnapshot } from '../schemas/marketplace.schema';
+import { Types } from 'mongoose';
+import { MarketplaceDescriptionTemplateSnapshot } from '../schemas/marketplace.schema';
 import { ProductDocument } from '../../product/product-types';
 import { MarketplaceTemplateRepository } from './marketplace-template.repository';
+import { MarketplaceConfigCacheService } from './marketplace-config-cache.service';
 import { ProductFieldMapper } from './product-field-mapper.service';
 import { TemplateEngine } from './template-engine.service';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
@@ -34,8 +34,7 @@ export class MarketplaceDescriptionService {
   private readonly logger = new Logger(MarketplaceDescriptionService.name);
 
   constructor(
-    @InjectModel(MarketplaceModel.name)
-    private readonly marketplaceModel: Model<MarketplaceDocument>,
+    private readonly configCache: MarketplaceConfigCacheService,
     private readonly templateRepo: MarketplaceTemplateRepository,
     private readonly fieldMapper: ProductFieldMapper,
     private readonly engine: TemplateEngine,
@@ -131,9 +130,9 @@ export class MarketplaceDescriptionService {
   }
 
   async getDefaultTemplateForMarketplace(marketplaceId: string): Promise<MarketplaceDescriptionTemplateSnapshot | null> {
-    const marketplace = await this.marketplaceModel.findById(marketplaceId);
+    const marketplace = await this.configCache.getById(marketplaceId);
     if (!marketplace) return null;
-    return marketplace.templates?.find(t => t.isDefault && t.isActive) ?? null;
+    return (marketplace as any).templates?.find((t: any) => t.isDefault && t.isActive) ?? null;
   }
 
   async getDefaultTemplateForMarketplaceName(marketplaceName: string): Promise<MarketplaceDescriptionTemplateSnapshot | null> {

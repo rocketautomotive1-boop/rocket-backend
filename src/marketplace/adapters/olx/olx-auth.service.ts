@@ -2,9 +2,6 @@ import { Injectable, Logger, OnModuleInit, InternalServerErrorException } from '
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { ConfigService } from '@nestjs/config';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { MarketplaceModel, MarketplaceDocument } from '../../schemas/marketplace.schema';
 import { IMarketplaceAuthAdapter } from '../../interfaces/marketplace-auth-adapter.interface';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
 import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
@@ -26,8 +23,6 @@ export class OLXAuthService implements IMarketplaceAuthAdapter, OnModuleInit {
     private readonly marketplaceRegistry: MarketplaceRegistryService,
     private readonly tokenManager: TokenManagerService,
     private readonly broker: MarketplaceTokenBrokerService,
-    @InjectModel(MarketplaceModel.name)
-    private marketplaceModel: Model<MarketplaceDocument>,
     private readonly configService: ConfigService,
   ) { }
 

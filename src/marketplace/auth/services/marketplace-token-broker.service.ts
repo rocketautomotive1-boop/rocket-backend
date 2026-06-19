@@ -5,6 +5,7 @@ import { MarketplaceModel, MarketplaceDocument, MarketplaceAccountSnapshot } fro
 import { MarketplaceCredentialsService } from '../../credentials/marketplace-credentials.service';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
 import { decrypt, encrypt, isEncrypted } from '../../credentials/credentials-crypto.helper';
+import { MarketplaceConfigCacheService } from '../../services/marketplace-config-cache.service';
 
 /** Token resolvido para uma conta (forma consumida pelo TokenManager/endpoints internos). */
 export interface ResolvedAccountToken {
@@ -53,6 +54,7 @@ export class MarketplaceTokenBrokerService {
     private readonly marketplaceModel: Model<MarketplaceDocument>,
     private readonly credentials: MarketplaceCredentialsService,
     private readonly registry: MarketplaceAdapterRegistry,
+    private readonly configCache: MarketplaceConfigCacheService,
   ) {}
 
   // ── Resolução de conta ─────────────────────────────────────────────────────
@@ -197,6 +199,33 @@ export class MarketplaceTokenBrokerService {
     return this.resolveCredentials(account);
   }
 
+  /**
+   * Segredo de assinatura (partnerKey/appSecret/awsSecretKey…) da conta que
+   * atende o domínio. Mesmo fallback de `resolveCredentials`: override cifrado na
+   * conta → `marketplaces.credentials` → env (MP_<TAG>_<KEY>). Aceita tag OU id.
+   * Sem conta em accounts[], cai direto na credencial do marketplace (preserva o
+   * comportamento de marketplaces ainda não migrados ao modelo multi-client).
+   */
+  async signingCredentialForDomain(
+    tagOrId: string,
+    domain: string | undefined,
+    key: string,
+  ): Promise<string | undefined> {
+    const marketplaceId = await this.resolveMarketplaceId(tagOrId);
+    if (!marketplaceId) return this.credentials.get(tagOrId, key);
+
+    const account = await this.accountFor(marketplaceId, domain);
+    if (!account) return this.credentials.get(marketplaceId, key);
+    return this.resolveCredentialKey(account, key);
+  }
+
+  /** Resolve tagOrId → marketplaceId (ObjectId string). Devolve null se não achar. */
+  private async resolveMarketplaceId(tagOrId: string): Promise<string | null> {
+    // Config estável (id/tag/name) servida do cache in-process — antes batia no
+    // Mongo a cada chamada (milhares/dia). Token não passa por aqui.
+    return this.configCache.resolveId(tagOrId);
+  }
+
   /** Persiste (substitui) o token de uma conta em accounts[]. */
   async saveAccountToken(account: AccountRef, tokenData: any): Promise<void> {
     const token = { ...tokenData, isActive: true };
@@ -242,6 +271,8 @@ export class MarketplaceTokenBrokerService {
     };
     (mp as any).accounts = [...accounts, account];
     await mp.save();
+    // accounts[].label/domains/credentials são config cacheada → invalidar.
+    this.configCache.invalidate();
     return { accountId: String(account._id), label: account.label, domains: account.domains };
   }
 
@@ -298,13 +329,21 @@ export class MarketplaceTokenBrokerService {
    * clientId/secret OAuth; o adapter decide o que é obrigatório.
    */
   private async resolveCredentials(account: AccountRef): Promise<{ clientId?: string; clientSecret?: string }> {
-    const fromAccount = (key: string): string | undefined => {
-      const v = account.credentials?.[key];
-      if (!v) return undefined;
-      return isEncrypted(v) ? decrypt(v) : v;
-    };
-    const clientId = fromAccount('clientId') ?? (await this.credentials.get(account.marketplaceId, 'clientId')) ?? (await this.credentials.get(account.tag, 'clientId'));
-    const clientSecret = fromAccount('clientSecret') ?? (await this.credentials.get(account.marketplaceId, 'clientSecret')) ?? (await this.credentials.get(account.tag, 'clientSecret'));
+    const clientId = await this.resolveCredentialKey(account, 'clientId');
+    const clientSecret = await this.resolveCredentialKey(account, 'clientSecret');
     return { clientId, clientSecret };
+  }
+
+  /**
+   * Valor (plaintext) de uma credencial da conta para uma `key` arbitrária:
+   * override cifrado na conta → `marketplaces.credentials` (por id) → idem por tag/env.
+   */
+  private async resolveCredentialKey(account: AccountRef, key: string): Promise<string | undefined> {
+    const raw = account.credentials?.[key];
+    if (raw) return isEncrypted(raw) ? decrypt(raw) : raw;
+    return (
+      (await this.credentials.get(account.marketplaceId, key)) ??
+      (await this.credentials.get(account.tag, key))
+    );
   }
 }

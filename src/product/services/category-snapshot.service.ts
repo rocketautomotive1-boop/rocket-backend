@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { MlAttributeHydrationService } from '../../marketplace/services/ml-attribute-hydration.service';
 import { CategoryService } from '../../marketplace/services/category.service';
+import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
 import type {
   CategorySnapshotDto,
   HydratedCategoryDto,
@@ -16,10 +17,10 @@ export class CategorySnapshotService {
   constructor(
     @InjectModel('ProductModel') private readonly productModel: Model<any>,
     @InjectModel('CategoryModel') private readonly categoryModel: Model<any>,
-    @InjectModel('MarketplaceModel') private readonly marketplaceModel: Model<any>,
     @InjectModel('ProductDiscoveryModel') private readonly discoveryModel: Model<any>,
     private readonly mlHydration: MlAttributeHydrationService,
     private readonly categoryService: CategoryService,
+    private readonly configCache: MarketplaceConfigCacheService,
   ) {}
 
   async buildForProduct(productId: string): Promise<CategorySnapshotDto> {
@@ -35,7 +36,7 @@ export class CategorySnapshotService {
         .sort({ createdAt: -1 })
         .lean()
         .exec(),
-      this.marketplaceModel.findOne({ name: 'Mercado Livre' }).lean().exec(),
+      this.configCache.getByName('Mercado Livre'),
     ]);
     if (!product) throw new NotFoundException(`Product not found: ${productId}`);
 

@@ -1,7 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { MarketplaceModel, MarketplaceDocument } from '../../schemas/marketplace.schema';
+import { MarketplaceDocument } from '../../schemas/marketplace.schema';
 import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
 import { IMarketplaceAuthAdapter } from '../../interfaces/marketplace-auth-adapter.interface';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
@@ -24,7 +22,6 @@ export class MarketplaceAuthService {
     private readonly logger = new Logger(MarketplaceAuthService.name);
 
     constructor(
-        @InjectModel(MarketplaceModel.name) private marketplaceModel: Model<MarketplaceDocument>,
         private registryService: MarketplaceRegistryService,
         private tokenManager: TokenManagerService,
         private broker: MarketplaceTokenBrokerService,
@@ -41,7 +38,7 @@ export class MarketplaceAuthService {
     }
 
     async findByName(name: string): Promise<MarketplaceDocument> {
-        return this.marketplaceModel.findOne({ name }).exec();
+        return this.registryService.findByName(name);
     }
 
     /** Troca o code por token (adapter do provider) e persiste na conta do domínio. */

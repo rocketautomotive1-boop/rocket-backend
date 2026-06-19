@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import axios from 'axios';
 import { OrderDocument, OrderModel } from '../schemas/order.schema';
-import { MarketplaceModel, MarketplaceDocument } from '../../marketplace/schemas/marketplace.schema';
+import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
 import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
 import { buildSignedParams, buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
 
@@ -20,7 +20,7 @@ export class OrderLabelService {
 
     constructor(
         @InjectModel(OrderModel.name) private readonly orderModel: Model<OrderDocument>,
-        @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceDocument>,
+        private readonly configCache: MarketplaceConfigCacheService,
         private readonly auth: MarketplaceAuthService,
     ) {}
 
@@ -28,10 +28,7 @@ export class OrderLabelService {
         const order = await this.orderModel.findById(orderId).lean().exec();
         if (!order) throw new NotFoundException(`Order ${orderId} not found`);
 
-        const marketplace = await this.marketplaceModel
-            .findById(order.marketplaceId)
-            .lean()
-            .exec();
+        const marketplace = await this.configCache.getById(String(order.marketplaceId));
         if (!marketplace) throw new NotFoundException(`Marketplace not found for order ${orderId}`);
 
         // Via única de token (resolve via accounts[], renova se preciso).
