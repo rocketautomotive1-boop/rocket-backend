@@ -1,12 +1,11 @@
 import { Injectable, Logger, HttpException, OnModuleInit, InternalServerErrorException } from '@nestjs/common';
 import axios from 'axios';
-import { createHmac } from 'crypto';
 import { getShopeeBaseUrl, buildHeaders, getShopeeHost } from './shopee-utils'
+import { ShopeeSignerService } from './shopee-signer.service'
 import { IMarketplaceAuthAdapter } from '../../interfaces/marketplace-auth-adapter.interface';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
 import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
 import { TokenManagerService } from '../../auth/services/token-manager.service';
-import { MarketplaceCredentialsService } from '../../credentials/marketplace-credentials.service';
 
 @Injectable()
 export class ShopeeAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit {
@@ -19,7 +18,7 @@ export class ShopeeAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
     private readonly registry: MarketplaceAdapterRegistry,
     private readonly marketplaceRegistry: MarketplaceRegistryService,
     private readonly tokenManager: TokenManagerService,
-    private readonly credentials: MarketplaceCredentialsService,
+    private readonly signer: ShopeeSignerService,
   ) { }
 
   onModuleInit() {
@@ -27,16 +26,13 @@ export class ShopeeAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
   }
 
   /**
-   * Params Shopee assinados resolvendo partnerId/partnerKey via
-   * MarketplaceCredentialsService (marketplaces.credentials cifrado → env
-   * fallback). Substitui o buildSignedParams baseado em env no fluxo de refresh.
+   * Params Shopee assinados (sem token) via ShopeeSignerService — fonte única de
+   * assinatura Shopee (partnerId/partnerKey resolvidos do DB cifrado → env fallback).
    */
   private async signedParams(path: string, timestamp: number): Promise<{ partnerId: string; params: Record<string, any> }> {
-    const partnerId = await this.credentials.getRequired('shopee', 'partnerId');
-    const partnerKey = await this.credentials.getRequired('shopee', 'partnerKey');
-    const fullPath = path.startsWith('/api/v2') ? path : `/api/v2${path}`;
-    const sign = createHmac('sha256', partnerKey).update(`${partnerId}${fullPath}${timestamp}`).digest('hex');
-    return { partnerId, params: { partner_id: parseInt(partnerId), timestamp, sign } };
+    const partnerId = await this.signer.getPartnerId();
+    const params = await this.signer.buildSignedParams(path, timestamp);
+    return { partnerId, params };
   }
 
   async authenticate(code: string, additionalData?: any): Promise<any> {
