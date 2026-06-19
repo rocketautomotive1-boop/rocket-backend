@@ -33,7 +33,10 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
       if (error.response?.status === 401 || error.response?.data?.message === 'invalid_token') {
         this.logger.warn(`Erro de autenticação no Mercado Livre (${context}), forçando renovação do token...`);
         try {
-          const newToken = await this.authAdapter.forceRefreshAccessToken(this.name);
+          const newToken = await this.authAdapter.forceRefreshAccessToken(
+            this.name,
+            accountId ? { accountId } : undefined,
+          );
           this.logger.log(`Token renovado com sucesso para ${context}, tentando novamente...`);
           return await operation(newToken);
         } catch (refreshError: any) {
