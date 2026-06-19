@@ -55,11 +55,14 @@ export class MercadoLivreAuthAdapter implements IMarketplaceAuthAdapter, OnModul
     return String(userId);
   }
 
-  /** Força refresh e devolve o novo access token. */
-  async forceRefreshAccessToken(marketplaceName: string, domain?: string): Promise<string> {
+  /** Força refresh e devolve o novo access token. Selector roteia a conta multi-client. */
+  async forceRefreshAccessToken(
+    marketplaceName: string,
+    selector?: string | { domain?: string; accountId?: string },
+  ): Promise<string> {
     const marketplace = await this.marketplaceRegistry.findByName(marketplaceName);
     if (!marketplace) throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);
-    const resolved = await this.tokenManager.forceRefresh(String(marketplace._id), domain);
+    const resolved = await this.tokenManager.forceRefresh(String(marketplace._id), selector);
     return resolved.accessToken;
   }
 
