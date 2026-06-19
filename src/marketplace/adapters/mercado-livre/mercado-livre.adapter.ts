@@ -245,48 +245,41 @@ export class MercadoLivreAdapter extends MarketplaceAdapter {
     }
   }
 
-  async getQuestions(accessToken: string, sellerId: string, status?: 'UNANSWERED' | 'ANSWERED'): Promise<any[]> {
+  /** Delta poll: newest-first questions, stopping once we pass `since`. Returns refs for the reconciler. */
+  async listQuestionsSince(
+    accessToken: string,
+    sellerId: string,
+    since: Date,
+  ): Promise<Array<{ id: string; item_id: string; status: string; date_created: string }>> {
+    const out: Array<{ id: string; item_id: string; status: string; date_created: string }> = [];
+    const limit = 50;
+    const HARD_CAP = 500; // safety bound
+    let offset = 0;
+
     try {
-      const allQuestions: any[] = [];
-      const limit = 50; // ML API limit per request
-      const maxQuestions = 200; // Total we want to fetch
-      let offset = 0;
+      while (offset < HARD_CAP) {
+        const response = await axios.get(
+          `${this.baseUrl}/questions/search?seller_id=${sellerId}&sort_fields=item_id,date_created&api_version=4`,
+          {
+            params: { sort: 'date_created_desc', limit, offset },
+            headers: { Authorization: `Bearer ${accessToken}` },
+          },
+        );
+        const page = response.data.questions || [];
+        if (page.length === 0) break;
 
-      // Fetch multiple pages
-      while (offset < maxQuestions) {
-        const params: any = {
-          sort: 'date_created_desc',
-          limit: limit,
-          offset: offset
-        };
-
-        if (status) {
-          params.status = status;
+        let crossedCursor = false;
+        for (const q of page) {
+          if (new Date(q.date_created) <= since) { crossedCursor = true; break; }
+          out.push({ id: String(q.id), item_id: q.item_id, status: q.status, date_created: q.date_created });
         }
-
-        const response = await axios.get(`${this.baseUrl}/questions/search?seller_id=${sellerId}&sort_fields=item_id,date_created&api_version=4`, {
-          params,
-          headers: {
-            'Authorization': `Bearer ${accessToken}`
-          }
-        });
-
-
-        const questions = response.data.questions || [];
-        allQuestions.push(...questions);
-
-        // If we got less than limit, we've reached the end
-        if (questions.length < limit) {
-          break;
-        }
-
+        if (crossedCursor || page.length < limit) break;
         offset += limit;
       }
-
-      this.logger.log(`Fetched ${allQuestions.length} questions from Mercado Livre`);
-      return allQuestions;
+      this.logger.log(`[Reconcile] ${out.length} ML questions newer than ${since.toISOString()}`);
+      return out;
     } catch (error) {
-      this.logger.error(`Erro ao buscar perguntas: ${error.message}`);
+      this.logger.error(`Erro ao listar perguntas (delta): ${error.message}`);
       throw error;
     }
   }
