@@ -2,7 +2,6 @@ import { Injectable, Logger, Inject, forwardRef, OnModuleInit } from '@nestjs/co
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { QueueService } from '../queue/queue.service';
 import { MarketplaceTokenBrokerService } from '../marketplace/auth/services/marketplace-token-broker.service';
-import { QuestionsService } from '../questions/questions.service';
 import { OrderSyncFlowService } from '../order/services/order-sync-flow.service';
 
 @Injectable()
@@ -13,8 +12,6 @@ export class SchedulerService implements OnModuleInit {
         private readonly queueService: QueueService,
         @Inject(forwardRef(() => MarketplaceTokenBrokerService))
         private readonly tokenBroker: MarketplaceTokenBrokerService,
-        @Inject(forwardRef(() => QuestionsService))
-        private readonly questionsService: QuestionsService,
         @Inject(forwardRef(() => OrderSyncFlowService))
         private readonly orderSyncFlowService: OrderSyncFlowService,
     ) { }
@@ -59,18 +56,6 @@ export class SchedulerService implements OnModuleInit {
             );
         } catch (error) {
             this.logger.error('Error in Hourly Orders Sync:', error);
-        }
-    }
-
-    // Every 5 Minutes: Sync questions from marketplaces (fallback for missed webhooks)
-    @Cron('0 */5 * * * *')
-    async handleQuestionSync() {
-        this.logger.log('Starting Scheduled Questions Sync...');
-        try {
-            await this.questionsService.syncQuestions();
-            this.logger.log('Questions Sync completed.');
-        } catch (error) {
-            this.logger.error('Error in Questions Sync:', error);
         }
     }
 

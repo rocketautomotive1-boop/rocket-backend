@@ -11,11 +11,19 @@ import { MarketplaceRegistryModule } from '../marketplace/marketplace-registry.m
 import { MarketplaceAuthModule } from '../marketplace/auth/marketplace-auth.module';
 import { QuestionRepository } from './question.repository';
 import { AiModule } from '../ai/ai.module';
+import { QuestionIngestService } from './ingest/question-ingest.service';
+import { QuestionProductResolver } from './resolve/question-product.resolver';
+import { QuestionReconciler } from './reconcile/question-reconciler.service';
+import {
+    QuestionReconcileCheckpointModel,
+    QuestionReconcileCheckpointSchema,
+} from './reconcile/question-reconcile-checkpoint.schema';
 
 @Module({
     imports: [
         MongooseModule.forFeature([
             { name: QuestionModel.name, schema: QuestionSchema },
+            { name: QuestionReconcileCheckpointModel.name, schema: QuestionReconcileCheckpointSchema },
         ]),
         MarketplaceModule,
         forwardRef(() => ProductModule),
@@ -25,7 +33,13 @@ import { AiModule } from '../ai/ai.module';
         AiModule,
     ],
     controllers: [QuestionsController],
-    providers: [QuestionsService, QuestionRepository],
-    exports: [QuestionsService, QuestionRepository],
+    providers: [
+        QuestionsService,
+        QuestionRepository,
+        QuestionIngestService,
+        QuestionProductResolver,
+        QuestionReconciler,
+    ],
+    exports: [QuestionsService, QuestionRepository, QuestionIngestService],
 })
 export class QuestionsModule { }

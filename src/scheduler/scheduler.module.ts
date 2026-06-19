@@ -4,7 +4,6 @@ import { SchedulerService } from './scheduler.service';
 import { QueueModule } from '../queue/queue.module';
 import { MarketplaceModule } from '../marketplace/marketplace.module';
 import { MarketplaceAuthModule } from '../marketplace/auth/marketplace-auth.module';
-import { QuestionsModule } from '../questions/questions.module';
 import { MarketplaceOrchestratorModule } from '../marketplace-orchestrator/marketplace-orchestrator.module';
 import { OrderModule } from '../order/order.module';
 
@@ -14,7 +13,6 @@ import { OrderModule } from '../order/order.module';
         QueueModule,
         MarketplaceModule,
         MarketplaceAuthModule,
-        forwardRef(() => QuestionsModule),
         MarketplaceOrchestratorModule,
         forwardRef(() => OrderModule),
     ],
