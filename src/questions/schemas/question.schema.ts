@@ -46,6 +46,9 @@ export class QuestionModel {
 
     @Prop()
     responseTimeMinutes: number;
+
+    @Prop({ default: false })
+    notified: boolean;
 }
 
 export const QuestionSchema = SchemaFactory.createForClass(QuestionModel);
