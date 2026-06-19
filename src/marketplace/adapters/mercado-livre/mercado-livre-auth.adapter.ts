@@ -34,19 +34,22 @@ export class MercadoLivreAuthAdapter implements IMarketplaceAuthAdapter, OnModul
   // Resolvem token via TokenManager (oauth2 → broker), sem depender do
   // MarketplaceAuthService (evita ciclo).
 
-  /** Access token válido (já renovado) do ML por nome do marketplace. */
-  async getValidToken(marketplaceName: string, domain?: string): Promise<string> {
+  /**
+   * Access token válido (já renovado) do ML. `selector` aceita string (domain,
+   * legado/saída) ou { accountId } para resolução de entrada (webhook/order).
+   */
+  async getValidToken(marketplaceName: string, selector?: string | { domain?: string; accountId?: string }): Promise<string> {
     const marketplace = await this.marketplaceRegistry.findByName(marketplaceName);
     if (!marketplace) throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);
-    const resolved = await this.tokenManager.resolveToken(String(marketplace._id), domain);
+    const resolved = await this.tokenManager.resolveToken(String(marketplace._id), selector);
     return resolved.accessToken;
   }
 
   /** userId do ML (additionalData) por nome do marketplace. */
-  async getUserId(marketplaceName: string, domain?: string): Promise<string> {
+  async getUserId(marketplaceName: string, selector?: string | { domain?: string; accountId?: string }): Promise<string> {
     const marketplace = await this.marketplaceRegistry.findByName(marketplaceName);
     if (!marketplace) throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);
-    const resolved = await this.tokenManager.resolveToken(String(marketplace._id), domain);
+    const resolved = await this.tokenManager.resolveToken(String(marketplace._id), selector);
     const userId = resolved.additionalData?.userId;
     if (!userId) throw new Error(`userId não encontrado no token do marketplace "${marketplaceName}"`);
     return String(userId);
@@ -61,8 +64,8 @@ export class MercadoLivreAuthAdapter implements IMarketplaceAuthAdapter, OnModul
   }
 
   /** GET /users/me autenticado. */
-  async me(marketplaceName: string, domain?: string): Promise<any> {
-    const token = await this.getValidToken(marketplaceName, domain);
+  async me(marketplaceName: string, selector?: string | { domain?: string; accountId?: string }): Promise<any> {
+    const token = await this.getValidToken(marketplaceName, selector);
     const response = await axios.get(`${this.baseUrl}/users/me`, {
       headers: { Authorization: `Bearer ${token}` },
     });

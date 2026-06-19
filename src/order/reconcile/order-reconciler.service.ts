@@ -10,6 +10,7 @@ import { OrderRepository } from '../order.repository';
 import { OrderIngestService } from '../ingest/order-ingest.service';
 import { OrderMetricsService } from '../observability/order-metrics.service';
 import { MarketplaceRegistryService } from '../../marketplace/services/marketplace-registry.service';
+import { MarketplaceTokenBrokerService } from '../../marketplace/auth/services/marketplace-token-broker.service';
 import { RECONCILE, nextInterval, maxCursor, isStatusDivergent } from './reconcile-cursor';
 
 /**
@@ -32,7 +33,13 @@ export class OrderReconciler implements OnModuleInit {
     private readonly ingest: OrderIngestService,
     private readonly metrics: OrderMetricsService,
     private readonly registry: MarketplaceRegistryService,
+    private readonly broker: MarketplaceTokenBrokerService,
   ) {}
+
+  /** Chave estável do timer/checkpoint por (marketplace, conta). */
+  private key(marketplaceId: string, accountId?: string | null): string {
+    return accountId ? `${marketplaceId}:${accountId}` : marketplaceId;
+  }
 
   async onModuleInit(): Promise<void> {
     if (process.env.RECONCILER_ENABLED === 'false') {
@@ -41,32 +48,39 @@ export class OrderReconciler implements OnModuleInit {
     }
     const marketplaces = await this.registry.findAll();
     for (const mkt of marketplaces.filter((m: any) => m.enabled)) {
-      this.scheduleNext(String(mkt._id), RECONCILE.FLOOR_MS);
+      const marketplaceId = String(mkt._id);
+      // Uma varredura por conta multi-client (cada uma com seu cursor). Sem
+      // accounts[] → uma varredura na conta default (accountId undefined).
+      const accounts = await this.broker.listAccountsWithToken(marketplaceId);
+      const targets = accounts.length ? accounts.map(a => a.accountId) : [undefined];
+      for (const accountId of targets) {
+        this.scheduleNext(marketplaceId, RECONCILE.FLOOR_MS, accountId);
+      }
     }
   }
 
-  private scheduleNext(marketplaceId: string, delay: number): void {
+  private scheduleNext(marketplaceId: string, delay: number, accountId?: string): void {
     const t = setTimeout(
       () =>
-        this.runFor(marketplaceId).catch(e =>
-          this.logger.error(`[Reconcile] ${marketplaceId} failed: ${(e as Error).message}`),
+        this.runFor(marketplaceId, accountId).catch(e =>
+          this.logger.error(`[Reconcile] ${this.key(marketplaceId, accountId)} failed: ${(e as Error).message}`),
         ),
       delay,
     );
-    this.timers.set(marketplaceId, t);
+    this.timers.set(this.key(marketplaceId, accountId), t);
   }
 
-  async runFor(marketplaceId: string): Promise<void> {
+  async runFor(marketplaceId: string, accountId?: string): Promise<void> {
     this.metrics.incReconcileRun();
-    const cp = await this.getOrCreateCheckpoint(marketplaceId);
-    const refs = await this.gateway.listOrdersSince(marketplaceId, cp.lastUpdatedCursor);
+    const cp = await this.getOrCreateCheckpoint(marketplaceId, accountId);
+    const refs = await this.gateway.listOrdersSince(marketplaceId, cp.lastUpdatedCursor, accountId);
 
     let gaps = 0;
     for (const ref of refs) {
       const existing = await this.repo.findStatusByExternalId(ref.id);
       if (!existing || isStatusDivergent(existing.status, ref.status)) {
         gaps++;
-        await this.ingest.ingest(ref.id, marketplaceId, 'reconcile');
+        await this.ingest.ingest(ref.id, marketplaceId, 'reconcile', accountId);
       }
     }
 
@@ -78,16 +92,17 @@ export class OrderReconciler implements OnModuleInit {
     await cp.save();
 
     this.logger.log(
-      `[Reconcile] ${marketplaceId} delta=${refs.length} gaps=${gaps} nextMs=${cp.currentIntervalMs}`,
+      `[Reconcile] ${this.key(marketplaceId, accountId)} delta=${refs.length} gaps=${gaps} nextMs=${cp.currentIntervalMs}`,
     );
-    this.scheduleNext(marketplaceId, cp.currentIntervalMs);
+    this.scheduleNext(marketplaceId, cp.currentIntervalMs, accountId);
   }
 
-  private async getOrCreateCheckpoint(marketplaceId: string): Promise<ReconcileCheckpointDocument> {
-    const existing = await this.checkpoints.findOne({ marketplaceId });
+  private async getOrCreateCheckpoint(marketplaceId: string, accountId?: string): Promise<ReconcileCheckpointDocument> {
+    const filter = { marketplaceId, accountId: accountId ?? null };
+    const existing = await this.checkpoints.findOne(filter);
     if (existing) return existing;
     return this.checkpoints.create({
-      marketplaceId,
+      ...filter,
       lastUpdatedCursor: new Date(Date.now() - RECONCILE.BOOTSTRAP_WINDOW_MS),
       currentIntervalMs: RECONCILE.FLOOR_MS,
       consecutiveCleanRuns: 0,

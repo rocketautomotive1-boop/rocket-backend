@@ -4,13 +4,18 @@ import { HydratedDocument } from 'mongoose';
 export type ReconcileCheckpointDocument = HydratedDocument<ReconcileCheckpointModel>;
 
 /**
- * Per-marketplace high-water-mark for the order reconciler. Persists the cursor so the
- * incremental delta poll survives restarts and never re-scans history.
+ * High-water-mark for the order reconciler, per (marketplace, account). Persists the cursor
+ * so the incremental delta poll survives restarts and never re-scans history. Multi-client:
+ * each account[] has its own cursor; `accountId` ausente = conta default (single-client legado).
  */
 @Schema({ collection: 'reconcile_checkpoints', timestamps: true })
 export class ReconcileCheckpointModel {
-  @Prop({ required: true, unique: true })
+  @Prop({ required: true, index: true })
   marketplaceId: string;
+
+  /** Conta multi-client. Ausente (null) = checkpoint da conta default/legado. */
+  @Prop({ default: null })
+  accountId?: string | null;
 
   @Prop({ required: true })
   lastUpdatedCursor: Date;
@@ -26,3 +31,5 @@ export class ReconcileCheckpointModel {
 }
 
 export const ReconcileCheckpointSchema = SchemaFactory.createForClass(ReconcileCheckpointModel);
+// Cursor único por (marketplace, conta). accountId null = conta default.
+ReconcileCheckpointSchema.index({ marketplaceId: 1, accountId: 1 }, { unique: true });

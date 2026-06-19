@@ -10,6 +10,8 @@ export class WebhookInboxModel {
   @Prop({ required: true }) kind: WebhookInboxKind;
   @Prop({ required: true, unique: true }) eventId: string;
   @Prop({ index: true }) externalId?: string;
+  /** Seller id no marketplace (ML user_id) → resolve a conta multi-client destino. */
+  @Prop() externalUserId?: string;
   @Prop() resource?: string;
   @Prop({ type: Object, required: true }) payload: any;
   @Prop({ default: 'pending', index: true }) status: WebhookInboxStatus;

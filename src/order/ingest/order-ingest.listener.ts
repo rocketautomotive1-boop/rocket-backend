@@ -4,6 +4,7 @@ import axios from 'axios';
 import { OrderIngestService } from './order-ingest.service';
 import { MarketplaceService } from '../../marketplace/services/marketplace.service';
 import { MercadoLivreAuthAdapter } from '../../marketplace/adapters/mercado-livre/mercado-livre-auth.adapter';
+import { MarketplaceTokenBrokerService } from '../../marketplace/auth/services/marketplace-token-broker.service';
 import {
   OrderPackSyncRequestedCommand,
   OrderSyncRequestedCommand,
@@ -22,28 +23,33 @@ export class OrderIngestListener {
     private readonly ingest: OrderIngestService,
     private readonly marketplaceService: MarketplaceService,
     private readonly mlAuth: MercadoLivreAuthAdapter,
+    private readonly broker: MarketplaceTokenBrokerService,
   ) {}
 
   @OnEvent(WEBHOOK_DOMAIN_COMMANDS.ORDER_SYNC_REQUESTED, { async: true })
   async onSync(cmd: OrderSyncRequestedCommand): Promise<void> {
     const mktId = await this.resolveMarketplaceId(cmd.marketplace);
     if (!mktId) return;
-    this.logger.log(`[Ingest] sync requested ${cmd.marketplace} externalId=${cmd.externalOrderId}`);
-    await this.ingest.ingest(cmd.externalOrderId, mktId, cmd.source as any);
+    const accountId = await this.resolveAccountId(mktId, cmd.externalUserId, cmd.externalOrderId);
+    if (accountId === false) return; // conta desconhecida → não rotear (falha fechada)
+    this.logger.log(`[Ingest] sync requested ${cmd.marketplace} externalId=${cmd.externalOrderId}${accountId ? ` account=${accountId}` : ''}`);
+    await this.ingest.ingest(cmd.externalOrderId, mktId, cmd.source as any, accountId || undefined);
   }
 
   @OnEvent(WEBHOOK_DOMAIN_COMMANDS.ORDER_PACK_SYNC_REQUESTED, { async: true })
   async onPack(cmd: OrderPackSyncRequestedCommand): Promise<void> {
     const mktId = await this.resolveMarketplaceId(cmd.marketplace);
     if (!mktId) return;
+    const accountId = await this.resolveAccountId(mktId, cmd.externalUserId, `pack:${cmd.externalPackId}`);
+    if (accountId === false) return;
 
-    const ids = await this.expandMlPack(cmd.externalPackId);
+    const ids = await this.expandMlPack(cmd.externalPackId, accountId || undefined);
     if (!ids.length) {
       this.logger.warn(`[Ingest] Pack ${cmd.externalPackId} expanded to 0 orders`);
       return;
     }
     this.logger.log(`[Ingest] Pack ${cmd.externalPackId} → orders: ${ids.join(', ')}`);
-    for (const id of ids) await this.ingest.ingest(id, mktId, cmd.source as any);
+    for (const id of ids) await this.ingest.ingest(id, mktId, cmd.source as any, accountId || undefined);
   }
 
   private async resolveMarketplaceId(marketplace: string): Promise<string | null> {
@@ -55,9 +61,31 @@ export class OrderIngestListener {
     return mkt._id.toString();
   }
 
-  private async expandMlPack(packId: string): Promise<string[]> {
+  /**
+   * Resolve a conta multi-client a partir do user_id do marketplace.
+   *  - sem externalUserId → null (single-client legado; cai na conta default)
+   *  - com externalUserId que casa → accountId
+   *  - com externalUserId que NÃO casa nenhuma conta → false (falha fechada:
+   *    NÃO roteia para a conta default, evitando contabilizar pedido na conta errada)
+   */
+  private async resolveAccountId(
+    marketplaceId: string,
+    externalUserId: string | null | undefined,
+    ctx: string,
+  ): Promise<string | null | false> {
+    if (!externalUserId) return null;
+    const account = await this.broker.resolveAccountByExternalUserId(marketplaceId, externalUserId);
+    if (!account) {
+      this.logger.warn(`[Ingest] user_id=${externalUserId} não casou nenhuma conta (mkt=${marketplaceId}, ${ctx}). Ignorando — conta desconhecida.`);
+      return false;
+    }
+    return account.accountId;
+  }
+
+  private async expandMlPack(packId: string, accountId?: string): Promise<string[]> {
     try {
-      const token = await this.mlAuth.getValidToken('Mercado Livre');
+      const selector = accountId ? { accountId } : undefined;
+      const token = await this.mlAuth.getValidToken('Mercado Livre', selector);
       const me = await axios.get('https://api.mercadolibre.com/users/me', {
         headers: { Authorization: `Bearer ${token}` },
       });

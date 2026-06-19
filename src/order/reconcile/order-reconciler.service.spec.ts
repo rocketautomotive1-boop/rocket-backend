@@ -13,6 +13,7 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../ports/marketplace-order.gateway';
 import { OrderIngestService } from '../ingest/order-ingest.service';
 import { OrderMetricsService } from '../observability/order-metrics.service';
 import { MarketplaceRegistryService } from '../../marketplace/services/marketplace-registry.service';
+import { MarketplaceTokenBrokerService } from '../../marketplace/auth/services/marketplace-token-broker.service';
 
 describe('OrderReconciler (integration)', () => {
   let mongo: MongoMemoryServer;
@@ -39,6 +40,7 @@ describe('OrderReconciler (integration)', () => {
         { provide: MARKETPLACE_ORDER_GATEWAY, useValue: gateway },
         { provide: OrderIngestService, useValue: ingest },
         { provide: MarketplaceRegistryService, useValue: { findAll: async () => [] } },
+        { provide: MarketplaceTokenBrokerService, useValue: { listAccountsWithToken: async () => [] } },
       ],
     }).compile();
 
@@ -75,6 +77,6 @@ describe('OrderReconciler (integration)', () => {
     await reconciler.runFor('mkt1');
 
     expect(ingest.ingest).toHaveBeenCalledTimes(1);
-    expect(ingest.ingest).toHaveBeenCalledWith('MISSING', 'mkt1', 'reconcile');
+    expect(ingest.ingest).toHaveBeenCalledWith('MISSING', 'mkt1', 'reconcile', undefined);
   });
 });

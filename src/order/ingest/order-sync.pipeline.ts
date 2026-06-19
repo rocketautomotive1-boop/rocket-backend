@@ -30,11 +30,11 @@ export class OrderSyncPipeline {
         private readonly orchestratorPublisher: OrchestratorPublisherService,
     ) { }
 
-    async execute(externalId: string, marketplaceId: string, source: IngestSource = 'sync'): Promise<void> {
-        this.logger.log(`[Pipeline] Starting sync for order ${externalId} (marketplace: ${marketplaceId})`);
+    async execute(externalId: string, marketplaceId: string, source: IngestSource = 'sync', accountId?: string): Promise<void> {
+        this.logger.log(`[Pipeline] Starting sync for order ${externalId} (marketplace: ${marketplaceId})${accountId ? ` account=${accountId}` : ''}`);
 
         // ── PASSO 1: FETCH ────────────────────────────────────────────────────
-        const externalOrder = await this.gateway.fetchOrder(externalId, marketplaceId);
+        const externalOrder = await this.gateway.fetchOrder(externalId, marketplaceId, accountId);
         if (!externalOrder) {
             this.logger.warn(`[Pipeline] Order ${externalId} not found in marketplace. Aborting.`);
             return;
@@ -42,6 +42,9 @@ export class OrderSyncPipeline {
 
         const marketplaceName: string = externalOrder.marketplaceName ?? 'Marketplace';
         const orderData = await this.orderMapper.mapToDomain(externalOrder, marketplaceId);
+        // Persiste a conta de origem (resolvida na borda) para que fulfillment/NF-e/
+        // update-status usem a conta certa. Só sobrescreve quando resolvida.
+        if (accountId) orderData.accountId = accountId;
 
         const existing = await this.orderRepository.findByExternalId(externalId);
 

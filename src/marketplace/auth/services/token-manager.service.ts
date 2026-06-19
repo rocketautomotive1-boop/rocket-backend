@@ -27,9 +27,21 @@ export class TokenManagerService {
     /**
      * Resolve o token para um marketplace conforme sua estratégia configurada.
      * Nunca lança erro por "token não encontrado" para estratégias que não usam DB.
-     * `domain` só é relevante para oauth2 (multi-client) — as demais estratégias o ignoram.
+     *
+     * Seletor de conta (só relevante para oauth2/hybrid — multi-client):
+     *  - `accountId` → resolução de ENTRADA (webhook/order): a conta já está
+     *    determinada pelo marketplace; tem PRECEDÊNCIA sobre domain.
+     *  - `domain` → resolução de SAÍDA (publicação): escolhe a conta pelo domínio
+     *    do produto.
+     * Aceita string (domain, legado posicional) ou objeto { domain?, accountId? }.
      */
-    async resolveToken(marketplaceId: string, domain?: string): Promise<ResolvedToken> {
+    async resolveToken(
+        marketplaceId: string,
+        selector?: string | { domain?: string; accountId?: string },
+    ): Promise<ResolvedToken> {
+        const { domain, accountId } =
+            typeof selector === 'string' ? { domain: selector, accountId: undefined } : (selector ?? {});
+
         const marketplace = await this.marketplaceModel.findById(marketplaceId).exec();
         if (!marketplace) {
             throw new Error(`Marketplace ${marketplaceId} não encontrado`);
@@ -52,7 +64,7 @@ export class TokenManagerService {
 
             case 'oauth2':
             default:
-                return this.resolveOAuthToken(marketplace, domain);
+                return this.resolveOAuthToken(marketplace, domain, accountId);
         }
     }
 
@@ -138,10 +150,12 @@ export class TokenManagerService {
         return this.resolveToken(marketplaceId, domain);
     }
 
-    private async resolveOAuthToken(marketplace: MarketplaceDocument, domain?: string): Promise<ResolvedToken> {
-        // Delega ao broker unificado (accounts[] → tokens[] → coleção legada),
-        // que resolve a conta do domínio e renova o token se estiver expirando.
-        const resolved = await this.broker.ensureValidToken(String(marketplace._id), domain);
+    private async resolveOAuthToken(marketplace: MarketplaceDocument, domain?: string, accountId?: string): Promise<ResolvedToken> {
+        // Delega ao broker unificado. accountId (entrada/webhook) tem precedência:
+        // a conta já está determinada, não se escolhe por domínio.
+        const resolved = accountId
+            ? await this.broker.ensureValidTokenByAccount(String(marketplace._id), accountId)
+            : await this.broker.ensureValidToken(String(marketplace._id), domain);
         return {
             accessToken: resolved.accessToken,
             refreshToken: resolved.refreshToken,

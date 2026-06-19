@@ -23,10 +23,11 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
 
   private async executeWithRetry<T>(
     operation: (token: string) => Promise<T>,
-    context: string
+    context: string,
+    accountId?: string,
   ): Promise<T> {
     try {
-      const token = await this.authAdapter.getValidToken(this.name);
+      const token = await this.authAdapter.getValidToken(this.name, accountId ? { accountId } : undefined);
       return await operation(token);
     } catch (error: any) {
       if (error.response?.status === 401 || error.response?.data?.message === 'invalid_token') {
@@ -45,10 +46,11 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
   }
 
   async getOrders(params: any): Promise<any[]> {
+    const accountId: string | undefined = params?.accountId;
     return this.executeWithRetry(async (token) => {
       this.logger.log(`Buscando pedidos no Mercado Livre`);
 
-      const user = await this.authAdapter.me(this.name);
+      const user = await this.authAdapter.me(this.name, accountId ? { accountId } : undefined);
       if (!user) {
         throw new Error('Usuário não encontrado');
       }
@@ -94,10 +96,10 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
         })),
         original_data: o
       }));
-    }, 'getOrders');
+    }, 'getOrders', accountId);
   }
 
-  async getOrderDetails(orderId: string): Promise<any> {
+  async getOrderDetails(orderId: string, accountId?: string): Promise<any> {
     return this.executeWithRetry(async (token) => {
       this.logger.log(`Buscando detalhes do pedido no Mercado Livre: ${orderId}`);
 
@@ -188,10 +190,10 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
         })),
         original_data: o,
       };
-    }, 'getOrderDetails');
+    }, 'getOrderDetails', accountId);
   }
 
-  async getBillingInfo(billingId: string): Promise<any> {
+  async getBillingInfo(billingId: string, accountId?: string): Promise<any> {
     return this.executeWithRetry(async (token) => {
       this.logger.log(`Buscando dados de faturamento (billing info: ${billingId}) no Mercado Livre`);
 
@@ -203,7 +205,7 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
 
       this.logger.log(`Billing Info ${billingId} obtido com sucesso`);
       return response.data;
-    }, 'getBillingInfo');
+    }, 'getBillingInfo', accountId);
   }
 
   async updateOrderStatus(orderId: string, status: string): Promise<any> {

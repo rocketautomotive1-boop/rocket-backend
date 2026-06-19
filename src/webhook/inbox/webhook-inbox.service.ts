@@ -11,7 +11,7 @@ export class WebhookInboxService {
     try {
       const record = await this.model.create({
         marketplace, topic, kind: n.kind === 'ignore' ? 'unparseable' : n.kind,
-        eventId: n.eventId, externalId: n.externalId, resource: n.resource,
+        eventId: n.eventId, externalId: n.externalId, externalUserId: n.externalUserId, resource: n.resource,
         payload: n.raw, status: 'pending', attempts: 0, maxAttempts: 8,
         receivedAt: new Date(), nextRetryAt: new Date(),
       });

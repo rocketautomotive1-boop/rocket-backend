@@ -81,6 +81,65 @@ export class MarketplaceTokenBrokerService {
     return acc ? this.toRef(marketplaceId, (mp as any).tag, acc) : null;
   }
 
+  /**
+   * Contas (id + label) com token OAuth ativo de um marketplace. Usado pelo
+   * reconciler para varrer cada conta multi-client com seu próprio cursor.
+   * Devolve [] quando não há accounts[] (marketplace single-client legado) — o
+   * chamador trata o caso default sem accountId.
+   */
+  async listAccountsWithToken(marketplaceId: string): Promise<Array<{ accountId: string; label: string }>> {
+    const mp = await this.marketplaceModel.findById(marketplaceId).lean().exec();
+    if (!mp) return [];
+    const accounts: any[] = (mp as any).accounts ?? [];
+    return accounts
+      .filter((a) => a?.token?.accessToken)
+      .map((a) => ({ accountId: String(a._id), label: a.label }));
+  }
+
+  /**
+   * Conta cujo token foi emitido para `externalUserId` (o id do seller NO
+   * marketplace, ex.: ML `user_id`). É a resolução de ENTRADA (webhook/order):
+   * o marketplace nos diz a conta destino; não escolhemos por domínio.
+   * Match em `token.additionalData.userId`. Devolve null se nenhuma conta casar
+   * — o chamador NÃO deve cair na conta default (roteamento errado de pedido).
+   */
+  async resolveAccountByExternalUserId(
+    marketplaceId: string,
+    externalUserId: string | number,
+  ): Promise<AccountRef | null> {
+    const target = String(externalUserId);
+    const mp = await this.marketplaceModel.findById(marketplaceId).lean().exec();
+    if (!mp) return null;
+    const accounts: any[] = (mp as any).accounts ?? [];
+    const acc = accounts.find(
+      (a) => String(a?.token?.additionalData?.userId ?? '') === target,
+    );
+    return acc ? this.toRef(marketplaceId, (mp as any).tag, acc) : null;
+  }
+
+  /**
+   * Token válido de uma conta ESPECÍFICA (por accountId), renovando se estiver
+   * expirando. Caminho de entrada (orders): a conta já está determinada pelo
+   * webhook, não há escolha por domínio. Lança se a conta/token não existir.
+   */
+  async ensureValidTokenByAccount(
+    marketplaceId: string,
+    accountId: string,
+  ): Promise<ResolvedAccountToken> {
+    const account = await this.accountById(marketplaceId, accountId);
+    if (!account?.token?.accessToken) {
+      throw new BadRequestException(
+        `Nenhum token OAuth ativo para conta ${accountId} (marketplace ${marketplaceId}).`,
+      );
+    }
+    if (this.isExpiringSoon(account.token, 30) && account.token.refreshToken) {
+      await this.refreshToken(marketplaceId, accountId);
+      const refreshed = await this.accountById(marketplaceId, accountId);
+      if (refreshed?.token?.accessToken) return this.shape(refreshed.token);
+    }
+    return this.shape(account.token);
+  }
+
   private toRef(
     marketplaceId: string,
     tag: string,

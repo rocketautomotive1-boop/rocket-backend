@@ -17,9 +17,14 @@ export class OrderIngestService {
     private readonly metrics: OrderMetricsService,
   ) {}
 
-  async ingest(externalId: string, marketplaceId: string, source: IngestSource = 'sync'): Promise<void> {
-    this.logger.log(`[Ingest] ${externalId} mkt=${marketplaceId} source=${source}`);
+  /**
+   * `accountId` (opcional) identifica a conta multi-client que recebeu o pedido,
+   * resolvida na borda do webhook a partir do user_id do marketplace. Ausente →
+   * conta default (single-client legado).
+   */
+  async ingest(externalId: string, marketplaceId: string, source: IngestSource = 'sync', accountId?: string): Promise<void> {
+    this.logger.log(`[Ingest] ${externalId} mkt=${marketplaceId} source=${source}${accountId ? ` account=${accountId}` : ''}`);
     this.metrics.incIngest(source);
-    await this.pipeline.execute(externalId, marketplaceId, source);
+    await this.pipeline.execute(externalId, marketplaceId, source, accountId);
   }
 }

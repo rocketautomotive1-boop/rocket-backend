@@ -4,7 +4,7 @@ import { WEBHOOK_DOMAIN_COMMANDS } from '../events/webhook.events';
 export interface DispatchInput {
   marketplace: string; topic: string;
   kind: 'order' | 'order_pack' | 'question' | 'unparseable';
-  externalId?: string; resource?: string; payload: any; receivedAt: Date;
+  externalId?: string; externalUserId?: string; resource?: string; payload: any; receivedAt: Date;
 }
 @Injectable()
 export class WebhookDispatcher {
@@ -15,10 +15,10 @@ export class WebhookDispatcher {
     if (!input.externalId) { this.logger.warn(`[Dispatch] ${input.marketplace}/${input.topic} kind=${input.kind} sem externalId`); return; }
     switch (input.kind) {
       case 'order':
-        await this.emitter.emitAsync(WEBHOOK_DOMAIN_COMMANDS.ORDER_SYNC_REQUESTED, { marketplace: input.marketplace, externalOrderId: input.externalId, resource: input.resource ?? null, receivedAt: input.receivedAt, source: 'webhook' });
+        await this.emitter.emitAsync(WEBHOOK_DOMAIN_COMMANDS.ORDER_SYNC_REQUESTED, { marketplace: input.marketplace, externalOrderId: input.externalId, externalUserId: input.externalUserId ?? null, resource: input.resource ?? null, receivedAt: input.receivedAt, source: 'webhook' });
         return;
       case 'order_pack':
-        await this.emitter.emitAsync(WEBHOOK_DOMAIN_COMMANDS.ORDER_PACK_SYNC_REQUESTED, { marketplace: input.marketplace, externalPackId: input.externalId, resource: input.resource, receivedAt: input.receivedAt, source: 'webhook' });
+        await this.emitter.emitAsync(WEBHOOK_DOMAIN_COMMANDS.ORDER_PACK_SYNC_REQUESTED, { marketplace: input.marketplace, externalPackId: input.externalId, externalUserId: input.externalUserId ?? null, resource: input.resource, receivedAt: input.receivedAt, source: 'webhook' });
         return;
       case 'question':
         await this.emitter.emitAsync(WEBHOOK_DOMAIN_COMMANDS.QUESTION_INGEST_REQUESTED, { marketplace: input.marketplace, externalQuestionId: input.externalId, resource: input.resource, receivedAt: input.receivedAt });

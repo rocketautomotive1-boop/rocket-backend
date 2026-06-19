@@ -22,12 +22,12 @@ export class MarketplaceOrderGatewayProvider implements MarketplaceOrderGateway 
     private readonly adapters: MarketplaceAdapterRegistry,
   ) {}
 
-  async fetchOrder(externalId: string, marketplaceId: string): Promise<ExternalOrder | null> {
+  async fetchOrder(externalId: string, marketplaceId: string, accountId?: string): Promise<ExternalOrder | null> {
     const mkt = await this.registry.findOne(marketplaceId);
     if (!mkt) return null;
     if (!this.adapters.hasOrderAdapter(mkt.name)) return null;
     const adapter = this.adapters.getOrderAdapter(mkt.name);
-    const detail = await adapter.getOrderDetails(externalId);
+    const detail = await adapter.getOrderDetails(externalId, accountId);
     if (!detail) return null;
     return {
       ...(detail as any),
@@ -36,7 +36,7 @@ export class MarketplaceOrderGatewayProvider implements MarketplaceOrderGateway 
     } as ExternalOrder;
   }
 
-  async listOrdersSince(marketplaceId: string, cursor: Date): Promise<ExternalOrderRef[]> {
+  async listOrdersSince(marketplaceId: string, cursor: Date, accountId?: string): Promise<ExternalOrderRef[]> {
     const mkt = await this.registry.findOne(marketplaceId);
     if (!mkt) return [];
     if (!this.adapters.hasOrderAdapter(mkt.name)) return [];
@@ -45,7 +45,7 @@ export class MarketplaceOrderGatewayProvider implements MarketplaceOrderGateway 
     // Adapters expose getOrders({status,limit,offset}); an incremental date filter is
     // adapter-specific and not yet part of the interface. Until it is, fetch a recent page
     // and filter client-side by cursor (sliding-window degradation). Returns refs only.
-    const orders = await adapter.getOrders({ limit: 100, offset: 0 });
+    const orders = await adapter.getOrders({ limit: 100, offset: 0, accountId });
     return (orders || [])
       .map((o: any) => ({
         id: String(o.id),
@@ -61,11 +61,11 @@ export class MarketplaceOrderGatewayProvider implements MarketplaceOrderGateway 
       );
   }
 
-  async getBillingInfo(billingId: string, marketplaceId: string): Promise<any> {
+  async getBillingInfo(billingId: string, marketplaceId: string, accountId?: string): Promise<any> {
     const mkt = await this.registry.findOne(marketplaceId);
     if (!mkt) return null;
     const adapter = this.adapters.getOrderAdapter(mkt.name);
     if (!adapter.getBillingInfo) return null;
-    return adapter.getBillingInfo(billingId);
+    return adapter.getBillingInfo(billingId, accountId);
   }
 }

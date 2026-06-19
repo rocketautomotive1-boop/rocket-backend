@@ -59,7 +59,7 @@ export class WebhookInboxWorker implements OnModuleInit, OnModuleDestroy {
     try {
       await this.dispatcher.dispatch({
         marketplace: entry.marketplace, topic: entry.topic, kind: entry.kind as any,
-        externalId: entry.externalId, resource: entry.resource, payload: entry.payload, receivedAt: entry.receivedAt ?? new Date(),
+        externalId: entry.externalId, externalUserId: entry.externalUserId, resource: entry.resource, payload: entry.payload, receivedAt: entry.receivedAt ?? new Date(),
       });
       await this.model.findByIdAndUpdate(entry._id, { status: 'done', processedAt: new Date(), lastError: null });
     } catch (err) {

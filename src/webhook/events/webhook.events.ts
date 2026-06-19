@@ -7,6 +7,8 @@ export const WEBHOOK_DOMAIN_COMMANDS = {
 export interface OrderSyncRequestedCommand {
   marketplace: string;
   externalOrderId: string;
+  /** Seller id no marketplace (ML user_id) → conta multi-client destino. */
+  externalUserId?: string | null;
   resource?: string | null;
   receivedAt: Date;
   source: 'webhook';
@@ -15,6 +17,8 @@ export interface OrderSyncRequestedCommand {
 export interface OrderPackSyncRequestedCommand {
   marketplace: 'mercadolivre';
   externalPackId: string;
+  /** Seller id no marketplace (ML user_id) → conta multi-client destino. */
+  externalUserId?: string | null;
   resource: string;
   receivedAt: Date;
   source: 'webhook';

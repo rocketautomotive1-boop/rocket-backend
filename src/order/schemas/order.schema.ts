@@ -107,6 +107,15 @@ export class OrderModel {
     @Prop({ type: Types.ObjectId, required: true })
     marketplaceId: Types.ObjectId;
 
+    /**
+     * Conta multi-client (accounts[]._id) que RECEBEU este pedido, resolvida na
+     * borda do webhook a partir do user_id do marketplace. Persistida para que
+     * fulfillment/NF-e/update-status operem na conta correta. Ausente em pedidos
+     * legados (single-client) → cai na conta default.
+     */
+    @Prop()
+    accountId?: string;
+
     @Prop({ required: true, index: true })
     status: string;
 

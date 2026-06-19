@@ -17,6 +17,12 @@ export interface NormalizedWebhook {
   eventId: string;
   externalId?: string;
   resource?: string;
+  /**
+   * Id do seller NO marketplace (ex.: ML `user_id`) — a conta destino da
+   * notificação. Resolvido na borda → accountId interno (multi-client). Ausente
+   * em marketplaces que não identificam a conta no payload.
+   */
+  externalUserId?: string;
   raw: unknown;
 }
 

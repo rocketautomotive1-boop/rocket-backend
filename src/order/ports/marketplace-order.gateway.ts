@@ -20,16 +20,20 @@ export interface ExternalOrderRef {
 }
 
 export interface MarketplaceOrderGateway {
-  /** Fetch a single order's full detail from the marketplace API. Returns null if not found. */
-  fetchOrder(externalId: string, marketplaceId: string): Promise<ExternalOrder | null>;
+  /**
+   * Fetch a single order's full detail from the marketplace API. Returns null if not found.
+   * `accountId` (opcional) roteia a conta multi-client que recebeu o pedido — quando ausente,
+   * cai na conta default do marketplace (comportamento single-client legado).
+   */
+  fetchOrder(externalId: string, marketplaceId: string, accountId?: string): Promise<ExternalOrder | null>;
 
   /**
    * List orders updated at the marketplace strictly after `cursor` (high-water mark on
    * date_last_updated), oldest-first. Adapters lacking incremental filter degrade to a
-   * sliding window internally. Returns [] if none.
+   * sliding window internally. Returns [] if none. `accountId` roteia a conta multi-client.
    */
-  listOrdersSince(marketplaceId: string, cursor: Date): Promise<ExternalOrderRef[]>;
+  listOrdersSince(marketplaceId: string, cursor: Date, accountId?: string): Promise<ExternalOrderRef[]>;
 
   /** Fetch raw billing info JSON for a billing id (marketplace-specific). */
-  getBillingInfo(billingId: string, marketplaceId: string): Promise<any>;
+  getBillingInfo(billingId: string, marketplaceId: string, accountId?: string): Promise<any>;
 }
