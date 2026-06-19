@@ -1,7 +1,8 @@
 import { Injectable, HttpException, OnModuleInit } from '@nestjs/common';
 import axios from 'axios';
 import { ShopeeAuthAdapter } from './shopee-auth.adapter'
-import { getShopeeBaseUrl, buildSignedParams, buildHeaders, getSignatureBaseString } from './shopee-utils'
+import { getShopeeBaseUrl, buildHeaders } from './shopee-utils'
+import { ShopeeSignerService } from './shopee-signer.service'
 import { IMarketplaceProductAdapter } from '../../interfaces/marketplace-product-adapter.interface';
 import { MarketplaceDocument } from '../../schemas/marketplace.schema';
 import { ProductDocument } from '../../../product/product-types';
@@ -19,6 +20,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
     private readonly registry: MarketplaceAdapterRegistry,
     private readonly descriptionService: MarketplaceDescriptionService,
     private readonly listingService: ListingService, // [NEW] Inject
+    private readonly signer: ShopeeSignerService,
   ) { }
 
   onModuleInit() {
@@ -131,7 +133,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
 
       const timestamp = Math.floor(Date.now() / 1000);
       const path = '/product/get_item_list';
-      const signedParams = buildSignedParams(path, timestamp, currentToken.accessToken, currentToken.additionalData.shopId, {
+      const signedParams = await this.signer.buildSignedParams(path, timestamp, currentToken.accessToken, currentToken.additionalData.shopId, {
         offset: params.offset || 0,
         page_size: params.limit || 20,
         item_status: params.status || 'NORMAL',
@@ -163,7 +165,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
 
       const timestamp = Math.floor(Date.now() / 1000);
       const path = '/product/get_item_base_info';
-      const signedParams = buildSignedParams(path, timestamp, currentToken.accessToken, currentToken.additionalData.shopId, {
+      const signedParams = await this.signer.buildSignedParams(path, timestamp, currentToken.accessToken, currentToken.additionalData.shopId, {
         item_id_list: itemIds
       });
 
@@ -227,7 +229,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
     const timestamp = Math.floor(Date.now() / 1000)
     const path = '/media_space/upload_image'
     const shopId = token.additionalData?.shopId || token.shopId || token.shop_id;
-    const params = buildSignedParams(path, timestamp, token.accessToken, shopId)
+    const params = await this.signer.buildSignedParams(path, timestamp, token.accessToken, shopId)
     try {
       let response: any
       try {
@@ -260,7 +262,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
       const isWrongSign = (error?.response?.status === 403) || /wrong\s*sign/i.test(String(error?.response?.data?.message || error?.message || ''))
       if (isWrongSign) {
         try {
-          const altParams = buildSignedParams(path, timestamp)
+          const altParams = await this.signer.buildSignedParams(path, timestamp)
           let retry: any
           try {
             const FormData = require('form-data')
@@ -291,7 +293,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
     if (!urls || urls.length === 0) return []
     const timestamp = Math.floor(Date.now() / 1000)
     const path = '/media_space/get_image'
-    const params = buildSignedParams(path, timestamp)
+    const params = await this.signer.buildSignedParams(path, timestamp)
     try {
       const response = await axios.post(`${this.baseUrl}${path}`, { image_url_list: urls }, { headers: buildHeaders(), params })
       const list = response.data?.response?.image_id_list
@@ -301,7 +303,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
       return Array.isArray(list) ? list.map((id: any) => String(id)) : []
     } catch (error: any) {
       try {
-        const altParams = buildSignedParams(path, timestamp)
+        const altParams = await this.signer.buildSignedParams(path, timestamp)
         const retry = await axios.post(`${this.baseUrl}${path}`, { image_url_list: urls }, { headers: buildHeaders(), params: altParams })
         const list = retry.data?.response?.image_id_list
           || retry.data?.image_id_list
@@ -440,7 +442,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
           };
         }
 
-        const params = buildSignedParams(path, timestamp, accessToken, shopId);
+        const params = await this.signer.buildSignedParams(path, timestamp, accessToken, shopId);
 
         let usedImageIds: string[] = [];
         if (Array.isArray(shopeeProduct.images) && shopeeProduct.images.length) {
@@ -502,7 +504,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
   private async getAvailableLogistics(token: any): Promise<number[]> {
     const timestamp = Math.floor(Date.now() / 1000)
     const path = '/logistics/get_channel_list'
-    const params = buildSignedParams(path, timestamp, token.accessToken, token.additionalData.shopId)
+    const params = await this.signer.buildSignedParams(path, timestamp, token.accessToken, token.additionalData.shopId)
     const response = await axios.get(`${this.baseUrl}${path}`, { headers: buildHeaders(), params })
 
     const payload = response.data || {}
@@ -520,7 +522,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
   async updateProductPrice(externalId: string, price: number, token: any): Promise<any> {
     const timestamp = Math.floor(Date.now() / 1000);
     const path = '/product/update_price';
-    const params = buildSignedParams(path, timestamp, token.accessToken, token.additionalData.shopId);
+    const params = await this.signer.buildSignedParams(path, timestamp, token.accessToken, token.additionalData.shopId);
 
     try {
       const payload = {
@@ -547,7 +549,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
   async updateProductStock(externalId: string, stock: number, token: any): Promise<any> {
     const timestamp = Math.floor(Date.now() / 1000);
     const path = '/product/update_stock';
-    const params = buildSignedParams(path, timestamp, token.accessToken, token.additionalData.shopId);
+    const params = await this.signer.buildSignedParams(path, timestamp, token.accessToken, token.additionalData.shopId);
 
     try {
       const payload = {
@@ -604,7 +606,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
         throw new Error('ShopId ausente para atualização de produto. Verifique logs.');
       }
 
-      const params = buildSignedParams(path, timestamp, accessToken, shopId);
+      const params = await this.signer.buildSignedParams(path, timestamp, accessToken, shopId);
       const shopeeProduct = await this.transformProductToShopee(product, marketplace);
 
       // Check for price and stock updates using transformed values which handle fallbacks correctly
@@ -675,7 +677,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
     try {
       const timestamp = Math.floor(Date.now() / 1000);
       const path = '/product/update_item';
-      const params = buildSignedParams(path, timestamp, images[0].token.accessToken, images[0].token.additionalData.shopId)
+      const params = await this.signer.buildSignedParams(path, timestamp, images[0].token.accessToken, images[0].token.additionalData.shopId)
 
       let imagesPayload: any
       if (Array.isArray(images) && images.length) {
@@ -730,7 +732,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
     try {
       const timestamp = Math.floor(Date.now() / 1000);
       const path = '/product/update_item';
-      const params = buildSignedParams(path, timestamp, token.accessToken, token.additionalData.shopId)
+      const params = await this.signer.buildSignedParams(path, timestamp, token.accessToken, token.additionalData.shopId)
 
       // Simulação da chamada de atualização de título
       const response = await axios.post(`${this.baseUrl}${path}`, {
@@ -766,7 +768,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
     try {
       const timestamp = Math.floor(Date.now() / 1000);
       const path = '/product/update_item';
-      const params = buildSignedParams(path, timestamp, category['token'].accessToken, category['token'].additionalData.shopId)
+      const params = await this.signer.buildSignedParams(path, timestamp, category['token'].accessToken, category['token'].additionalData.shopId)
 
       const response = await axios.post(`${this.baseUrl}${path}`, {
         item_id: parseInt(externalId),
@@ -799,7 +801,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
     try {
       const timestamp = Math.floor(Date.now() / 1000);
       const path = '/product/update_stock';
-      const params = buildSignedParams(path, timestamp, inventory['token'].accessToken, inventory['token'].additionalData.shopId)
+      const params = await this.signer.buildSignedParams(path, timestamp, inventory['token'].accessToken, inventory['token'].additionalData.shopId)
 
       // Shopee V2 Structure: stock_list with model_id: 0 for simple products
       const payload = {
