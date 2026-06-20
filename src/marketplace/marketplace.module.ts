@@ -34,6 +34,7 @@ import { TemplateEngine } from './services/template-engine.service';
 import { TemplateConditionEvaluator } from './services/template-condition.evaluator';
 import { MarketplaceAdapterRegistry } from './registries/marketplace-adapter.registry';
 import { AuthRetryService } from './adapters/shared/auth-retry.service';
+import { MlHttpClient } from './adapters/mercado-livre/ml-http-client';
 import { MarketplaceCategoryService } from './services/marketplace-category.service';
 
 import { MarketplaceRegistryService } from './services/marketplace-registry.service';
@@ -182,6 +183,7 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
     OLXWebhookService,
     MarketplaceAdapterRegistry,
     AuthRetryService,
+    MlHttpClient,
     RocketProductAdapter,
     TikTokShopAdapter,
     TikTokShopAuthAdapter,

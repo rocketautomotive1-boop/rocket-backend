@@ -1,75 +1,49 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import axios from 'axios';
 import FormData = require('form-data');
 import { IMarketplaceOrderAdapter } from '../../interfaces/marketplace-order-adapter.interface';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
-import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
-import { AuthRetryService } from '../shared/auth-retry.service';
-import { ResolvedToken } from '../../auth/services/token-manager.service';
+import { MlHttpClient } from './ml-http-client';
+import { HttpAuthContext } from '../shared/marketplace-http-client';
 
 @Injectable()
 export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnModuleInit {
   private readonly logger = new Logger(MercadoLivreOrderAdapter.name);
-  private baseUrl = 'https://api.mercadolibre.com';
   private name = 'Mercado Livre';
 
   constructor(
     private readonly registry: MarketplaceAdapterRegistry,
-    private readonly marketplaceRegistry: MarketplaceRegistryService,
-    private readonly authRetry: AuthRetryService,
+    private readonly http: MlHttpClient,
   ) { }
 
   onModuleInit() {
     this.registry.registerOrderAdapter(this.name, this);
   }
 
-  /** Roda `op` com auth-retry canônico (refresh da conta certa via accountId). */
-  private async withRetry<T>(
-    context: string,
-    accountId: string | undefined,
-    op: (token: ResolvedToken) => Promise<T>,
-  ): Promise<T> {
-    const mkt = await this.marketplaceRegistry.findByName(this.name);
-    return this.authRetry.run(
-      { marketplaceId: String(mkt._id), selector: accountId ? { accountId } : undefined, context },
-      op,
-    );
-  }
-
-  /** GET /users/me com o token resolvido (sem reentrar no pipeline de auth). */
-  private async meWith(token: ResolvedToken): Promise<any> {
-    const res = await axios.get(`${this.baseUrl}/users/me`, {
-      headers: { Authorization: `Bearer ${token.accessToken}` },
-    });
-    return res.data;
+  /** Contexto de auth (conta por accountId) p/ o HttpClient. */
+  private ctx(context: string, accountId?: string): HttpAuthContext {
+    return { context, accountId };
   }
 
   async getOrders(params: any): Promise<any[]> {
     const accountId: string | undefined = params?.accountId;
-    return this.withRetry('getOrders', accountId, async (token) => {
-      this.logger.log(`Buscando pedidos no Mercado Livre`);
+    this.logger.log(`Buscando pedidos no Mercado Livre`);
 
-      const user = await this.meWith(token);
-      if (!user) {
-        throw new Error('Usuário não encontrado');
-      }
+    const user = await this.http.get<any>('/users/me', this.ctx('getOrders.me', accountId));
+    if (!user) {
+      throw new Error('Usuário não encontrado');
+    }
 
-      const response = await axios.get(`${this.baseUrl}/orders/search`, {
-        headers: {
-          'Authorization': `Bearer ${token.accessToken}`,
-        },
-        params: {
-          seller: user.id,
-          status: params.status || 'paid',
-          sort: 'date_desc',
-          limit: params.limit || 50,
-          offset: params.offset || 0,
-        },
-      });
+    const data = await this.http.get<any>('/orders/search', this.ctx('getOrders', accountId), {
+      seller: user.id,
+      status: params.status || 'paid',
+      sort: 'date_desc',
+      limit: params.limit || 50,
+      offset: params.offset || 0,
+    });
 
-      this.logger.log(`${response.data.results.length} pedidos encontrados no Mercado Livre`);
+    this.logger.log(`${data.results.length} pedidos encontrados no Mercado Livre`);
 
-      return response.data.results.map((o: any) => ({
+    return data.results.map((o: any) => ({
         id: String(o.id),
         marketplaceId: null, // Context agnostic
         marketplaceName: this.name,
@@ -95,28 +69,21 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
         })),
         original_data: o
       }));
-    });
   }
 
   async getOrderDetails(orderId: string, accountId?: string): Promise<any> {
-    return this.withRetry('getOrderDetails', accountId, async (token) => {
-      this.logger.log(`Buscando detalhes do pedido no Mercado Livre: ${orderId}`);
+    this.logger.log(`Buscando detalhes do pedido no Mercado Livre: ${orderId}`);
+    const ctx = this.ctx('getOrderDetails', accountId);
 
-      const response = await axios.get(`${this.baseUrl}/orders/${orderId}`, {
-        headers: { 'Authorization': `Bearer ${token.accessToken}` },
-      });
+    const o = await this.http.get<any>(`/orders/${orderId}`, ctx);
+    this.logger.log(`Detalhes do pedido ${orderId} obtidos com sucesso`);
 
-      this.logger.log(`Detalhes do pedido ${orderId} obtidos com sucesso`);
-      const o = response.data;
-
+    {
       // Resolve buyer shipping address if available
       let buyerAddress: any = undefined;
       if (o.shipping?.receiver_address || o.shipping?.id) {
         try {
-          const shRes = await axios.get(`${this.baseUrl}/shipments/${o.shipping.id}`, {
-            headers: { 'Authorization': `Bearer ${token.accessToken}` },
-          });
-          const ra = shRes.data?.receiver_address || {};
+          const ra = (await this.http.get<any>(`/shipments/${o.shipping.id}`, ctx))?.receiver_address || {};
           buyerAddress = {
             street: ra.street_name || '',
             number: String(ra.street_number || ''),
@@ -189,38 +156,28 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
         })),
         original_data: o,
       };
-    });
+    }
   }
 
   async getBillingInfo(billingId: string, accountId?: string): Promise<any> {
-    return this.withRetry('getBillingInfo', accountId, async (token) => {
-      this.logger.log(`Buscando dados de faturamento (billing info: ${billingId}) no Mercado Livre`);
-
-      const response = await axios.get(`${this.baseUrl}/orders/billing-info/MLB/${billingId}`, {
-        headers: {
-          'Authorization': `Bearer ${token.accessToken}`,
-        },
-      });
-
-      this.logger.log(`Billing Info ${billingId} obtido com sucesso`);
-      return response.data;
-    });
+    this.logger.log(`Buscando dados de faturamento (billing info: ${billingId}) no Mercado Livre`);
+    const data = await this.http.get<any>(
+      `/orders/billing-info/MLB/${billingId}`,
+      this.ctx('getBillingInfo', accountId),
+    );
+    this.logger.log(`Billing Info ${billingId} obtido com sucesso`);
+    return data;
   }
 
   async updateOrderStatus(orderId: string, status: string, accountId?: string): Promise<any> {
-    return this.withRetry('updateOrderStatus', accountId, async (token) => {
-      this.logger.log(`Atualizando status do pedido no Mercado Livre: ${orderId} para ${status}`);
-
-      const response = await axios.post(`${this.baseUrl}/orders/${orderId}/${this.mapOrderStatus(status)}`, {}, {
-        headers: {
-          'Authorization': `Bearer ${token.accessToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      this.logger.log(`Status do pedido ${orderId} atualizado para ${status}`);
-      return response.data;
-    });
+    this.logger.log(`Atualizando status do pedido no Mercado Livre: ${orderId} para ${status}`);
+    const data = await this.http.post<any>(
+      `/orders/${orderId}/${this.mapOrderStatus(status)}`,
+      this.ctx('updateOrderStatus', accountId),
+      {},
+    );
+    this.logger.log(`Status do pedido ${orderId} atualizado para ${status}`);
+    return data;
   }
 
   /**
@@ -233,45 +190,46 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
    * Accepts XML alone, or PDF + XML (max 2 files, 1 MB each).
    */
   async uploadInvoice(orderId: string, xmlContent: string, options?: { packId?: string; pdfBase64?: string; accountId?: string }): Promise<any> {
-    return this.withRetry('uploadInvoice', options?.accountId, async (token) => {
-      const packId = options?.packId;
-      const resourcePath = packId
-        ? `/packs/${packId}/fiscal_documents`
-        : `/orders/${orderId}/fiscal_documents`;
+    const packId = options?.packId;
+    const resourcePath = packId
+      ? `/packs/${packId}/fiscal_documents`
+      : `/orders/${orderId}/fiscal_documents`;
 
-      this.logger.log(`Enviando NFe para ML: ${resourcePath}`);
+    this.logger.log(`Enviando NFe para ML: ${resourcePath}`);
 
-      const form = new FormData();
+    const form = new FormData();
 
-      // XML is required; filename must end in .xml so ML accepts it
-      const xmlBuffer = Buffer.from(xmlContent, 'utf-8');
-      form.append('fiscal_document', xmlBuffer, {
-        filename: 'nota_fiscal.xml',
-        contentType: 'application/xml',
-        knownLength: xmlBuffer.length,
-      });
-
-      // Optional: attach PDF if provided
-      if (options?.pdfBase64) {
-        const pdfBuffer = Buffer.from(options.pdfBase64, 'base64');
-        form.append('fiscal_document', pdfBuffer, {
-          filename: 'nota_fiscal.pdf',
-          contentType: 'application/pdf',
-          knownLength: pdfBuffer.length,
-        });
-      }
-
-      const response = await axios.post(`${this.baseUrl}${resourcePath}`, form, {
-        headers: {
-          'Authorization': `Bearer ${token.accessToken}`,
-          ...form.getHeaders(),
-        },
-        maxBodyLength: Infinity,
-      });
-
-      this.logger.log(`NFe enviada com sucesso: ${JSON.stringify(response.data)}`);
-      return response.data;
+    // XML is required; filename must end in .xml so ML accepts it
+    const xmlBuffer = Buffer.from(xmlContent, 'utf-8');
+    form.append('fiscal_document', xmlBuffer, {
+      filename: 'nota_fiscal.xml',
+      contentType: 'application/xml',
+      knownLength: xmlBuffer.length,
     });
+
+    // Optional: attach PDF if provided
+    if (options?.pdfBase64) {
+      const pdfBuffer = Buffer.from(options.pdfBase64, 'base64');
+      form.append('fiscal_document', pdfBuffer, {
+        filename: 'nota_fiscal.pdf',
+        contentType: 'application/pdf',
+        knownLength: pdfBuffer.length,
+      });
+    }
+
+    const res = await this.http.request<any>(
+      {
+        method: 'POST',
+        path: resourcePath,
+        body: form,
+        headers: form.getHeaders(),
+        axiosConfig: { maxBodyLength: Infinity },
+      },
+      this.ctx('uploadInvoice', options?.accountId),
+    );
+
+    this.logger.log(`NFe enviada com sucesso: ${JSON.stringify(res.data)}`);
+    return res.data;
   }
 
   private mapOrderStatus(status: string): string {
