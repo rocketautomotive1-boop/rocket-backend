@@ -3,7 +3,6 @@ import { MarketplaceDocument } from '../schemas/marketplace.schema';
 import { ProductDocument, ProductMovement } from '../../product/product-types';
 import { ProductTitle } from '../../product/product-types';
 import { ShopeeAdapter } from '../adapters/shopee/shopee.adapter';
-import { MarketplaceAuthService } from '../auth/services/marketplace-auth.service';
 import { MarketplaceIntegrationHelperService } from './marketplace-integration-helper.service';
 import { CategoryMappingService } from './category/category-mapping.service';
 import { MarketplaceDescriptionService } from './marketplace-description.service';
@@ -16,7 +15,6 @@ export class ShopeeService {
 
   constructor(
     private shopeeAdapter: ShopeeAdapter,
-    private marketplaceAuthService: MarketplaceAuthService,
     @Inject(forwardRef(() => MarketplaceIntegrationHelperService))
     private helperService: MarketplaceIntegrationHelperService,
     @Inject(forwardRef(() => CategoryMappingService))
@@ -35,29 +33,7 @@ export class ShopeeService {
     this.logger.log(`Criando produto ID ${String(product._id)} na Shopee`);
 
     try {
-      // Obter token válido
-      const token = await this.marketplaceAuthService.ensureValidToken(marketplace._id);
-
-      this.logger.log(`[ShopeeService] Token retrieved: ${token ? 'YES' : 'NO'}`);
-      if (token) {
-        this.logger.log(`[ShopeeService] Token structure: ${JSON.stringify({
-          hasAdditionalData: !!token.additionalData,
-          additionalData: token.additionalData,
-          shopIdRoot: (token as any).shopId
-        })}`);
-      }
-
-      if (!token || !token.additionalData || !token.additionalData.shopId) {
-        // Fallback: try to see if shopId is at the root or under 'shop_id' in additionalData
-        const shopIdFallback = (token as any).shopId || token.additionalData?.shop_id;
-        if (shopIdFallback && token.additionalData) {
-          token.additionalData.shopId = shopIdFallback;
-          this.logger.log(`[ShopeeService] Recovered shopId from fallback: ${shopIdFallback}`);
-        } else {
-          throw new Error('Token de acesso ou shopId não disponível para a Shopee');
-        }
-      }
-
+      // Token/shopId são resolvidos pelo ShopeeHttpClient (conta no DB) dentro do adapter.
       // Obter categoria mapeada para o produto, com fallback padrão 102273 quando não houver mapeamento
       const categoryId = await this.helperService.getMarketplaceCategoryForProduct(product, marketplace._id);
       const normalizedCategoryId = categoryId ? parseInt(String(categoryId)) : 102273;
@@ -107,7 +83,6 @@ export class ShopeeService {
         const shopeeUpdateData = {
           id: String(product._id),
           item_id: parseInt(externalIdToUpdate),
-          shop_id: parseInt(token.additionalData.shopId),
           name: shopeeSpecificTitle || product.name,
           description: description,
           price: await this.getLatestPrice(product),
@@ -130,25 +105,7 @@ export class ShopeeService {
             measure_unit: 'UN'
           }
         };
-        const shopeeUpdateDataWithToken = {
-          ...shopeeUpdateData,
-          token: {
-            accessToken: token.accessToken,
-            refreshToken: token.refreshToken, // Incluir refresh token
-            additionalData: { shopId: token.additionalData.shopId }
-          }
-        };
-        const updateResponse = await this.shopeeAdapter.updateProduct(externalIdToUpdate, shopeeUpdateDataWithToken);
-
-        // Atualizar token se foi renovado durante o update
-        if (updateResponse && updateResponse.token) {
-          shopeeUpdateDataWithToken.token = updateResponse.token;
-        } else if (updateResponse && updateResponse.accessToken) {
-          shopeeUpdateDataWithToken.token = {
-            ...shopeeUpdateDataWithToken.token,
-            accessToken: updateResponse.accessToken
-          }
-        }
+        const updateResponse = await this.shopeeAdapter.updateProduct(externalIdToUpdate, shopeeUpdateData);
 
         // Separadamente, atualizar Estoque e Preço (Shopee V2 exige endpoints específicos)
         // Isso garante que mesmo na "primeira publicação" (que vira update), os valores peguem
@@ -158,7 +115,6 @@ export class ShopeeService {
         try {
           await this.shopeeAdapter.updateProductInventory(externalIdToUpdate, {
             quantity: realStock,
-            token: shopeeUpdateDataWithToken.token
           });
         } catch (stockErr) {
           this.logger.warn(`Falha ao atualizar estoque Shopee (Create-as-Update): ${stockErr.message}`);
@@ -167,7 +123,6 @@ export class ShopeeService {
         try {
           await this.shopeeAdapter.updateProductPrice(externalIdToUpdate, {
             price: realPrice,
-            token: shopeeUpdateDataWithToken.token
           });
         } catch (priceErr) {
           this.logger.warn(`Falha ao atualizar preço Shopee (Create-as-Update): ${priceErr.message}`);
@@ -202,7 +157,6 @@ export class ShopeeService {
 
       const shopeeData = {
         id: String(product._id),
-        shop_id: parseInt(token.additionalData.shopId),
         category_id: normalizedCategoryId,
         name: shopeeSpecificTitle || product.name,
         description: description,
@@ -238,18 +192,8 @@ export class ShopeeService {
         }
       };
 
-      // Incluir o token e shopId no objeto do produto para que o adapter possa extraí-los
-      const shopeeDataWithToken = {
-        ...shopeeData,
-        token: {
-          accessToken: token.accessToken,
-          refreshToken: token.refreshToken, // Incluir refresh token
-          additionalData: { shopId: token.additionalData.shopId }
-        }
-      };
-
-      // Enviar para a Shopee
-      const response = await this.shopeeAdapter.createProduct(shopeeDataWithToken);
+      // Enviar para a Shopee (token/shopId resolvidos pelo ShopeeHttpClient)
+      const response = await this.shopeeAdapter.createProduct(shopeeData);
 
       if (!response || !response.item_id) {
         throw new Error('Falha ao criar produto na Shopee: resposta inválida');
@@ -295,13 +239,7 @@ export class ShopeeService {
     this.logger.log(`Atualizando produto ID ${String(product._id)} na Shopee (externalId: ${productTitle.externalId})`);
 
     try {
-      // Obter token válido
-      const token = await this.marketplaceAuthService.ensureValidToken(marketplace._id);
-
-      if (!token || !token.additionalData || !token.additionalData.shopId) {
-        throw new Error('Token de acesso ou shopId não disponível para a Shopee');
-      }
-
+      // Token/shopId resolvidos pelo ShopeeHttpClient (conta no DB) dentro do adapter.
       // Obter descrição formatada para a Shopee
       const description = await this.helperService.getFormattedDescription(product, String(marketplace._id));
 
@@ -324,7 +262,6 @@ export class ShopeeService {
       const shopeeData = {
         id: String(product._id),
         item_id: parseInt(productTitle.externalId),
-        shop_id: parseInt(token.additionalData.shopId),
         name: effectiveName,
         description: description,
         price: 0, // Metadata update ignores/doesn't need price in V2 logic if updated separately
@@ -349,38 +286,16 @@ export class ShopeeService {
         }
       };
 
-      // Incluir o token e shopId no objeto do produto para que o adapter possa extraí-los
-      const shopeeDataWithToken = {
-        ...shopeeData,
-        token: {
-          accessToken: token.accessToken,
-          refreshToken: token.refreshToken, // Incluir refresh token
-          additionalData: { shopId: token.additionalData.shopId }
-        }
-      };
-
-      // Atualizar produto (metadados)
+      // Atualizar produto (metadados) — token/shopId resolvidos pelo ShopeeHttpClient
       const response = await this.shopeeAdapter.updateProduct(
         productTitle.externalId,
-        shopeeDataWithToken
+        shopeeData
       );
-
-      // Atualizar token se foi renovado durante o update
-      if (response && response.token) {
-        shopeeDataWithToken.token = response.token;
-      } else if (response && response.accessToken) {
-        // Fallback se o adapter retornar formato diferente
-        shopeeDataWithToken.token = {
-          ...shopeeDataWithToken.token,
-          accessToken: response.accessToken
-        };
-      }
 
       // Separadamente, atualizar Estoque e Preço (Shopee V2 exige endpoints específicos)
       try {
         await this.shopeeAdapter.updateProductInventory(productTitle.externalId, {
           quantity: realStock,
-          token: shopeeDataWithToken.token
         });
       } catch (stockErr) {
         this.logger.warn(`Falha ao atualizar estoque Shopee separado: ${stockErr.message}`);
@@ -389,7 +304,6 @@ export class ShopeeService {
       try {
         await this.shopeeAdapter.updateProductPrice(productTitle.externalId, {
           price: realPrice,
-          token: shopeeDataWithToken.token
         });
       } catch (priceErr) {
         this.logger.warn(`Falha ao atualizar preço Shopee separado: ${priceErr.message}`);

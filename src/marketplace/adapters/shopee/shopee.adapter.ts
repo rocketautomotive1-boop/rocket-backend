@@ -28,44 +28,14 @@ export class ShopeeAdapter extends MarketplaceAdapter {
     return this.authAdapter.refreshToken(token);
   }
 
-  // Product methods
+  // Product methods — token/shopId são resolvidos pelo ShopeeHttpClient (conta no DB),
+  // o adapter não recebe mais token por argumento.
   async createProduct(product: any): Promise<any> {
-    // Montar objeto de token no formato esperado pelo ProductAdapter
-    const tokenObj = product.token && product.token.accessToken
-      ? product.token
-      : {
-        accessToken: product.accessToken || product.token,
-        additionalData: { shopId: product.shopId || product.additionalData?.shopId },
-      };
-
-    if (!tokenObj?.accessToken) {
-      throw new Error('Token de acesso não fornecido para criação de produto na Shopee');
-    }
-    if (!tokenObj?.additionalData?.shopId) {
-      throw new Error('ID da loja não fornecido para criação de produto na Shopee');
-    }
-
-    const productWithToken = { ...product, token: tokenObj };
-    return this.productAdapter.createProduct(productWithToken);
+    return this.productAdapter.createProduct(product);
   }
 
   async updateProduct(externalId: string, product: any): Promise<any> {
-    const tokenObj = product.token && product.token.accessToken
-      ? product.token
-      : {
-        accessToken: product.accessToken || product.token,
-        additionalData: { shopId: product.shopId || product.additionalData?.shopId },
-      };
-
-    if (!tokenObj?.accessToken) {
-      throw new Error('Token de acesso não fornecido para atualização de produto na Shopee');
-    }
-    if (!tokenObj?.additionalData?.shopId) {
-      throw new Error('ID da loja não fornecido para atualização de produto na Shopee');
-    }
-
-    const productWithToken = { ...product, token: tokenObj, externalId };
-    return this.productAdapter.updateProduct(externalId, productWithToken);
+    return this.productAdapter.updateProduct(externalId, product);
   }
 
   async updateProductImages(externalId: string, images: any[]): Promise<any> {
@@ -73,7 +43,7 @@ export class ShopeeAdapter extends MarketplaceAdapter {
   }
 
   async updateProductTitle(externalId: string, title: string): Promise<any> {
-    return this.productAdapter.updateProductTitle(externalId, title, undefined as any);
+    return this.productAdapter.updateProductTitle(externalId, title);
   }
 
   async updateProductCategory(externalId: string, category: any): Promise<any> {
@@ -82,14 +52,12 @@ export class ShopeeAdapter extends MarketplaceAdapter {
 
   async updateProductInventory(externalId: string, inventory: any): Promise<any> {
     const stock = inventory.stock || inventory.quantity || 0;
-    const token = inventory.token;
-    return this.productAdapter.updateProductStock(externalId, Number(stock), token);
+    return this.productAdapter.updateProductStock(externalId, Number(stock));
   }
 
   async updateProductPrice(externalId: string, priceData: any): Promise<any> {
     const price = priceData.price || 0;
-    const token = priceData.token;
-    return this.productAdapter.updateProductPrice(externalId, Number(price), token);
+    return this.productAdapter.updateProductPrice(externalId, Number(price));
   }
 
   async validateProduct(product: any): Promise<{ isValid: boolean, missingRequirements: string[] }> {
@@ -101,12 +69,12 @@ export class ShopeeAdapter extends MarketplaceAdapter {
     return this.orderAdapter.getOrders(params);
   }
 
-  async getOrderDetails(orderId: string, token?: any): Promise<any> {
-    return this.orderAdapter.getOrderDetails(orderId, token);
+  async getOrderDetails(orderId: string): Promise<any> {
+    return this.orderAdapter.getOrderDetails(orderId);
   }
 
-  async updateOrderStatus(orderId: string, status: string, token?: any): Promise<any> {
-    return this.orderAdapter.updateOrderStatus(orderId, status, token);
+  async updateOrderStatus(orderId: string, status: string): Promise<any> {
+    return this.orderAdapter.updateOrderStatus(orderId, status);
   }
 
   // Category methods
