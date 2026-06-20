@@ -1,6 +1,5 @@
-import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
-import axios from 'axios';
-import { MercadoLivreAuthAdapter } from './mercado-livre-auth.adapter';
+import { Injectable, Logger } from '@nestjs/common';
+import { MlHttpClient } from './ml-http-client';
 
 /** Um listing type da resposta crua de /sites/{SITE}/listing_prices. */
 export interface RawListingType {
@@ -32,14 +31,9 @@ const RELEVANT_TYPES = ['gold_special', 'gold_pro'] as const;
 @Injectable()
 export class MercadoLivrePricingAdapter {
   private readonly logger = new Logger(MercadoLivrePricingAdapter.name);
-  private readonly baseUrl = 'https://api.mercadolibre.com';
   private readonly site = 'MLB';
-  private readonly marketplaceName = 'Mercado Livre';
 
-  constructor(
-    @Inject(forwardRef(() => MercadoLivreAuthAdapter))
-    private readonly authAdapter: MercadoLivreAuthAdapter,
-  ) {}
+  constructor(private readonly http: MlHttpClient) {}
 
   /** Lucro líquido = preço − custo − comissão; margem = lucro / preço. */
   computeNetProfit(
@@ -86,18 +80,15 @@ export class MercadoLivrePricingAdapter {
     categoryId?: string;
     listingTypeId?: string;
   }): Promise<RawListingType[]> {
-    const token = await this.authAdapter.getValidToken(this.marketplaceName);
-
     const query: Record<string, string | number> = { price: params.price };
     if (params.categoryId) query.category_id = params.categoryId;
     if (params.listingTypeId) query.listing_type_id = params.listingTypeId;
 
-    const response = await axios.get(`${this.baseUrl}/sites/${this.site}/listing_prices`, {
-      params: query,
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    const data = response.data;
+    const data = await this.http.get<any>(
+      `/sites/${this.site}/listing_prices`,
+      { context: 'getListingPrices' },
+      query,
+    );
     return Array.isArray(data) ? data : [data];
   }
 

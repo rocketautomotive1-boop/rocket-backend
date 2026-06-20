@@ -96,10 +96,9 @@ export class QuestionReconciler {
 
     const since = checkpoint.lastCreatedCursor;
 
-    // accessToken é o token inicial; o adapter reabre via auth-retry pela conta
-    // (target.accountId) se levar 401.
+    // O token (sellerId) vem do broker; o transporte/refresh fica no MlHttpClient
+    // dentro do adapter, roteado por target.accountId.
     const delta = await this.mercadoLivreAdapter.listQuestionsSince(
-      token.accessToken,
       sellerId,
       since,
       target.accountId,

@@ -2,8 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { QuestionRepository } from '../question.repository';
 import { MarketplaceRegistryService } from '../../marketplace/services/marketplace-registry.service';
-import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
-import { MarketplaceTokenBrokerService } from '../../marketplace/auth/services/marketplace-token-broker.service';
 import { MercadoLivreAdapter } from '../../marketplace/adapters/mercado-livre/mercado-livre.adapter';
 import { QuestionProductResolver } from '../resolve/question-product.resolver';
 import { NOTIFICATION_EVENTS } from '../../notifications/events/notification.events';
@@ -16,8 +14,6 @@ export class QuestionIngestService {
   constructor(
     private readonly questionRepository: QuestionRepository,
     private readonly marketplaceRegistry: MarketplaceRegistryService,
-    private readonly marketplaceAuth: MarketplaceAuthService,
-    private readonly broker: MarketplaceTokenBrokerService,
     private readonly mercadoLivreAdapter: MercadoLivreAdapter,
     private readonly resolver: QuestionProductResolver,
     private readonly eventEmitter: EventEmitter2,
@@ -32,18 +28,12 @@ export class QuestionIngestService {
     const mkt = marketplaces.find((m: any) => m.enabled && m.name === 'Mercado Livre');
     if (!mkt) return;
 
-    // Multi-client: token da conta que originou a pergunta (accountId) quando
-    // conhecido; senão conta default (legado/single-account).
-    let token: string | undefined;
+    // Multi-client: o MlHttpClient resolve/renova o token da conta (accountId)
+    // dentro do getQuestionById; sem token resolvido aqui.
+    let q: any;
     try {
-      const active = accountId
-        ? await this.broker.ensureValidTokenByAccount(String(mkt._id), accountId)
-        : await this.marketplaceAuth.ensureValidToken(mkt._id);
-      token = active?.accessToken;
+      q = await this.mercadoLivreAdapter.getQuestionById(externalQuestionId, accountId);
     } catch { return; }
-    if (!token) return;
-
-    const q = await this.mercadoLivreAdapter.getQuestionById(token, externalQuestionId, accountId);
     if (!q) return;
 
     const existing = await this.questionRepository.findOne({ externalId: String(q.id) });
@@ -68,7 +58,7 @@ export class QuestionIngestService {
         await existing!.save();
         return;
       case 'LINK_PRODUCT': {
-        const pid = await this.resolver.resolve(q.item_id, mkt, token);
+        const pid = await this.resolver.resolve(q.item_id, mkt);
         if (pid) {
           existing!.product = pid;
           existing!.itemId = q.item_id;
@@ -82,7 +72,7 @@ export class QuestionIngestService {
         await existing!.save();
         return;
       case 'CREATE': {
-        const pid = await this.resolver.resolve(q.item_id, mkt, token);
+        const pid = await this.resolver.resolve(q.item_id, mkt);
         const status = q.status === 'ANSWERED' ? 'ANSWERED' : 'UNANSWERED';
         const created = await this.questionRepository.create({
           externalId: String(q.id),

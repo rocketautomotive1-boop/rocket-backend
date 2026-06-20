@@ -96,7 +96,7 @@ export class MercadoLivreController {
 
         try {
             const token = await this.marketplaceAuthService.ensureValidToken(marketplace._id);
-            const itemData = await this.mercadoLivreService.getItem(externalId, token.accessToken);
+            const itemData = await this.mercadoLivreService.getItem(externalId);
             const { canUpdate, restrictions } = await this.mercadoLivreService.canUpdateItem(itemData);
 
             const testData = {

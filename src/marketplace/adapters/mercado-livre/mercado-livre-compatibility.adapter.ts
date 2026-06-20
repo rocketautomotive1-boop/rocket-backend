@@ -1,38 +1,20 @@
-import { HttpService } from "@nestjs/axios";
 import { Injectable, InternalServerErrorException, Logger } from "@nestjs/common";
-import { MercadoLivreAuthAdapter } from "./mercado-livre-auth.adapter";
-import { firstValueFrom } from "rxjs";
+import { MlHttpClient } from "./ml-http-client";
+
+/** Compatibilidades ML (conta default). Token/refresh/retry no MlHttpClient. */
+const CTX = (context: string) => ({ context });
 
 @Injectable()
 export class MercadoLivreCompatibilityAdapter {
-    private readonly marketplaceName = 'Mercado Livre';
-    private readonly baseUrl = 'https://api.mercadolibre.com';
     private readonly logger = new Logger(MercadoLivreCompatibilityAdapter.name);
 
-    constructor(
-        private readonly httpService: HttpService,
-        private readonly mercadoLivreAuthAdapter: MercadoLivreAuthAdapter
-    ) { }
+    constructor(private readonly http: MlHttpClient) { }
 
-    private logMlResponse(operation: string, url: string, status: number | undefined, data: unknown): void {
-        const raw =
-            typeof data === 'object' && data !== null ? JSON.stringify(data) : String(data ?? '');
-        const body = raw.length > 12000 ? `${raw.slice(0, 12000)}…[truncated]` : raw;
-        this.logger.log(`[ML API resposta] ${operation} ${url} status=${status ?? 'n/a'} body=${body}`);
+    /** DELETE via MlHttpClient (a base só tem get/post como açúcar). */
+    private async del(path: string, context: string): Promise<any> {
+        const res = await this.http.request<any>({ method: 'DELETE', path }, CTX(context));
+        return res.data;
     }
-
-    private async getHeaders() {
-        const accessToken = await this.mercadoLivreAuthAdapter.getValidToken(this.marketplaceName);
-        if (!accessToken) {
-          throw new InternalServerErrorException('Access Token do Mercado Livre não disponível.');  
-        }
-        return {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        };
-      }
 
     /** Itens no modelo User Product exigem compatibilidades em `/user-products/{id}/compatibilities`. */
     private extractUserProductId(item: any): string | undefined {
@@ -42,21 +24,14 @@ export class MercadoLivreCompatibilityAdapter {
         return String(v);
     }
 
-    private async fetchMlItem(itemId: string, headers: { headers: Record<string, string> }): Promise<any> {
-        const res = await firstValueFrom(
-            this.httpService.get(`${this.baseUrl}/items/${itemId}`, headers),
-        );
-        return res.data;
+    private async fetchMlItem(itemId: string): Promise<any> {
+        return this.http.get<any>(`/items/${itemId}`, CTX('compat.fetchItem'));
     }
 
       async getCatalogDomain(domainId: string): Promise<any> {
         try {
-          const url = `${this.baseUrl}/catalog_domains/${domainId}`;
-          const headers = await this.getHeaders();
-          this.logger.log(`Buscando domínio do catálogo ${domainId}: ${url}.`);
-          const response = await firstValueFrom(this.httpService.get(url, headers));
-          this.logMlResponse('GET catalog_domains', url, response.status, response.data);
-          return response.data;
+          this.logger.log(`Buscando domínio do catálogo ${domainId}.`);
+          return await this.http.get<any>(`/catalog_domains/${domainId}`, CTX('getCatalogDomain'));
         } catch (error) {
           this.logger.error(`Erro ao buscar domínio do catálogo ${domainId}:`, error.response?.data || error.message);
           throw new InternalServerErrorException('Erro ao comunicar com a API do Mercado Livre.');
@@ -65,8 +40,7 @@ export class MercadoLivreCompatibilityAdapter {
 
       async searchProductCompatibilities(payload: any, fetchAll: boolean = false): Promise<any> {
         try {
-          const url = `${this.baseUrl}/catalog_compatibilities/products_search/chunks`;
-          const headers = await this.getHeaders();
+          const path = '/catalog_compatibilities/products_search/chunks';
 
           if (!payload.domain_id || !payload.site_id) {
             payload.site_id = 'MLB';
@@ -75,7 +49,7 @@ export class MercadoLivreCompatibilityAdapter {
 
           // Se fetchAll é true, buscar todos os resultados com paginação
           if (fetchAll) {
-            return await this.searchAllProductCompatibilities(payload, headers);
+            return await this.searchAllProductCompatibilities(payload);
           }
 
           // Configurar paginação padrão se não fornecida
@@ -86,19 +60,18 @@ export class MercadoLivreCompatibilityAdapter {
             payload.offset = 0;
           }
 
-          this.logger.log(`Buscando compatibilidades de produtos: ${url} e payload: ${JSON.stringify(payload)}.`);
-          const response = await firstValueFrom(this.httpService.post(url, payload, headers));
-          this.logMlResponse('POST products_search/chunks', url, response.status, response.data);
-          return response.data;
+          this.logger.log(`Buscando compatibilidades de produtos e payload: ${JSON.stringify(payload)}.`);
+          return await this.http.post<any>(path, CTX('searchProductCompatibilities'), payload);
         } catch (error) {
           this.logger.error('Erro ao buscar compatibilidades de produtos:', error.response?.data || error.message);
           throw new InternalServerErrorException('Erro ao comunicar com a API do Mercado Livre.');
         }
       }
 
-      private async searchAllProductCompatibilities(payload: any, headers: any): Promise<any> {
+      private async searchAllProductCompatibilities(payload: any): Promise<any> {
         this.logger.log(`Iniciando busca completa de compatibilidades`);
-      
+        const path = '/catalog_compatibilities/products_search/chunks';
+
         try {
           // Primeiro, fazer uma requisição para descobrir o total
           const initialPayload = {
@@ -106,17 +79,11 @@ export class MercadoLivreCompatibilityAdapter {
             limit: 1,
             offset: 0
           };
-      
+
           this.logger.log(`Buscando total de registros...`);
-          const initialUrl = `${this.baseUrl}/catalog_compatibilities/products_search/chunks`;
-          const initialResponse = await firstValueFrom(this.httpService.post(
-            initialUrl,
-            initialPayload,
-            headers
-          ));
-          this.logMlResponse('POST products_search/chunks (total)', initialUrl, initialResponse.status, initialResponse.data);
-      
-          const totalFromAPI = initialResponse.data.total || 0;
+          const initialData = await this.http.post<any>(path, CTX('searchAllCompat.total'), initialPayload);
+
+          const totalFromAPI = initialData.total || 0;
           this.logger.log(`Total de registros conforme API: ${totalFromAPI}`);
       
           if (totalFromAPI === 0) {
@@ -150,16 +117,8 @@ export class MercadoLivreCompatibilityAdapter {
             };
       
             this.logger.log(`Buscando página ${page + 1}/${totalPages} - offset: ${offset}, limit: ${limit}`);
-            
-            const pageUrl = `${this.baseUrl}/catalog_compatibilities/products_search/chunks`;
-            const response = await firstValueFrom(this.httpService.post(
-              pageUrl,
-              pagePayload,
-              headers
-            ));
-            this.logMlResponse(`POST products_search/chunks (página ${page + 1})`, pageUrl, response.status, response.data);
-      
-            const data = response.data;
+
+            const data = await this.http.post<any>(path, CTX(`searchAllCompat.page${page + 1}`), pagePayload);
             const results = data.results || [];
       
             this.logger.log(`Página ${page + 1}: ${results.length} resultados obtidos`);
@@ -234,21 +193,17 @@ export class MercadoLivreCompatibilityAdapter {
 
       async getAttributeTopValues(attributeId: string, knownAttributes: any[] = []): Promise<any> {
         try {
-          const url = `${this.baseUrl}/catalog_domains/MLB-CARS_AND_VANS/attributes/${attributeId}/top_values`;
-          const headers = await this.getHeaders();
-          
+          const path = `/catalog_domains/MLB-CARS_AND_VANS/attributes/${attributeId}/top_values`;
           const payload = {
             known_attributes: knownAttributes,
             site_id: "MLB",
             domain_id: "MLB-CARS_AND_VANS"
           };
 
-          this.logger.log(`Buscando top values para atributo ${attributeId}: ${url}`);
+          this.logger.log(`Buscando top values para atributo ${attributeId}`);
           this.logger.log(`Payload: ${JSON.stringify(payload)}`);
-          
-          const response = await firstValueFrom(this.httpService.post(url, payload, headers));
-          this.logMlResponse(`POST top_values ${attributeId}`, url, response.status, response.data);
-          return response.data;
+
+          return await this.http.post<any>(path, CTX('getAttributeTopValues'), payload);
         } catch (error) {
           this.logger.error(`Erro ao buscar top values para atributo ${attributeId}:`, error.response?.data || error.message);
           throw new InternalServerErrorException(`Erro ao buscar valores do atributo ${attributeId} na API do Mercado Livre.`);
@@ -256,7 +211,6 @@ export class MercadoLivreCompatibilityAdapter {
       }
 
       async syncCompatibility(itemId: string, compatibilityData: any): Promise<any> {
-        const headers = await this.getHeaders();
         const body: Record<string, any> = {
           ...compatibilityData,
           site_id: compatibilityData?.site_id || 'MLB',
@@ -268,7 +222,7 @@ export class MercadoLivreCompatibilityAdapter {
 
         let userProductId: string | undefined;
         try {
-          const itemData = await this.fetchMlItem(itemId, headers);
+          const itemData = await this.fetchMlItem(itemId);
           userProductId = this.extractUserProductId(itemData);
           if (userProductId) {
             this.logger.log(`Item ${itemId} usa User Product user_product_id=${userProductId}`);
@@ -277,21 +231,17 @@ export class MercadoLivreCompatibilityAdapter {
           this.logger.warn(`GET /items/${itemId} antes do sync de compat falhou: ${e?.message}`);
         }
 
-        const postCompat = async (url: string, label: string) => {
-          this.logger.log(`Sincronizando compatibilidade (${label}) item=${itemId}: ${url}`);
+        const postCompat = async (path: string, label: string) => {
+          this.logger.log(`Sincronizando compatibilidade (${label}) item=${itemId}: ${path}`);
           this.logger.log(`Payload: ${JSON.stringify(body)}`);
-          const response = await firstValueFrom(this.httpService.post(url, body, headers));
-          this.logMlResponse(`POST ${label}`, url, response.status, response.data);
-          return response.data;
+          return this.http.post<any>(path, CTX(`syncCompat.${label}`), body);
         };
 
         try {
           if (userProductId) {
-            const url = `${this.baseUrl}/user-products/${userProductId}/compatibilities`;
-            return await postCompat(url, 'user-products/.../compatibilities');
+            return await postCompat(`/user-products/${userProductId}/compatibilities`, 'user-products/.../compatibilities');
           }
-          const urlItems = `${this.baseUrl}/items/${itemId}/compatibilities`;
-          return await postCompat(urlItems, 'items/.../compatibilities');
+          return await postCompat(`/items/${itemId}/compatibilities`, 'items/.../compatibilities');
         } catch (error: any) {
           const msg = String(error.response?.data?.message || '');
           const isUserProductMigrationError =
@@ -300,14 +250,13 @@ export class MercadoLivreCompatibilityAdapter {
 
           if (isUserProductMigrationError && !userProductId) {
             try {
-              const itemData = await this.fetchMlItem(itemId, headers);
+              const itemData = await this.fetchMlItem(itemId);
               const up = this.extractUserProductId(itemData);
               if (up) {
                 this.logger.warn(
                   `Retry: ML recusou /items/.../compat; usando User Product user_product_id=${up}`,
                 );
-                const url = `${this.baseUrl}/user-products/${up}/compatibilities`;
-                return await postCompat(url, 'user-products/.../compatibilities(retry)');
+                return await postCompat(`/user-products/${up}/compatibilities`, 'user-products/.../compatibilities(retry)');
               }
             } catch (retryErr: any) {
               this.logger.error(`Retry User Product falhou: ${retryErr?.message}`);
@@ -326,29 +275,24 @@ export class MercadoLivreCompatibilityAdapter {
       }
 
       async removeCompatibilityFromMarketplace(itemId: string, compatibilityId: string): Promise<any> {
-        const headers = await this.getHeaders();
         let userProductId: string | undefined;
         try {
-          const itemData = await this.fetchMlItem(itemId, headers);
+          const itemData = await this.fetchMlItem(itemId);
           userProductId = this.extractUserProductId(itemData);
         } catch {
           // fallback para URL legacy
         }
 
-        const doDelete = async (url: string, label: string) => {
-          this.logger.log(`Removendo compatibilidade ${compatibilityId} (${label}) ${url}`);
-          const response = await firstValueFrom(this.httpService.delete(url, headers));
-          this.logMlResponse(`DELETE ${label}`, url, response.status, response.data);
-          return response.data;
+        const doDelete = async (path: string, label: string) => {
+          this.logger.log(`Removendo compatibilidade ${compatibilityId} (${label}) ${path}`);
+          return this.del(path, `removeCompat.${label}`);
         };
 
         try {
           if (userProductId) {
-            const url = `${this.baseUrl}/user-products/${userProductId}/compatibilities/${compatibilityId}`;
-            return await doDelete(url, 'user-products');
+            return await doDelete(`/user-products/${userProductId}/compatibilities/${compatibilityId}`, 'user-products');
           }
-          const url = `${this.baseUrl}/items/${itemId}/compatibilities/${compatibilityId}`;
-          return await doDelete(url, 'items');
+          return await doDelete(`/items/${itemId}/compatibilities/${compatibilityId}`, 'items');
         } catch (error: any) {
           const msg = String(error.response?.data?.message || '');
           const retryUp =
@@ -357,11 +301,10 @@ export class MercadoLivreCompatibilityAdapter {
             !userProductId;
           if (retryUp) {
             try {
-              const itemData = await this.fetchMlItem(itemId, headers);
+              const itemData = await this.fetchMlItem(itemId);
               const up = this.extractUserProductId(itemData);
               if (up) {
-                const url = `${this.baseUrl}/user-products/${up}/compatibilities/${compatibilityId}`;
-                return await doDelete(url, 'user-products(retry)');
+                return await doDelete(`/user-products/${up}/compatibilities/${compatibilityId}`, 'user-products(retry)');
               }
             } catch {
               /* fall through */

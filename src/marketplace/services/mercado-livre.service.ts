@@ -345,8 +345,8 @@ export class MercadoLivreService {
   /**
    * Consulta um item no Mercado Livre
    */
-  async getItem(externalId: string, accessToken: string): Promise<any> {
-    return this.mercadoLivreProductAdapter.getItem(externalId, accessToken);
+  async getItem(externalId: string): Promise<any> {
+    return this.mercadoLivreProductAdapter.getItem(externalId);
   }
 
   /**
@@ -370,18 +370,8 @@ export class MercadoLivreService {
     this.logger.log(`Consultando status do item ${productTitle.externalId} no Mercado Livre`);
 
     try {
-      // Obter token válido
-      const token = await this.marketplaceAuthService.ensureValidToken(marketplace._id);
-
-      if (!token) {
-        throw new Error('Token de acesso não disponível para o Mercado Livre');
-      }
-
-      // Consultar o item
-      const itemData = await this.mercadoLivreProductAdapter.getItem(
-        productTitle.externalId,
-        token.accessToken
-      );
+      // Token/refresh ficam no MlHttpClient dentro do adapter.
+      const itemData = await this.mercadoLivreProductAdapter.getItem(productTitle.externalId);
 
       // Verificar restrições
       const { canUpdate, restrictions } = this.mercadoLivreProductAdapter.canUpdateItem(itemData);
@@ -557,63 +547,18 @@ export class MercadoLivreService {
       }
       */
 
-      // Obter token válido usando o novo serviço
-      const accessToken = '';
+      // Token/refresh/retry ficam no MlHttpClient dentro do adapter — não há mais
+      // retry manual de 403 nem token resolvido aqui.
+      const suggestedCategory = await this.mercadoLivreAdapter.discoverCategory(title);
+      this.logger.log('Categoria sugerida:', JSON.stringify(suggestedCategory, null, 2));
 
-      try {
-        // Buscar categoria sugerida
-        const suggestedCategory = await this.mercadoLivreAdapter.discoverCategory(
-          accessToken,
-          title
-        );
+      const categoryDetails = await this.mercadoLivreAdapter.getCategoryDetails(suggestedCategory.category_id);
+      this.logger.log('Detalhes da categoria:', JSON.stringify(categoryDetails, null, 2));
 
-        this.logger.log('Categoria sugerida:', JSON.stringify(suggestedCategory, null, 2));
-
-        // Buscar detalhes da categoria
-        const categoryDetails = await this.mercadoLivreAdapter.getCategoryDetails(
-          accessToken,
-          suggestedCategory.category_id
-        );
-
-        this.logger.log('Detalhes da categoria:', JSON.stringify(categoryDetails, null, 2));
-
-        // Retornar resultado formatado
-        return {
-          ...suggestedCategory,
-          details: categoryDetails
-        };
-
-      } catch (error) {
-        // Se for erro 403, tentar renovar o token e tentar novamente
-        if (error.response?.status === 403) {
-          this.logger.log('Erro 403 detectado, tentando renovar token...');
-
-          // Limpar cache do token para forçar renovação
-          //this.tokenService.clearCache(marketplace.id);
-
-          // Obter novo token
-          const newAccessToken = '';
-
-          // Tentar novamente com o novo token
-          const suggestedCategory = await this.mercadoLivreAdapter.discoverCategory(
-            newAccessToken,
-            title
-          );
-
-          const categoryDetails = await this.mercadoLivreAdapter.getCategoryDetails(
-            newAccessToken,
-            suggestedCategory.category_id
-          );
-
-          return {
-            ...suggestedCategory,
-            details: categoryDetails
-          };
-        }
-
-        // Se não for erro 403, propaga o erro
-        throw error;
-      }
+      return {
+        ...suggestedCategory,
+        details: categoryDetails,
+      };
     } catch (error) {
       this.logger.error('Erro ao buscar categoria sugerida:', error);
       throw error;

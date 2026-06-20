@@ -10,10 +10,8 @@ function makeSut(existing: any) {
     create: jest.fn().mockResolvedValue({ status: 'UNANSWERED', save: jest.fn() }),
   };
   const registry = { findAll: jest.fn().mockResolvedValue([mlMarketplace]) };
-  const auth = { ensureValidToken: jest.fn().mockResolvedValue({ accessToken: 'tok' }) };
-  const broker = {
-    ensureValidTokenByAccount: jest.fn().mockResolvedValue({ accessToken: 'tok-acc', additionalData: {} }),
-  };
+  // O token/refresh agora vivem no MlHttpClient dentro do adapter; o ingest só
+  // chama getQuestionById(externalId, accountId).
   const adapter = {
     getQuestionById: jest.fn().mockResolvedValue({
       id: 99, item_id: 'MLB1', text: 'oi?', status: 'UNANSWERED',
@@ -23,9 +21,9 @@ function makeSut(existing: any) {
   const resolver = { resolve: jest.fn().mockResolvedValue(new Types.ObjectId()) };
   const emitter = { emit: jest.fn() };
   const sut = new QuestionIngestService(
-    repo as any, registry as any, auth as any, broker as any, adapter as any, resolver as any, emitter as any,
+    repo as any, registry as any, adapter as any, resolver as any, emitter as any,
   );
-  return { sut, repo, emitter, resolver, auth, broker, adapter };
+  return { sut, repo, emitter, resolver, adapter };
 }
 
 describe('QuestionIngestService', () => {
@@ -48,21 +46,15 @@ describe('QuestionIngestService', () => {
     expect(emitter.emit).not.toHaveBeenCalled();
   });
 
-  it('resolves the token by account when accountId is given', async () => {
-    const { sut, broker, auth, adapter } = makeSut(null) as any;
+  it('threads accountId into getQuestionById (multi-conta)', async () => {
+    const { sut, adapter } = makeSut(null);
     await sut.ingest('99', 'reconcile', 'ACC_B');
-    expect(broker.ensureValidTokenByAccount).toHaveBeenCalledWith(
-      String(mlMarketplace._id),
-      'ACC_B',
-    );
-    expect(auth.ensureValidToken).not.toHaveBeenCalled();
-    expect(adapter.getQuestionById).toHaveBeenCalledWith('tok-acc', '99', 'ACC_B');
+    expect(adapter.getQuestionById).toHaveBeenCalledWith('99', 'ACC_B');
   });
 
-  it('falls back to default account token when no accountId', async () => {
-    const { sut, broker, auth } = makeSut(null) as any;
+  it('passes undefined accountId for the default account', async () => {
+    const { sut, adapter } = makeSut(null);
     await sut.ingest('99', 'reconcile');
-    expect(auth.ensureValidToken).toHaveBeenCalled();
-    expect(broker.ensureValidTokenByAccount).not.toHaveBeenCalled();
+    expect(adapter.getQuestionById).toHaveBeenCalledWith('99', undefined);
   });
 });

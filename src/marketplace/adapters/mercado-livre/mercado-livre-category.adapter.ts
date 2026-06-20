@@ -1,15 +1,13 @@
-import { ProductAttributesService } from '../../services/product-attributes.service';
-import { Inject, forwardRef, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import axios from 'axios';
-import { MercadoLivreAuthAdapter } from './mercado-livre-auth.adapter';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
-import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
-import { AuthRetryService } from '../shared/auth-retry.service';
+import { MlHttpClient } from './ml-http-client';
+
+/** Catálogo ML: leituras conta-agnósticas (conta default). Token/refresh/retry vivem no MlHttpClient. */
+const CTX = (context: string) => ({ context });
 
 @Injectable()
 export class MercadoLivreCategoryAdapter implements OnModuleInit {
   private readonly logger = new Logger(MercadoLivreCategoryAdapter.name);
-  private baseUrl = 'https://api.mercadolibre.com';
   private name = 'Mercado Livre';
 
   // Cache simples em memória (Map<key, { data, timestamp }>)
@@ -17,313 +15,147 @@ export class MercadoLivreCategoryAdapter implements OnModuleInit {
   private readonly CACHE_TTL = 60 * 60 * 1000; // 1 hora
 
   constructor(
-    @Inject(forwardRef(() => MercadoLivreAuthAdapter))
-    private readonly authAdapter: MercadoLivreAuthAdapter,
     private readonly registry: MarketplaceAdapterRegistry,
-    private readonly marketplaceRegistry: MarketplaceRegistryService,
-    private readonly authRetry: AuthRetryService,
+    private readonly http: MlHttpClient,
   ) { }
 
   onModuleInit() {
     this.registry.registerCategoryAdapter(this.name, this);
   }
 
-  /**
-   * Helper para cache simples em memória
-   */
   private async getCachedRequest<T>(key: string, requestFn: () => Promise<T>): Promise<T> {
     const cached = this.cache.get(key);
     const now = Date.now();
-
     if (cached && (now - cached.timestamp < this.CACHE_TTL)) {
       return cached.data;
     }
-
     const data = await requestFn();
     this.cache.set(key, { data, timestamp: now });
     return data;
   }
 
-  /**
-   * Chamada ao Mercado Livre via auth-retry canônico. Categoria é catálogo
-   * conta-agnóstico → conta default (selector vazio). O token canônico
-   * (resolvido/renovado pelo helper) sobrescreve o Authorization do config.
-   */
-  private async requestWithRetry(config: any): Promise<any> {
-    const mkt = await this.marketplaceRegistry.findByName(this.name);
-    return this.authRetry.run(
-      { marketplaceId: String(mkt._id), context: 'category' },
-      (token) =>
-        axios({
-          ...config,
-          headers: {
-            ...(config.headers || {}),
-            Authorization: `Bearer ${token.accessToken}`,
-          },
-        }),
-    );
-  }
-
-  async getCategories(accessToken: string, parentId?: string): Promise<any[]> {
-
+  async getCategories(parentId?: string): Promise<any[]> {
     try {
-      // Se não tiver parentId, busca as categorias raiz
       if (!parentId) {
-        const response = await this.requestWithRetry({
-          method: 'get',
-          url: `${this.baseUrl}/sites/MLB/categories`,
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-
-
-        return response.data;
+        return await this.http.get<any[]>('/sites/MLB/categories', CTX('getCategories'));
       }
-
-      // Se tiver parentId, busca a categoria específica e suas subcategorias
-      const response = await this.requestWithRetry({
-        method: 'get',
-        url: `${this.baseUrl}/categories/${parentId}`,
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-
-      // Extrai as subcategorias do resultado
-      const childrenCategories = response.data.children_categories || [];
-
-
-
-      return childrenCategories;
-    } catch (error) {
+      const data = await this.http.get<any>(`/categories/${parentId}`, CTX('getCategories'));
+      return data.children_categories || [];
+    } catch (error: any) {
       this.logger.error(`Erro na busca de categorias do Mercado Livre: ${error.message}`, error.stack);
       throw new Error(`Falha na busca de categorias do Mercado Livre: ${error.message}`);
     }
   }
 
-  async getCategoryDetails(accessToken: string, categoryId: string): Promise<any> {
+  async getCategoryDetails(categoryId: string): Promise<any> {
     const cacheKey = `details:${categoryId}`;
-
     return this.getCachedRequest(cacheKey, async () => {
-
-
       try {
-        // Primeira chamada para obter os detalhes básicos da categoria
-        const categoryResponse = await this.requestWithRetry({
-          method: 'get',
-          url: `${this.baseUrl}/categories/${categoryId}`,
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-
-        // Segunda chamada para obter os atributos da categoria
-        const attributesResponse = await this.requestWithRetry({
-          method: 'get',
-          url: `${this.baseUrl}/categories/${categoryId}/attributes`,
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-
-
-
-        // Combinar os resultados
-        return {
-          ...categoryResponse.data,
-          attributes: attributesResponse.data
-        };
-      } catch (error) {
+        const [category, attributes] = await Promise.all([
+          this.http.get<any>(`/categories/${categoryId}`, CTX('getCategoryDetails')),
+          this.http.get<any>(`/categories/${categoryId}/attributes`, CTX('getCategoryDetails')),
+        ]);
+        return { ...category, attributes };
+      } catch (error: any) {
         this.logger.error(`Erro na busca de detalhes da categoria do Mercado Livre: ${error.message}`, error.stack);
         throw new Error(`Falha na busca de detalhes da categoria do Mercado Livre: ${error.message}`);
       }
     });
   }
 
-  async getShippingPreferences(accessToken: string, categoryId: string): Promise<any> {
-
+  async getShippingPreferences(categoryId: string): Promise<any> {
     try {
-      const response = await this.requestWithRetry({
-        method: 'get',
-        url: `${this.baseUrl}/categories/${categoryId}/shipping_preferences`,
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      return response.data;
-    } catch (error) {
+      return await this.http.get<any>(`/categories/${categoryId}/shipping_preferences`, CTX('getShippingPreferences'));
+    } catch (error: any) {
       this.logger.error(`Erro ao buscar preferências de envio: ${error.message}`, error.stack);
       throw new Error(`Falha ao buscar preferências de envio: ${error.message}`);
     }
   }
 
-  async getAllChildCategories(accessToken: string, parentId: string): Promise<any[]> {
-
-
+  async getAllChildCategories(parentId: string): Promise<any[]> {
     try {
-      // Busca os detalhes da categoria pai
-      const categoryDetails = await this.getCategoryDetails(accessToken, parentId);
-
-      // Se não tiver subcategorias, retorna um array vazio
+      const categoryDetails = await this.getCategoryDetails(parentId);
       if (!categoryDetails.children_categories || categoryDetails.children_categories.length === 0) {
-
         return [];
       }
-
-      // Extrai as subcategorias diretas
-      const directChildren = categoryDetails.children_categories;
-
-
-      // Array para armazenar todas as subcategorias (diretas e indiretas)
-      let allCategories = [];
-
-      // Para cada subcategoria direta, busca seus detalhes completos e recursivamente suas subcategorias
-      for (const child of directChildren) {
-        // Busca detalhes completos da subcategoria
-        const childDetails = await this.getCategoryDetails(accessToken, child.id);
-
-        // Adiciona a subcategoria com detalhes completos ao array
+      let allCategories: any[] = [];
+      for (const child of categoryDetails.children_categories) {
+        const childDetails = await this.getCategoryDetails(child.id);
         allCategories.push(childDetails);
-
-        // Busca recursivamente as subcategorias da subcategoria atual
-        const childCategories = await this.getAllChildCategories(accessToken, child.id);
-
-        // Adiciona as subcategorias encontradas ao array de todas as categorias
+        const childCategories = await this.getAllChildCategories(child.id);
         allCategories = [...allCategories, ...childCategories];
       }
-
-
-
       return allCategories;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Erro na busca recursiva de subcategorias do Mercado Livre: ${error.message}`, error.stack);
       throw new Error(`Falha na busca recursiva de subcategorias do Mercado Livre: ${error.message}`);
     }
   }
 
-  async discoverCategory(accessToken: string, title: string): Promise<any> {
-
-
+  async discoverCategory(title: string): Promise<any> {
     try {
-      const response = await this.requestWithRetry({
-        method: 'get',
-        url: `${this.baseUrl}/sites/MLB/domain_discovery/search`,
-        params: { q: title },
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-
-
-
-      if (!response.data || response.data.length === 0) {
+      const data = await this.http.get<any>('/sites/MLB/domain_discovery/search', CTX('discoverCategory'), { q: title });
+      if (!data || data.length === 0) {
         this.logger.error('Resposta vazia da API do Mercado Livre');
         throw new Error('Nenhuma categoria encontrada para o título fornecido');
       }
-
-      const suggestedCategory = response.data[0];
-
-      // Mapear os campos da resposta para o formato esperado
-      const mappedCategory = {
-        category_id: suggestedCategory.category_id,
-        name: suggestedCategory.category_name, // Mapeando category_name para name
-        domain_id: suggestedCategory.domain_id,
-        domain_name: suggestedCategory.domain_name,
-        attributes: suggestedCategory.attributes || []
+      const suggested = data[0];
+      const mapped = {
+        category_id: suggested.category_id,
+        name: suggested.category_name,
+        domain_id: suggested.domain_id,
+        domain_name: suggested.domain_name,
+        attributes: suggested.attributes || [],
       };
-
-
-
-      if (!mappedCategory.category_id || !mappedCategory.name) {
+      if (!mapped.category_id || !mapped.name) {
         this.logger.error('Resposta inválida do Mercado Livre:', {
-          hasCategoryId: !!mappedCategory.category_id,
-          hasName: !!mappedCategory.name,
-          rawResponse: suggestedCategory
+          hasCategoryId: !!mapped.category_id,
+          hasName: !!mapped.name,
+          rawResponse: suggested,
         });
         throw new Error('Resposta inválida do Mercado Livre: categoria incompleta');
       }
-
-
-
-      return mappedCategory;
-    } catch (error) {
-      if (error.response) {
-        this.logger.error('Erro na resposta da API:', {
-          status: error.response.status,
-          statusText: error.response.statusText,
-          data: error.response.data
-        });
-      }
+      return mapped;
+    } catch (error: any) {
       this.logger.error(`Erro na busca de categoria sugerida: ${error.message}`, error.stack);
       throw new Error(`Falha na busca de categoria sugerida: ${error.message}`);
     }
   }
 
   async domainDiscovery(title: string): Promise<any> {
+    if (!title) throw new Error('Título não fornecido para busca de domínio');
     try {
-      if (!title) {
-        throw new Error('Título não fornecido para busca de domínio');
-      }
-
-      const accessToken = await this.authAdapter.getValidToken(this.name);
-      if (!accessToken) {
-        throw new Error(`Não consegui obter o token de acesso para ${this.name}.`);
-      }
-
-      const domainDiscovery = await this.requestWithRetry({
-        method: 'get',
-        url: `${this.baseUrl}/sites/MLB/domain_discovery/search`,
-        params: { q: title },
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!domainDiscovery.data || domainDiscovery.data.length === 0) {
+      const data = await this.http.get<any>('/sites/MLB/domain_discovery/search', CTX('domainDiscovery'), { q: title });
+      if (!data || data.length === 0) {
         throw new Error('Nenhum domínio encontrado para o título fornecido');
       }
-
-      return domainDiscovery.data;
-    } catch (error) {
+      return data;
+    } catch (error: any) {
       this.logger.error(`Erro ao buscar domínio sugerido: ${error.message}`);
       throw error;
     }
   }
 
   async getDomainAndCategories(title: string): Promise<any> {
+    if (!title) throw new Error('Título não fornecido para busca de domínio e categorias');
     try {
-      if (!title) {
-        throw new Error('Título não fornecido para busca de domínio e categorias');
-      }
-
-      const accessToken = await this.authAdapter.getValidToken(this.name);
-      if (!accessToken) {
-        throw new Error(`Não consegui obter o token de acesso para ${this.name}.`);
-      }
-
       const domain = await this.domainDiscovery(title);
       if (!Array.isArray(domain)) {
         throw new Error('Resposta inválida do Mercado Livre: domínio não é um array.');
       }
-
-      const enrichedDomain = await Promise.all(domain.map(async (domainItem: any) => {
+      return await Promise.all(domain.map(async (domainItem: any) => {
         const category = await this.getCategory(domainItem.category_id);
         if (!category) {
           throw new Error(`Não foi possível obter a categoria: ${domainItem.category_id}.`);
         }
-
-        // Optimization: Fetch Shipping Preferences (Dimensions)
         let dimensions = null;
         try {
-          const prefs = await this.getShippingPreferences(accessToken, domainItem.category_id);
-          if (prefs && prefs.dimensions) {
-            dimensions = prefs.dimensions;
-          }
-        } catch (ignored) {
-          // Ignore error if preferences fetch fails, it's optional
-        }
-
-        // Return enriched object (Category + Dimensions)
-        // We attach dimensions to the category object itself for persistence later
-        const categoryWithDimensions = {
-          ...category,
-          dimensions: dimensions
-        };
-
-        return { ...domainItem, category: categoryWithDimensions };
+          const prefs = await this.getShippingPreferences(domainItem.category_id);
+          if (prefs && prefs.dimensions) dimensions = prefs.dimensions;
+        } catch { /* preferences são best-effort */ }
+        return { ...domainItem, category: { ...category, dimensions } };
       }));
-      return enrichedDomain;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Erro ao buscar domínio e categorias: ${error.message}`);
       throw error;
     }
@@ -331,24 +163,10 @@ export class MercadoLivreCategoryAdapter implements OnModuleInit {
 
   async getCategory(categoryId: string): Promise<any> {
     const cacheKey = `category:${categoryId}`;
-
     return this.getCachedRequest(cacheKey, async () => {
       try {
-        const accessToken = await this.authAdapter.getValidToken(this.name);
-        if (!accessToken) {
-          throw new Error(`Não consegui obter o token de acesso para ${this.name}.`);
-        }
-
-        const category = await this.requestWithRetry({
-          method: 'get',
-          url: `${this.baseUrl}/categories/${categoryId}`,
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        if (!category) {
-          throw new Error('Não foi possível obter a categoria');
-        }
-        return category.data;
-      } catch (error) {
+        return await this.http.get<any>(`/categories/${categoryId}`, CTX('getCategory'));
+      } catch (error: any) {
         this.logger.error(`Erro ao buscar categoria: ${error.message}`);
         throw error;
       }
@@ -357,21 +175,11 @@ export class MercadoLivreCategoryAdapter implements OnModuleInit {
 
   async getCategoryAttributes(categoryId: string): Promise<any> {
     const cacheKey = `attributes:${categoryId}`;
-
     return this.getCachedRequest(cacheKey, async () => {
       try {
-        const accessToken = await this.authAdapter.getValidToken(this.name);
-        if (!accessToken) {
-          throw new Error(`Não consegui obter o token de acesso para ${this.name}.`);
-        }
         this.logger.debug(`Fetching attributes for category ID: ${categoryId}`);
-        const attributes = await this.requestWithRetry({
-          method: 'get',
-          url: `${this.baseUrl}/categories/${categoryId}/attributes`,
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        return attributes.data;
-      } catch (error) {
+        return await this.http.get<any>(`/categories/${categoryId}/attributes`, CTX('getCategoryAttributes'));
+      } catch (error: any) {
         this.logger.error(`Erro ao buscar atributos da categoria: ${error.message}`);
         throw error;
       }
@@ -385,28 +193,15 @@ export class MercadoLivreCategoryAdapter implements OnModuleInit {
 
   async getDomainWithCategoryAndAttributes(title: any): Promise<any> {
     try {
-      const accessToken = await this.authAdapter.getValidToken(this.name);
-      if (!accessToken) {
-        throw new Error(`Não consegui obter o token de acesso para ${this.name}.`);
-      }
       const domain = await this.domainDiscovery(title);
       for (const domainItem of domain) {
         const category = await this.getCategory(domainItem.category_id);
-        if (!category) {
-          throw new Error('Não foi possível obter a categoria');
-        }
-
+        if (!category) throw new Error('Não foi possível obter a categoria');
         const attributes = await this.getCategoryAttributes(domainItem.category_id);
-        if (!attributes) {
-          throw new Error('Não foi possível obter os atributos da categoria');
-        }
-
-        return {
-          category: category,
-          attributes: attributes
-        };
+        if (!attributes) throw new Error('Não foi possível obter os atributos da categoria');
+        return { category, attributes };
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Erro ao buscar domínio com categoria e atributos: ${error.message}`);
       throw error;
     }

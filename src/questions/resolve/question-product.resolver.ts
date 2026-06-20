@@ -18,7 +18,7 @@ export class QuestionProductResolver {
     private readonly productService: ProductService,
   ) {}
 
-  async resolve(itemId: string, marketplace: any, token: string): Promise<Types.ObjectId | null> {
+  async resolve(itemId: string, marketplace: any): Promise<Types.ObjectId | null> {
     if (!itemId) return null;
     const key = `${marketplace._id}:${itemId}`;
 
@@ -29,7 +29,7 @@ export class QuestionProductResolver {
     if (negExpiry && negExpiry > Date.now()) return null;
     if (negExpiry) this.negative.delete(key);
 
-    const resolved = await this.doResolve(itemId, marketplace, token);
+    const resolved = await this.doResolve(itemId, marketplace);
     if (resolved) {
       this.positive.set(key, resolved.toString());
       return resolved;
@@ -39,7 +39,7 @@ export class QuestionProductResolver {
   }
 
   /** Listing match → numeric/MLB fallback → getItem+SKU auto-link. Lifted from QuestionsService.resolveProductId. */
-  private async doResolve(itemId: string, marketplace: any, token: string): Promise<Types.ObjectId | null> {
+  private async doResolve(itemId: string, marketplace: any): Promise<Types.ObjectId | null> {
     let pm = await this.productTitleService.findByExternalIdAndMarketplaceId(itemId, marketplace._id);
 
     if (!pm) {
@@ -57,7 +57,7 @@ export class QuestionProductResolver {
 
     if (!pm) {
       try {
-        const itemDetails = await this.mercadoLivreService.getItem(itemId, token);
+        const itemDetails = await this.mercadoLivreService.getItem(itemId);
         const sku = itemDetails.seller_custom_field ||
           itemDetails.attributes?.find((a: any) => a.id === 'SELLER_SKU')?.value_name;
         if (sku) {

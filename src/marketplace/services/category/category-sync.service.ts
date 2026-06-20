@@ -37,7 +37,7 @@ export class CategorySyncService {
 
     switch (marketplace.name) {
       case 'Mercado Livre':
-        categories = await this.syncMercadoLivreCategories(marketplace, token, parentId);
+        categories = await this.syncMercadoLivreCategories(marketplace, parentId);
         break;
       case 'Shopee':
         categories = await this.syncShopeeCategories(marketplace, token, parentId);
@@ -50,7 +50,7 @@ export class CategorySyncService {
     return categories;
   }
 
-  private async syncMercadoLivreCategories(marketplace: MarketplaceConfig, token: any, parentId?: string): Promise<MarketplaceCategoryDocument[]> {
+  private async syncMercadoLivreCategories(marketplace: MarketplaceConfig, parentId?: string): Promise<MarketplaceCategoryDocument[]> {
     this.logger.log(`Sincronizando categorias do Mercado Livre${parentId ? ` para categoria pai ${parentId}` : ''}`);
 
     try {
@@ -61,22 +61,22 @@ export class CategorySyncService {
         this.logger.log(`Buscando recursivamente todas as subcategorias de ${parentId}`);
 
         // Primeiro, busca os detalhes da categoria pai para garantir que ela seja salva primeiro
-        const parentCategory = await this.mercadoLivreAdapter.categoryAdapter.getCategoryDetails(token.accessToken, parentId);
+        const parentCategory = await this.mercadoLivreAdapter.categoryAdapter.getCategoryDetails(parentId);
 
         // Adiciona a categoria pai à lista para garantir que ela seja salva/atualizada primeiro
         categories.push(parentCategory);
 
         // Depois busca todas as subcategorias recursivamente
-        const childCategories = await this.mercadoLivreAdapter.categoryAdapter.getAllChildCategories(token.accessToken, parentId);
+        const childCategories = await this.mercadoLivreAdapter.categoryAdapter.getAllChildCategories(parentId);
         categories = [...categories, ...childCategories];
       } else {
         // Se não tiver parentId, busca apenas as categorias raiz
-        categories = await this.mercadoLivreAdapter.getCategories(token.accessToken);
+        categories = await this.mercadoLivreAdapter.getCategories();
 
         // Para cada categoria raiz, busca detalhes completos
         const rootCategoriesWithDetails = [];
         for (const rootCategory of categories) {
-          const details = await this.mercadoLivreAdapter.categoryAdapter.getCategoryDetails(token.accessToken, rootCategory.id);
+          const details = await this.mercadoLivreAdapter.categoryAdapter.getCategoryDetails(rootCategory.id);
           rootCategoriesWithDetails.push(details);
         }
         categories = rootCategoriesWithDetails;
@@ -188,10 +188,7 @@ export class CategorySyncService {
         break;
       }
       seen.add(currentId);
-      const details = await this.mercadoLivreAdapter.categoryAdapter.getCategoryDetails(
-        token.accessToken,
-        currentId,
-      );
+      const details = await this.mercadoLivreAdapter.categoryAdapter.getCategoryDetails(currentId);
       chainRaw.push(details);
       currentId = details.parent_id || null;
     }

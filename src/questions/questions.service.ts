@@ -6,7 +6,6 @@ import {
 } from '../webhook/events/webhook.events';
 import { QuestionRepository } from './question.repository';
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
-import { MarketplaceAuthService } from '../marketplace/auth/services/marketplace-auth.service';
 import { MercadoLivreAdapter } from '../marketplace/adapters/mercado-livre/mercado-livre.adapter';
 import { AiService } from '../ai/ai.service';
 import { ProductCompatibilityService } from '../product/services/product-compatibility.service';
@@ -19,7 +18,6 @@ export class QuestionsService {
     constructor(
         private readonly questionRepository: QuestionRepository,
         private marketplaceRegistry: MarketplaceRegistryService,
-        private marketplaceAuth: MarketplaceAuthService,
         private mercadoLivreAdapter: MercadoLivreAdapter,
         private aiService: AiService,
         private productCompatibilityService: ProductCompatibilityService,
@@ -172,14 +170,10 @@ export class QuestionsService {
         if (!question) throw new NotFoundException('Question not found');
 
         const marketplace = await this.marketplaceRegistry.findOne(question.marketplaceId as any);
-        const activeToken = await this.marketplaceAuth.ensureValidToken(marketplace._id);
-        const token = activeToken?.accessToken;
 
-        if (!token) throw new Error(`No active token found for marketplace ${marketplace.name}`);
-
-        // Adapter Logic
+        // Adapter Logic — token/refresh ficam no MlHttpClient dentro do adapter.
         if (marketplace.name === 'Mercado Livre') {
-            await this.mercadoLivreAdapter.answerQuestionWithToken(token, question.externalId, text);
+            await this.mercadoLivreAdapter.answerQuestion(question.externalId, text);
         } else {
             throw new Error(`Answer logic not implemented for ${marketplace.name}`);
         }

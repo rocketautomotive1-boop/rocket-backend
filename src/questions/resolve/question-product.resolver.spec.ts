@@ -2,7 +2,6 @@ import { Types } from 'mongoose';
 import { QuestionProductResolver } from './question-product.resolver';
 
 const mkt = { _id: new Types.ObjectId() };
-const token = 'tok';
 
 function makeSut(overrides: Partial<{
   titleFind: jest.Mock; getItem: jest.Mock; findByBarcode: jest.Mock; titleCreate: jest.Mock;
@@ -25,7 +24,7 @@ describe('QuestionProductResolver', () => {
     const { sut, mercadoLivreService } = makeSut({
       titleFind: jest.fn().mockResolvedValue({ product: { id: pid.toString() } }),
     });
-    const result = await sut.resolve('MLB1', mkt, token);
+    const result = await sut.resolve('MLB1', mkt);
     expect(result?.toString()).toBe(pid.toString());
     expect(mercadoLivreService.getItem).not.toHaveBeenCalled();
   });
@@ -34,16 +33,16 @@ describe('QuestionProductResolver', () => {
     const pid = new Types.ObjectId();
     const titleFind = jest.fn().mockResolvedValue({ product: { id: pid.toString() } });
     const { sut } = makeSut({ titleFind });
-    await sut.resolve('MLB1', mkt, token);
-    await sut.resolve('MLB1', mkt, token);
+    await sut.resolve('MLB1', mkt);
+    await sut.resolve('MLB1', mkt);
     expect(titleFind).toHaveBeenCalledTimes(1);
   });
 
   it('negative cache: a miss is not re-fetched via getItem within TTL', async () => {
     const getItem = jest.fn().mockResolvedValue({ status: 'active' }); // no SKU → no match
     const { sut } = makeSut({ getItem });
-    const first = await sut.resolve('MLB_MISS', mkt, token);
-    const second = await sut.resolve('MLB_MISS', mkt, token);
+    const first = await sut.resolve('MLB_MISS', mkt);
+    const second = await sut.resolve('MLB_MISS', mkt);
     expect(first).toBeNull();
     expect(second).toBeNull();
     expect(getItem).toHaveBeenCalledTimes(1); // second served by negative cache

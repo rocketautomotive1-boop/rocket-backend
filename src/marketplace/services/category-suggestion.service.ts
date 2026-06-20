@@ -137,10 +137,7 @@ export class CategorySuggestionService {
         finalSearchText: cleanSearchText
       });
 
-      const suggestedCategory = await this.mercadoLivreCategoryAdapter.discoverCategory(
-        validToken.accessToken,
-        cleanSearchText
-      );
+      const suggestedCategory = await this.mercadoLivreCategoryAdapter.discoverCategory(cleanSearchText);
 
       if (!suggestedCategory || !suggestedCategory.category_id) {
         throw new Error('Nenhuma categoria válida encontrada para o produto');
