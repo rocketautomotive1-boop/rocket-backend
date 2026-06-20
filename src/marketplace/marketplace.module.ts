@@ -250,6 +250,8 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
     TikTokShopCategoryAdapter,
     TikTokShopService,
     MlAttributeHydrationService,
+    // Transporte canônico ML consumido pelo OrderMarketplaceDetailsService (billing)
+    MlHttpClient,
     // Token consumed by OrderModule
     MARKETPLACE_ORDER_GATEWAY,
   ],

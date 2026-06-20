@@ -50,6 +50,9 @@ export interface SignedRequest {
 export abstract class MarketplaceHttpClient {
   protected readonly logger = new Logger(this.constructor.name);
 
+  /** Backoff p/ 429 (rate limit). Cada índice = espera antes da próxima tentativa. */
+  private static readonly RATE_LIMIT_BACKOFF_MS = [500, 1500, 4000];
+
   constructor(
     protected readonly authRetry: AuthRetryService,
     protected readonly marketplaceRegistry: MarketplaceRegistryService,
@@ -78,14 +81,66 @@ export abstract class MarketplaceHttpClient {
       { marketplaceId: String(mkt._id), selector, context: ctx.context },
       async (token) => {
         const signed = await this.sign(spec, token);
-        return axios.request<T>({
+        return this.requestWithRateLimitRetry<T>({
           method: spec.method,
           url: signed.url,
           ...signed.config,
           ...(spec.axiosConfig ?? {}),
-        });
+        }, ctx.context);
       },
     );
+  }
+
+  /**
+   * Executa o axios.request retentando em 429 (rate limit) com backoff. Honra
+   * Retry-After quando presente; senão usa backoff exponencial curto. Erros de
+   * auth (401/403) NÃO são tratados aqui — sobem para o AuthRetryService.
+   */
+  private async requestWithRateLimitRetry<T>(
+    config: AxiosRequestConfig,
+    context: string,
+  ): Promise<AxiosResponse<T>> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MarketplaceHttpClient.RATE_LIMIT_BACKOFF_MS.length; attempt++) {
+      try {
+        return await axios.request<T>(config);
+      } catch (error) {
+        if (!MarketplaceHttpClient.isRateLimited(error) ||
+            attempt === MarketplaceHttpClient.RATE_LIMIT_BACKOFF_MS.length) {
+          throw error;
+        }
+        lastError = error;
+        const waitMs = MarketplaceHttpClient.resolveRetryDelayMs(
+          error,
+          MarketplaceHttpClient.RATE_LIMIT_BACKOFF_MS[attempt],
+        );
+        this.logger.warn(
+          `Rate limit (429) em ${context}; retry ${attempt + 1}/${MarketplaceHttpClient.RATE_LIMIT_BACKOFF_MS.length} em ${waitMs}ms`,
+        );
+        await MarketplaceHttpClient.delay(waitMs);
+      }
+    }
+    throw lastError;
+  }
+
+  /** True se o erro é um 429 (rate limit), incluindo o 'local_rate_limited' do ML. */
+  static isRateLimited(error: unknown): boolean {
+    const e = error as any;
+    if (e?.response?.status === 429) return true;
+    const data = e?.response?.data;
+    const msg = String(data?.error ?? data?.message ?? '');
+    return /rate[_ ]?limit|too many requests/i.test(msg);
+  }
+
+  /** Espera do Retry-After (segundos) se presente; senão o fallback. */
+  static resolveRetryDelayMs(error: unknown, fallbackMs: number): number {
+    const header = (error as any)?.response?.headers?.['retry-after'];
+    const seconds = Number(header);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : fallbackMs;
+  }
+
+  private static delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /** Açúcar p/ GET; devolve já o response.data. */

@@ -8,6 +8,7 @@ import { buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shope
 import { ShopeeSignerService } from '../../marketplace/adapters/shopee/shopee-signer.service';
 import { MarketplaceOrderService } from '../../marketplace/services/marketplace-order.service';
 import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
+import { MlHttpClient } from '../../marketplace/adapters/mercado-livre/ml-http-client';
 
 // ── Shared types ────────────────────────────────────────────────────────────────
 
@@ -168,6 +169,7 @@ export class OrderMarketplaceDetailsService {
         private readonly marketplaceOrderService: MarketplaceOrderService,
         private readonly auth: MarketplaceAuthService,
         private readonly signer: ShopeeSignerService,
+        private readonly mlHttp: MlHttpClient,
     ) {}
 
     async getDetails(orderId: string): Promise<MarketplaceOrderDetails> {
@@ -286,9 +288,13 @@ export class OrderMarketplaceDetailsService {
      * Returns a normalized MarketplaceFinancialSummary plus raw data.
      */
     async getMlBillingDetails(orderId: string): Promise<any> {
-        const { order, marketplace, token } = await this.resolveContext(orderId);
-        const tag = (marketplace.tag || '').toLowerCase();
+        const order = await this.orderModel.findById(orderId).lean().exec();
+        if (!order) throw new NotFoundException(`Order ${orderId} not found`);
 
+        const marketplace = await this.configCache.getById(String((order as any).marketplaceId));
+        if (!marketplace) throw new NotFoundException(`Marketplace not found for order ${orderId}`);
+
+        const tag = (marketplace.tag || '').toLowerCase();
         if (!tag.includes('mercado')) {
             return { supported: false, marketplace: marketplace.name };
         }
@@ -299,15 +305,15 @@ export class OrderMarketplaceDetailsService {
         this.logger.log(`[ML Billing] Fetching billing details for order ${externalId}`);
 
         try {
-            const response = await axios.get(
-                `https://api.mercadolibre.com/billing/integration/group/ML/order/details`,
-                {
-                    headers: { Authorization: `Bearer ${token.accessToken}` },
-                    params: { order_ids: externalId },
-                }
+            // Transporte canônico (MlHttpClient): resolve conta (accountId), auth-retry
+            // e backoff de 429 (local_rate_limited) — sem axios cru nem token manual.
+            const billingResponse = await this.mlHttp.get<any>(
+                '/billing/integration/group/ML/order/details',
+                { accountId: (order as any).accountId, context: 'getMlBillingDetails' },
+                { order_ids: externalId },
             );
 
-            const rawResult = response.data?.results?.[0] ?? null;
+            const rawResult = billingResponse?.results?.[0] ?? null;
             if (!rawResult) {
                 return { supported: true, data: null };
             }
