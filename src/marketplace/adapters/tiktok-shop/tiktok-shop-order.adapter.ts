@@ -1,21 +1,17 @@
 import { Injectable, Logger, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
-import axios from 'axios';
 import { IMarketplaceOrderAdapter } from '../../interfaces/marketplace-order-adapter.interface';
 import { StandardOrder } from '../../model/order.interface';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
-import { TikTokShopAuthAdapter } from './tiktok-shop-auth.adapter';
-import { getTikTokShopBaseUrl, buildSignedParams, buildHeaders } from './tiktok-shop-utils';
+import { TikTokShopHttpClient } from './tiktok-shop-http-client';
 
 @Injectable()
 export class TikTokShopOrderAdapter implements IMarketplaceOrderAdapter, OnModuleInit {
   private readonly logger = new Logger(TikTokShopOrderAdapter.name);
-  private readonly baseUrl = getTikTokShopBaseUrl();
 
   constructor(
     @Inject(forwardRef(() => MarketplaceAdapterRegistry))
     private readonly registry: MarketplaceAdapterRegistry,
-    @Inject(forwardRef(() => TikTokShopAuthAdapter))
-    private readonly authAdapter: TikTokShopAuthAdapter,
+    private readonly http: TikTokShopHttpClient,
   ) {}
 
   onModuleInit() {
@@ -24,12 +20,6 @@ export class TikTokShopOrderAdapter implements IMarketplaceOrderAdapter, OnModul
   }
 
   async getOrders(params: any): Promise<StandardOrder[]> {
-    const token = await this.authAdapter.getValidToken('TikTok Shop');
-    const shopCipher = token.additionalData?.shopCipher;
-
-    const path = '/order/202309/orders/search';
-    const timestamp = Math.floor(Date.now() / 1000);
-
     const body: any = {
       page_size: params.limit || 20,
     };
@@ -45,20 +35,18 @@ export class TikTokShopOrderAdapter implements IMarketplaceOrderAdapter, OnModul
       body.create_time_to = Math.floor(new Date(params.create_time_to).getTime() / 1000);
     }
 
-    const bodyStr = JSON.stringify(body);
-    const queryParams = buildSignedParams(path, timestamp, token.accessToken, shopCipher, undefined, bodyStr);
-
     try {
-      const response = await axios.post(`${this.baseUrl}${path}`, body, {
-        headers: buildHeaders(token.accessToken),
-        params: queryParams,
-      });
+      const data = await this.http.post('/order/202309/orders/search', {
+        context: 'getOrders',
+        accountId: params?.accountId,
+        domain: params?.domain,
+      }, body);
 
-      if (response.data?.code !== 0) {
-        throw new Error(`TikTok Shop API Error: ${response.data?.message}`);
+      if (data?.code !== 0) {
+        throw new Error(`TikTok Shop API Error: ${data?.message}`);
       }
 
-      const orders = response.data?.data?.orders || [];
+      const orders = data?.data?.orders || [];
       return orders.map((order: any) => this.normalizeOrder(order));
     } catch (error: any) {
       this.logger.error(`Erro ao buscar pedidos do TikTok Shop: ${error.message}`);
@@ -66,29 +54,18 @@ export class TikTokShopOrderAdapter implements IMarketplaceOrderAdapter, OnModul
     }
   }
 
-  async getOrderDetails(orderId: string, token?: any): Promise<StandardOrder> {
-    if (!token) {
-      token = await this.authAdapter.getValidToken('TikTok Shop');
-    }
-    const shopCipher = token.additionalData?.shopCipher;
-
-    const path = `/order/202309/orders`;
-    const timestamp = Math.floor(Date.now() / 1000);
-    const queryParams = buildSignedParams(path, timestamp, token.accessToken, shopCipher, {
-      ids: orderId,
-    });
-
+  async getOrderDetails(orderId: string, accountId?: string): Promise<StandardOrder> {
     try {
-      const response = await axios.get(`${this.baseUrl}${path}`, {
-        headers: buildHeaders(token.accessToken),
-        params: queryParams,
-      });
+      const data = await this.http.get('/order/202309/orders', {
+        context: 'getOrderDetails',
+        accountId,
+      }, { ids: orderId });
 
-      if (response.data?.code !== 0) {
-        throw new Error(`TikTok Shop API Error: ${response.data?.message}`);
+      if (data?.code !== 0) {
+        throw new Error(`TikTok Shop API Error: ${data?.message}`);
       }
 
-      const orders = response.data?.data?.orders || [];
+      const orders = data?.data?.orders || [];
       if (orders.length === 0) {
         throw new Error(`Pedido ${orderId} não encontrado no TikTok Shop`);
       }
@@ -100,14 +77,9 @@ export class TikTokShopOrderAdapter implements IMarketplaceOrderAdapter, OnModul
     }
   }
 
-  async updateOrderStatus(orderId: string, status: string, token?: any): Promise<any> {
-    if (!token) {
-      token = await this.authAdapter.getValidToken('TikTok Shop');
-    }
-    const shopCipher = token.additionalData?.shopCipher;
-
+  async updateOrderStatus(orderId: string, status: string, accountId?: string): Promise<any> {
     if (status === 'shipped' || status === 'ship') {
-      return this.shipOrder(orderId, token, shopCipher);
+      return this.shipOrder(orderId, accountId);
     }
 
     this.logger.warn(`[TikTok Shop] Status update '${status}' not directly supported via API for order ${orderId}`);
@@ -119,27 +91,18 @@ export class TikTokShopOrderAdapter implements IMarketplaceOrderAdapter, OnModul
     return { success: false, error: 'Upload de NF-e não suportado pelo TikTok Shop' };
   }
 
-  private async shipOrder(orderId: string, token: any, shopCipher?: string): Promise<any> {
-    const path = `/fulfillment/202309/orders/${orderId}/packages`;
-    const timestamp = Math.floor(Date.now() / 1000);
+  private async shipOrder(orderId: string, accountId?: string): Promise<any> {
+    const data = await this.http.post(
+      `/fulfillment/202309/orders/${orderId}/packages`,
+      { context: 'shipOrder', accountId },
+      { pick_up: {} },
+    );
 
-    const body = {
-      pick_up: {},
-    };
-
-    const bodyStr = JSON.stringify(body);
-    const params = buildSignedParams(path, timestamp, token.accessToken, shopCipher, undefined, bodyStr);
-
-    const response = await axios.post(`${this.baseUrl}${path}`, body, {
-      headers: buildHeaders(token.accessToken),
-      params,
-    });
-
-    if (response.data?.code !== 0) {
-      throw new Error(`TikTok Shop ship error: ${response.data?.message}`);
+    if (data?.code !== 0) {
+      throw new Error(`TikTok Shop ship error: ${data?.message}`);
     }
 
-    return { success: true, result: response.data };
+    return { success: true, result: data };
   }
 
   private normalizeOrder(order: any): StandardOrder {

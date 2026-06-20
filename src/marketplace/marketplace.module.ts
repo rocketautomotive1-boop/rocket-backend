@@ -37,6 +37,7 @@ import { MarketplaceAdapterRegistry } from './registries/marketplace-adapter.reg
 import { AuthRetryService } from './adapters/shared/auth-retry.service';
 import { MlHttpClient } from './adapters/mercado-livre/ml-http-client';
 import { AmazonHttpClient } from './adapters/amazon/amazon-http-client';
+import { TikTokShopHttpClient } from './adapters/tiktok-shop/tiktok-shop-http-client';
 import { MarketplaceCategoryService } from './services/marketplace-category.service';
 
 import { MarketplaceRegistryService } from './services/marketplace-registry.service';
@@ -194,6 +195,7 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
     TikTokShopProductAdapter,
     TikTokShopOrderAdapter,
     TikTokShopCategoryAdapter,
+    TikTokShopHttpClient,
     TikTokShopService,
     MlDimensionsCalculatorService,
     MlDimensionsAttributeHandler,

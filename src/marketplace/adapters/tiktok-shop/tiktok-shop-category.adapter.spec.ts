@@ -1,39 +1,36 @@
-import axios from 'axios';
 import { TikTokShopCategoryAdapter } from './tiktok-shop-category.adapter';
-import { AuthRetryService } from '../shared/auth-retry.service';
 
-jest.mock('axios');
-jest.mock('./tiktok-shop-utils', () => ({
-  getTikTokShopBaseUrl: () => 'https://open-api.tiktokglobalshop.com',
-  buildSignedParams: (_p: string, _t: number, _tok: string, _c: any, extra: any) => ({ ...extra, sign: 'SIG' }),
-  buildHeaders: (tok: string) => ({ 'x-tts-access-token': tok }),
-}));
-
-describe('TikTokShopCategoryAdapter.getCategories auth-retry', () => {
-  const tokenManager = {
-    resolveToken: jest.fn().mockResolvedValue({ accessToken: 'OLD', additionalData: { shopCipher: 'CIPH' }, strategy: 'oauth2', fromDatabase: true }),
-    forceRefresh: jest.fn().mockResolvedValue({ accessToken: 'NEW', additionalData: { shopCipher: 'CIPH' }, strategy: 'oauth2', fromDatabase: true }),
-  };
-  const authRetry = new AuthRetryService(tokenManager as any);
-  const marketplaceRegistry = { findByName: jest.fn().mockResolvedValue({ _id: 'TTID' }) };
-  const authAdapter = { getValidToken: jest.fn() };
-
-  function makeAdapter(): TikTokShopCategoryAdapter {
-    return new (TikTokShopCategoryAdapter as any)(authAdapter, marketplaceRegistry, authRetry);
+/**
+ * Após a migração, o category adapter é um caller fino do TikTokShopHttpClient
+ * com cache. Token/shopCipher e auth-retry (refresh real no 401) ficam no http
+ * client — coberto por tiktok-shop-http-client.spec.ts.
+ */
+describe('TikTokShopCategoryAdapter', () => {
+  function makeAdapter(httpGet: jest.Mock): TikTokShopCategoryAdapter {
+    return new (TikTokShopCategoryAdapter as any)({ get: httpGet });
   }
 
-  beforeEach(() => jest.clearAllMocks());
+  it('fetches categories via http.get and unwraps data.data.categories', async () => {
+    const httpGet = jest.fn().mockResolvedValue({ data: { categories: [{ id: '1' }] } });
+    const adapter = makeAdapter(httpGet);
 
-  it('on 401 forces a REAL refresh (not getValidToken) and retries', async () => {
-    (axios.get as jest.Mock)
-      .mockRejectedValueOnce({ response: { status: 401 } })
-      .mockResolvedValueOnce({ data: { data: { categories: [{ id: '1' }] } } });
-
-    const out = await makeAdapter().getCategories('OLD', 'CIPH', 'pt-BR');
+    const out = await adapter.getCategories('pt-BR');
 
     expect(out).toEqual([{ id: '1' }]);
-    expect(tokenManager.forceRefresh).toHaveBeenCalledTimes(1);
-    // the legacy bug: it used to call getValidToken — must NOT happen now
-    expect(authAdapter.getValidToken).not.toHaveBeenCalled();
+    expect(httpGet).toHaveBeenCalledWith(
+      '/product/202309/categories',
+      { context: 'getCategories' },
+      { locale: 'pt-BR' },
+    );
+  });
+
+  it('caches categories (second call does not hit http)', async () => {
+    const httpGet = jest.fn().mockResolvedValue({ data: { categories: [{ id: '1' }] } });
+    const adapter = makeAdapter(httpGet);
+
+    await adapter.getCategories('pt-BR');
+    await adapter.getCategories('pt-BR');
+
+    expect(httpGet).toHaveBeenCalledTimes(1);
   });
 });
