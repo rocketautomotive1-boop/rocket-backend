@@ -53,6 +53,18 @@ describe('ShopeeProductAdapter (transport via ShopeeHttpClient)', () => {
     expect(body).toEqual({ item_id: 123, item_name: 'Novo título', name: 'Novo título' });
   });
 
+  it('getLogisticsChannels fetches /logistics/get_channel_list via the http client', async () => {
+    http.get.mockResolvedValueOnce({ response: { logistics_channel_list: [{ logistics_channel_id: 91003 }] } });
+
+    const out = await adapter.getLogisticsChannels();
+
+    expect(http.get).toHaveBeenCalledWith(
+      '/logistics/get_channel_list',
+      expect.objectContaining({ context: 'getLogisticsChannels' }),
+    );
+    expect(out).toEqual({ response: { logistics_channel_list: [{ logistics_channel_id: 91003 }] } });
+  });
+
   it('getItemList chains to getItemBaseInfo for the returned ids', async () => {
     http.get
       .mockResolvedValueOnce({ response: { item_list: [{ item_id: 10 }, { item_id: 20 }] } })

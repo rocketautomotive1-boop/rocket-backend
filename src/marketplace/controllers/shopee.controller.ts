@@ -1,7 +1,4 @@
 import { Controller, Get, Post, Put, Body, Param, Query, BadRequestException, HttpException, Logger } from '@nestjs/common'
-import axios from 'axios'
-import { getShopeeBaseUrl, buildHeaders } from '../adapters/shopee/shopee-utils'
-import { ShopeeSignerService } from '../adapters/shopee/shopee-signer.service'
 import { MarketplaceAuthService } from '../auth/services/marketplace-auth.service'
 import { MarketplaceOrderService } from '../services/marketplace-order.service'
 import { StandardOrder } from '../model/order.interface'
@@ -21,14 +18,7 @@ export class ShopeeController {
     private readonly orders: ShopeeOrderAdapter,
     private readonly marketplaceAuth: MarketplaceAuthService,
     private readonly marketplaceOrder: MarketplaceOrderService,
-    private readonly signer: ShopeeSignerService,
   ) { }
-
-  private async getShopeeToken() {
-    const marketplace = await this.marketplaceAuth.findByName('Shopee');
-    if (!marketplace) throw new BadRequestException('Marketplace Shopee não encontrado');
-    return this.marketplaceAuth.ensureValidToken(marketplace.id as any);
-  }
 
   private toHttpException(error: any): HttpException {
     if (error instanceof HttpException) {
@@ -98,15 +88,7 @@ export class ShopeeController {
   @Get('logistics/channels')
   async getLogisticsChannels() {
     try {
-      const token = await this.getShopeeToken()
-      const timestamp = Math.floor(Date.now() / 1000)
-      const path = '/logistics/get_channel_list'
-      const params = await this.signer.buildSignedParams(path, timestamp, token.accessToken, token.additionalData.shopId)
-      const response = await axios.get(`${getShopeeBaseUrl()}${path}`, {
-        headers: buildHeaders(),
-        params,
-      })
-      return response.data
+      return this.products.getLogisticsChannels()
     } catch (error) {
       throw this.toHttpException(error)
     }

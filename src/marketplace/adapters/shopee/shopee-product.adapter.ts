@@ -138,6 +138,11 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
     return payload?.response?.item_list || [];
   }
 
+  /** Lista os canais de logística da loja Shopee (payload bruto da API). */
+  async getLogisticsChannels(): Promise<any> {
+    return this.http.get<any>('/logistics/get_channel_list', this.ctx('getLogisticsChannels'));
+  }
+
   private async uploadImage(imageUrl: string): Promise<any> {
     const path = '/media_space/upload_image';
     try {
