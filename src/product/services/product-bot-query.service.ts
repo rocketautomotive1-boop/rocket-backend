@@ -1,32 +1,34 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { ProductModel } from '../../../product/schemas/product.schema';
-import { StockMovementModel } from '../../../stock/schemas/stock-movement.schema';
-import { STOCK_QUERY_PORT, StockQueryPort } from '../../../stock/ports/stock-query.port';
-import { PRICING_PORT, PricingPort } from '../../../pricing/ports/pricing.port';
+import { ProductModel } from '../schemas/product.schema';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
+import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
+import { ProductInfoQueryPort } from '../../notifications/bot/ports/bot-query.ports';
 
 interface ProductListRow {
   _id: Types.ObjectId | string;
   name: string;
   partNumber?: string;
-  price?: any;
   active?: boolean;
 }
 
+/**
+ * Implementação do PRODUCT_INFO_QUERY_PORT (bot WhatsApp). Busca produto + estoque +
+ * preço + última movimentação. Dona do ProductModel; estoque/preço/movimento via ports.
+ */
 @Injectable()
-export class ProductSearchQuery {
-  private readonly logger = new Logger(ProductSearchQuery.name);
+export class ProductBotQueryService implements ProductInfoQueryPort {
+  private readonly logger = new Logger(ProductBotQueryService.name);
   private readonly MAX_RESULTS = 5;
 
   constructor(
     @InjectModel('ProductModel') private readonly productModel: Model<ProductModel>,
-    @InjectModel(StockMovementModel.name) private readonly stockMovementModel: Model<StockMovementModel>,
     @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
     @Inject(PRICING_PORT) private readonly pricing: PricingPort,
   ) {}
 
-  async execute(searchTerm: string): Promise<string> {
+  async searchProduct(searchTerm: string): Promise<string> {
     try {
       const term = (searchTerm ?? '').trim();
       if (!term) {
@@ -43,9 +45,10 @@ export class ProductSearchQuery {
       const lines = [`🔎 *Resultados para:* ${term}`];
 
       for (const product of products) {
-        const stock = (await this.stockQuery.getProductStock(String((product as any)._id))).onHand;
-        const lastMovement = await this.getLastMovement(String((product as any)._id));
-        const price = this.formatPrice(await this.pricing.getBasePrice(String((product as any)._id)));
+        const productId = String((product as any)._id);
+        const stock = (await this.stockQuery.getProductStock(productId)).onHand;
+        const lastMovement = await this.getLastMovement(productId);
+        const price = this.formatPrice(await this.pricing.getBasePrice(productId));
         const status = product.active === false ? 'inativo' : 'ativo';
 
         lines.push(
@@ -60,19 +63,15 @@ export class ProductSearchQuery {
 
       return lines.join('\n');
     } catch (err) {
-      this.logger.error(`ProductSearchQuery failed: ${err.message}`);
+      this.logger.error(`searchProduct failed: ${err.message}`);
       return `❌ Erro ao buscar produto: ${err.message}`;
     }
   }
 
   private async findExact(term: string): Promise<ProductListRow | null> {
-    const escaped = this.escapeRegex(term);
-    const exactRegex = new RegExp(`^${escaped}$`, 'i');
-
+    const exactRegex = new RegExp(`^${this.escapeRegex(term)}$`, 'i');
     return this.productModel
-      .findOne({
-        $or: [{ partNumber: exactRegex }, { name: exactRegex }, { barcode: exactRegex }],
-      })
+      .findOne({ $or: [{ partNumber: exactRegex }, { name: exactRegex }, { barcode: exactRegex }] })
       .lean()
       .exec() as any;
   }
@@ -80,28 +79,20 @@ export class ProductSearchQuery {
   private async findSuggestions(term: string): Promise<ProductListRow[]> {
     const fuzzyRegex = new RegExp(this.escapeRegex(term), 'i');
     return (await this.productModel
-      .find({
-        $or: [{ name: fuzzyRegex }, { partNumber: fuzzyRegex }, { barcode: fuzzyRegex }],
-      })
+      .find({ $or: [{ name: fuzzyRegex }, { partNumber: fuzzyRegex }, { barcode: fuzzyRegex }] })
       .limit(this.MAX_RESULTS)
       .lean()
       .exec()) as any;
   }
 
   private async getLastMovement(productId: string): Promise<string | null> {
-    const matchProductId = Types.ObjectId.isValid(productId) ? new Types.ObjectId(productId) : productId;
-    const movement = await this.stockMovementModel
-      .findOne({ productId: matchProductId } as any)
-      .sort({ date: -1 })
-      .lean()
-      .exec();
-
+    const movements = await this.stockQuery.listMovements(productId, 1);
+    const movement = movements?.[0];
     if (!movement) return null;
 
     const when = movement.date
       ? new Date(movement.date).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
       : 'N/D';
-
     return `${movement.type} (${movement.quantity}) em ${when}`;
   }
 
@@ -109,11 +100,7 @@ export class ProductSearchQuery {
     if (raw == null) return null;
     const parsed = Number(raw?.toString?.() ?? raw);
     if (!Number.isFinite(parsed)) return null;
-
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
-    }).format(parsed);
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(parsed);
   }
 
   private escapeRegex(value: string): string {

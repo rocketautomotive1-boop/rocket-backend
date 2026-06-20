@@ -10,6 +10,7 @@ import { OrderCancellationService } from './lifecycle/order-cancellation.service
 import { OrderIngestService } from './ingest/order-ingest.service';
 import { OrderMetricsService } from './observability/order-metrics.service';
 import { MarketplaceOrderService } from '../marketplace/services/marketplace-order.service';
+import { SaleNotificationReconcilerService } from './services/sale-notification-reconciler.service';
 
 @Controller('orders')
 export class OrderController {
@@ -23,8 +24,18 @@ export class OrderController {
         private readonly productRepository: ProductRepository,
         private readonly metrics: OrderMetricsService,
         private readonly marketplaceOrderService: MarketplaceOrderService,
+        private readonly saleNotificationReconciler: SaleNotificationReconcilerService,
         @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
     ) { }
+
+    /**
+     * Reenvia a notificação WhatsApp de uma venda. Aceita externalId ou ObjectId.
+     * (Migrado de WhatsAppController — reenvio é lógica de negócio de order.)
+     */
+    @Post('/:orderId/resend-notification')
+    async resendNotification(@Param('orderId') orderId: string) {
+        return this.saleNotificationReconciler.resend(orderId);
+    }
 
     /**
      * Attach a fiscal document (NFe XML) to the order on the marketplace.

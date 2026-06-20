@@ -108,6 +108,8 @@ import { CategorySnapshotService } from './services/category-snapshot.service';
 
 import { ProductResolverProvider } from './ports/product-resolver.provider';
 import { PRODUCT_RESOLVER_PORT } from '../order/ports/product-resolver.port';
+import { ProductBotQueryService } from './services/product-bot-query.service';
+import { PRODUCT_INFO_QUERY_PORT } from '../notifications/bot/ports/bot-query.ports';
 // STOCK_LEDGER_PORT is now owned by StockModule (single stock owner).
 import { StockModule } from '../stock/stock.module';
 import { PricingModule } from '../pricing/pricing.module';
@@ -217,6 +219,9 @@ import { PricingModule } from '../pricing/pricing.module';
     // Hexagonal port implementations consumed by OrderModule
     ProductResolverProvider,
     { provide: PRODUCT_RESOLVER_PORT, useClass: ProductResolverProvider },
+    // Bot read-port consumed by NotificationsModule
+    ProductBotQueryService,
+    { provide: PRODUCT_INFO_QUERY_PORT, useExisting: ProductBotQueryService },
   ],
   exports: [
 
@@ -245,6 +250,8 @@ import { PricingModule } from '../pricing/pricing.module';
     PricingModule,
     // Tokens consumed by OrderModule
     PRODUCT_RESOLVER_PORT,
+    // Token consumed by NotificationsModule (bot product search)
+    PRODUCT_INFO_QUERY_PORT,
   ],
 })
 export class ProductModule { }

@@ -4,12 +4,17 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
-import { OrderModel } from '../../order/schemas/order.schema';
-import { ORDER_EVENTS, OrderPricingCalculatedEvent } from '../../order/events/order.events';
+import { OrderModel } from '../schemas/order.schema';
+import { ORDER_EVENTS, OrderPricingCalculatedEvent } from '../events/order.events';
 
+/**
+ * Reconciliador de notificações de venda (vive em order/, dono dos pedidos).
+ * Re-emite ORDER_EVENTS.PRICING_CALCULATED para pedidos sem notificação — o
+ * OrderSaleNotificationListener reprocessa e o broker reenvia ao WhatsApp.
+ */
 @Injectable()
-export class NotificationReconcilerService implements OnModuleInit {
-  private readonly logger = new Logger(NotificationReconcilerService.name);
+export class SaleNotificationReconcilerService implements OnModuleInit {
+  private readonly logger = new Logger(SaleNotificationReconcilerService.name);
   private readonly LOOKBACK_DAYS = 7;
 
   constructor(
@@ -20,8 +25,6 @@ export class NotificationReconcilerService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     await this.backfillLegacyWhatsappSentStatus();
-
-    // Aguarda 20s para o app estabilizar antes da reconciliação de startup
     setTimeout(() => {
       this.reconcile().catch(err =>
         this.logger.error(`Startup reconciliation failed: ${err.message}`),
@@ -29,15 +32,12 @@ export class NotificationReconcilerService implements OnModuleInit {
     }, 20_000);
   }
 
-  @Cron('0 */15 * * * *') // A cada 15 minutos
+  @Cron('0 */15 * * * *')
   async handleCron(): Promise<void> {
     await this.reconcile();
   }
 
-  /**
-   * Reenvia a notificação WhatsApp de uma venda específica.
-   * Aceita externalId (ex: "2000015818700676") ou ObjectId.
-   */
+  /** Reenvia a notificação de uma venda. Aceita externalId ou ObjectId. */
   async resend(orderId: string): Promise<{ ok: boolean; message: string }> {
     const query = Types.ObjectId.isValid(orderId)
       ? { _id: new Types.ObjectId(orderId) }
@@ -45,15 +45,9 @@ export class NotificationReconcilerService implements OnModuleInit {
 
     const order = await this.orderModel.findOne(query).lean().exec();
 
-    if (!order) {
-      return { ok: false, message: `Order ${orderId} not found` };
-    }
+    if (!order) return { ok: false, message: `Order ${orderId} not found` };
+    if (!order.pricing) return { ok: false, message: `Order ${order.externalId} has no pricing data yet` };
 
-    if (!order.pricing) {
-      return { ok: false, message: `Order ${order.externalId} has no pricing data yet` };
-    }
-
-    // Limpa flags para garantir reprocessamento manual
     await this.orderModel.updateOne(query, {
       $unset: {
         'notificationStatus.whatsapp.sentAt': 1,
@@ -66,15 +60,17 @@ export class NotificationReconcilerService implements OnModuleInit {
       },
     });
 
-    const event = new OrderPricingCalculatedEvent(
-      String(order._id),
-      order.externalId,
-      String(order.marketplaceId),
-      '',
-      order.pricing,
-      'manual', // reenvio manual — listener deve processar independente do triggeredBy
+    this.eventEmitter.emit(
+      ORDER_EVENTS.PRICING_CALCULATED,
+      new OrderPricingCalculatedEvent(
+        String(order._id),
+        order.externalId,
+        String(order.marketplaceId),
+        '',
+        order.pricing,
+        'manual',
+      ),
     );
-    this.eventEmitter.emit(ORDER_EVENTS.PRICING_CALCULATED, event);
 
     this.logger.log(`Manual resend triggered for order ${order.externalId}`);
     return { ok: true, message: `WhatsApp notification re-queued for order ${order.externalId}` };
@@ -85,10 +81,7 @@ export class NotificationReconcilerService implements OnModuleInit {
     const since = new Date();
     since.setDate(since.getDate() - this.LOOKBACK_DAYS);
     const oldestForAuto = new Date(
-      Math.max(
-        since.getTime(),
-        Date.now() - maxAutoAgeHours * 60 * 60 * 1000,
-      ),
+      Math.max(since.getTime(), Date.now() - maxAutoAgeHours * 60 * 60 * 1000),
     );
 
     const orders = await this.orderModel
@@ -116,14 +109,16 @@ export class NotificationReconcilerService implements OnModuleInit {
           'notificationStatus.whatsapp.lastAttemptAt': new Date(),
           $inc: { 'notificationStatus.whatsapp.attempts': 1 },
         });
-        const event = new OrderPricingCalculatedEvent(
-          String(order._id),
-          order.externalId,
-          String(order.marketplaceId),
-          '',
-          order.pricing,
+        this.eventEmitter.emit(
+          ORDER_EVENTS.PRICING_CALCULATED,
+          new OrderPricingCalculatedEvent(
+            String(order._id),
+            order.externalId,
+            String(order.marketplaceId),
+            '',
+            order.pricing,
+          ),
         );
-        this.eventEmitter.emit(ORDER_EVENTS.PRICING_CALCULATED, event);
         this.logger.log(`Reconciler: re-emitted PRICING_CALCULATED for order ${order.externalId}`);
       } catch (err) {
         await this.orderModel.findByIdAndUpdate(order._id, {

@@ -1,33 +1,36 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { IWhatsAppProvider } from './whatsapp.provider.interface';
+import {
+  WhatsAppGroup,
+  WhatsAppStatus,
+  WHATSAPP_INBOUND_EVENT,
+  WhatsAppInboundEvent,
+} from '../whatsapp.port';
 import * as fs from 'fs';
 import * as path from 'path';
 
 /**
- * Implementação WhatsApp via Baileys (WhatsApp Web)
+ * Transporte WhatsApp via Baileys (WhatsApp Web).
  *
- * Bibliotecas:
- * - @whiskeysockets/baileys
- * - pino (logger)
+ * Responsabilidade ÚNICA: socket, envio, reconexão, QR, grupos e emissão do
+ * evento neutro de mensagem recebida. Não conhece order/pricing/notifications.
  *
- * Setup:
- * npm install @whiskeysockets/baileys pino
+ * Setup: npm install @whiskeysockets/baileys pino
  */
 @Injectable()
-export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit, OnModuleDestroy {
+export class BaileysWhatsAppProvider implements OnModuleInit, OnModuleDestroy {
   private logger = new Logger(BaileysWhatsAppProvider.name);
   private sock: any = null; // WASocket
   private state: any = null;
   private saveCreds: any = null;
   private dataDir: string;
-  private currentQR: string | null = null; // Store current QR for endpoint access
+  private currentQR: string | null = null;
   private isReconnecting = false;
   private reconnectAttempts = 0;
   private readonly RECONNECT_DELAYS = [3000, 10000, 30000, 60000, 120000]; // ms
   private readonly MAX_RECONNECT_ATTEMPTS = 5;
-  private connected = false; // flag confiável, atualizada pelo connection.update
+  private connected = false; // atualizado pelo connection.update
   private groupId: string;
 
   constructor(
@@ -37,7 +40,6 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
     this.dataDir = this.configService.get('WHATSAPP_DATA_DIR') || './whatsapp_data';
     this.groupId = this.configService.get('WHATSAPP_GROUP_ID', '');
 
-    // Criar diretório se não existir
     if (!fs.existsSync(this.dataDir)) {
       fs.mkdirSync(this.dataDir, { recursive: true });
       this.logger.log(`Created WhatsApp data directory: ${this.dataDir}`);
@@ -49,7 +51,6 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
       await this.initialize();
     } catch (error) {
       this.logger.error(`Failed to initialize Baileys: ${error.message}`);
-      // Não falha o módulo, apenas log
     }
   }
 
@@ -61,13 +62,9 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
     }
   }
 
-  /**
-   * Inicializa a conexão WhatsApp via Baileys
-   */
   async initialize(): Promise<void> {
     try {
-      // Importar dinâmico para evitar erro se baileys não está instalado
-      // @ts-ignore
+      // @ts-ignore — import dinâmico evita erro se baileys não está instalado
       const {
         default: makeWASocket,
         useMultiFileAuthState,
@@ -81,15 +78,12 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
 
       this.logger.log('Initializing Baileys WhatsApp provider...');
 
-      // 1. Load/create session
       const authPath = path.join(this.dataDir, 'auth_info_multi');
-      const { state: sessionState, saveCreds } =
-        await useMultiFileAuthState(authPath);
+      const { state: sessionState, saveCreds } = await useMultiFileAuthState(authPath);
 
       this.state = sessionState;
       this.saveCreds = saveCreds;
 
-      // 2. Create socket
       this.sock = makeWASocket({
         auth: sessionState,
         logger: pinolog({ level: 'warn' }),
@@ -99,7 +93,6 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
         shouldSyncHistoryMessage: () => false,
       });
 
-      // 3. Handle connection updates and capture QR code
       this.sock.ev.on('connection.update', async (update: any) => {
         const { connection, lastDisconnect, qr } = update;
 
@@ -107,7 +100,7 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
           this.currentQR = qr;
           const qrPath = path.join(this.dataDir, 'qr.txt');
           fs.writeFileSync(qrPath, qr);
-          this.logger.warn('⚠️ QR Code gerado. Visite: http://localhost:3000/notifications/whatsapp/qr');
+          this.logger.warn('⚠️ QR Code gerado. Visite: http://localhost:3000/whatsapp/qr');
         }
 
         if (connection === 'open') {
@@ -119,7 +112,6 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
 
         if (connection === 'close') {
           const statusCode = lastDisconnect?.error?.output?.statusCode;
-
           this.connected = false;
 
           if (statusCode === DisconnectReason.loggedOut) {
@@ -128,12 +120,12 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
             return;
           }
 
-          // conflict:replaced — outra sessão substituiu esta; não reconectar para evitar loop.
+          // conflict:replaced — outra sessão substituiu esta; não reconectar (evita loop).
           if (statusCode === 409) {
             this.sock = null;
             this.logger.warn(
               '⚠️ Another WhatsApp session replaced this connection (conflict:replaced). ' +
-              'Close the other session (browser tab or phone app) and restart the server.'
+              'Close the other session (browser tab or phone app) and restart the server.',
             );
             return;
           }
@@ -144,7 +136,7 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
 
       this.sock.ev.on('creds.update', this.saveCreds);
 
-      // 4. Escutar mensagens do grupo e emitir evento interno para o bot
+      // Mensagens do grupo → evento neutro para o broker (notifications) rotear o bot.
       this.sock.ev.on('messages.upsert', ({ messages, type }: any) => {
         if (type !== 'notify') return;
         for (const msg of messages) {
@@ -161,22 +153,20 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
 
           if (!body.trim()) return;
 
-          this.eventEmitter.emit('whatsapp.message.received', { from, body, groupId: remoteJid });
+          const event: WhatsAppInboundEvent = { from, body, groupId: remoteJid };
+          this.eventEmitter.emit(WHATSAPP_INBOUND_EVENT, event);
         }
       });
 
       this.logger.log('Baileys initialized. Waiting for connection...');
     } catch (error) {
       this.logger.error(
-        `Initialize error: ${error.message}. Make sure '@whiskeysockets/baileys' is installed.`
+        `Initialize error: ${error.message}. Make sure '@whiskeysockets/baileys' is installed.`,
       );
       throw error;
     }
   }
 
-  /**
-   * Envia mensagem
-   */
   async sendMessage(destination: string, text: string): Promise<void> {
     if (!this.sock || !this.isConnected()) {
       try {
@@ -196,21 +186,15 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
     }
   }
 
-  /**
-   * Retorna se está conectado
-   */
   isConnected(): boolean {
     return this.connected && this.sock !== null;
   }
 
-  /**
-   * Agenda reconexão com backoff exponencial e guard contra reconexões paralelas
-   */
   private async scheduleReconnect(): Promise<void> {
     if (this.isReconnecting) return;
     if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
       this.logger.error(
-        `Max reconnect attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached. Manual restart required.`
+        `Max reconnect attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached. Manual restart required.`,
       );
       return;
     }
@@ -220,7 +204,7 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
     this.reconnectAttempts++;
 
     this.logger.log(
-      `Reconnect attempt ${this.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS} in ${delay / 1000}s...`
+      `Reconnect attempt ${this.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS} in ${delay / 1000}s...`,
     );
 
     await new Promise((resolve) => setTimeout(resolve, delay));
@@ -238,19 +222,13 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
     }
   }
 
-  /**
-   * Reconecta manualmente (ex: chamado via endpoint ou sendMessage)
-   */
   async reconnect(): Promise<void> {
     this.reconnectAttempts = 0;
     this.isReconnecting = false;
     await this.scheduleReconnect();
   }
 
-  /**
-   * Obtém status
-   */
-  async getStatus(): Promise<{ connected: boolean; phoneNumber?: string; message?: string }> {
+  async getStatus(): Promise<WhatsAppStatus> {
     if (!this.sock) {
       return { connected: false, message: 'Provider not initialized' };
     }
@@ -266,9 +244,6 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
     }
   }
 
-  /**
-   * Encerra gracefully
-   */
   async destroy(): Promise<void> {
     if (this.sock) {
       try {
@@ -281,11 +256,7 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
     }
   }
 
-  /**
-   * Lista todos os grupos em que o número está participando
-   * Use GET /notifications/whatsapp/groups para descobrir o @g.us ID do grupo
-   */
-  async listGroups(): Promise<{ id: string; name: string; participantCount: number }[]> {
+  async listGroups(): Promise<WhatsAppGroup[]> {
     if (!this.sock || !this.isConnected()) {
       throw new Error('WhatsApp not connected');
     }
@@ -297,9 +268,6 @@ export class BaileysWhatsAppProvider implements IWhatsAppProvider, OnModuleInit,
     }));
   }
 
-  /**
-   * Retorna o QR code em Base64 (útil para renderizar em endpoint)
-   */
   async getQRCode(): Promise<string | null> {
     if (this.currentQR) return this.currentQR;
     const qrPath = path.join(this.dataDir, 'qr.txt');

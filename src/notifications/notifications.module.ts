@@ -1,8 +1,7 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { DiscoveryModule } from '@nestjs/core';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { UserModel, UserSchema } from '../auth/schemas/user.schema';
 import { AuthModule } from '../auth/auth.module';
@@ -33,63 +32,37 @@ import { DeviceTokenService } from './device/device-token.service';
 import { DeviceController } from './device/device.controller';
 import { OrderNotificationTranslator } from './ingest/order-notification.translator';
 
-// ── WhatsApp subsystem (kept intact) ──
-// OrderModule is imported ONLY because the legacy WhatsApp listener
-// (WhatsAppNotificationListener) injects OrderFinancialSummaryService, which is
-// provided/exported by OrderModule. The NEW notification pipeline does NOT depend
-// on any domain module. Extracting the WhatsApp subsystem into its own module
-// (to drop this import) is out of scope for this task.
-import { OrderModule } from '../order/order.module';
-import { OrderModel, OrderSchema } from '../order/schemas/order.schema';
-// MarketplaceAuthModule is imported ONLY because the legacy WhatsApp bot queries
-// (BalanceMlQuery, MovementsMlQuery) inject MercadoLivreAuthAdapter, which it exports.
-// Narrower than the full MarketplaceModule the old module used; no cycle back to
-// NotificationsModule. The NEW notification pipeline does NOT depend on it.
-import { MarketplaceAuthModule } from '../marketplace/auth/marketplace-auth.module';
-import { PartnerModel, PartnerSchema } from './schemas/partner.schema';
-import { NotificationLogModel, NotificationLogSchema } from './schemas/notification-log.schema';
-import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
-import { StockMovementModel, StockMovementSchema } from '../stock/schemas/stock-movement.schema';
-import { StockModule } from '../stock/stock.module';
-import { PricingModule } from '../pricing/pricing.module';
-import { BaileysWhatsAppProvider } from './providers/baileys-whatsapp.provider';
-import { WhatsAppNotificationService } from './services/whatsapp-notification.service';
-import { WhatsAppNotificationListener } from './listeners/whatsapp-notification.listener';
-import { WhatsAppCancellationListener } from './listeners/whatsapp-cancellation.listener';
-import { WhatsAppQueueWorker } from './workers/whatsapp-queue.worker';
-import { WhatsAppController } from './controllers/whatsapp.controller';
+// WhatsApp transport (port-only consumer — no Baileys/queue knowledge here)
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+
+// Bot (broker side): router + dispatcher + session + inbound listener. Consome read-ports
+// (SALES/BALANCE/PRODUCT_INFO) implementados por Order/MarketplaceAuth/Product — importados
+// só para receber os tokens. NÃO injeta OrderModel/ProductModel nem serviços concretos.
 import { WhatsAppCommandRouter } from './bot/whatsapp-command.router';
 import { WhatsAppCommandDispatcher } from './bot/whatsapp-command.dispatcher';
-import { WhatsAppCommandListener } from './bot/whatsapp-command.listener';
 import { WhatsAppCommandSession } from './bot/whatsapp-command.session';
-import { BalanceMlQuery } from './bot/queries/balance-ml.query';
-import { SalesQuery } from './bot/queries/sales.query';
-import { PendingOrdersQuery } from './bot/queries/pending-orders.query';
-import { MovementsMlQuery } from './bot/queries/movements-ml.query';
-import { ProductSearchQuery } from './bot/queries/product-search.query';
-import { NotificationReconcilerService } from './services/notification-reconciler.service';
-import { DailyReportService } from './services/daily-report.service';
+import { WhatsAppCommandListener } from './bot/whatsapp-command.listener';
+import { OrderModule } from '../order/order.module';
+import { ProductModule } from '../product/product.module';
+import { MarketplaceAuthModule } from '../marketplace/auth/marketplace-auth.module';
 
 @Module({
   imports: [
     ConfigModule,
     DiscoveryModule,
     AuthModule,
-    OrderModule, // legacy WhatsApp subsystem only — see note above
-    StockModule, // STOCK_QUERY_PORT for the product-search bot query
-    PricingModule, // PRICING_PORT for the product-search bot query
-    MarketplaceAuthModule, // legacy WhatsApp bot queries only — see note above
+    WhatsAppModule, // WHATSAPP_PORT (canal WhatsApp + bot reply)
+    // Read-ports do bot (tokens exportados por estes módulos). Acíclico: nenhum deles
+    // importa NotificationsModule de volta.
+    OrderModule,
+    ProductModule,
+    MarketplaceAuthModule,
     MongooseModule.forFeature([
       { name: UserModel.name, schema: UserSchema },
       { name: NotificationModel.name, schema: NotificationSchema },
-      { name: OrderModel.name, schema: OrderSchema },
-      { name: PartnerModel.name, schema: PartnerSchema },
-      { name: NotificationLogModel.name, schema: NotificationLogSchema },
-      { name: ProductModel.name, schema: ProductSchema },
-      { name: StockMovementModel.name, schema: StockMovementSchema },
     ]),
   ],
-  controllers: [NotificationsController, DeviceController, WhatsAppController],
+  controllers: [NotificationsController, DeviceController],
   providers: [
     // Core
     NotificationPipelineService, NotificationDedupService, AudienceResolver,
@@ -100,28 +73,9 @@ import { DailyReportService } from './services/daily-report.service';
     // Gateway / read / device / ingest
     NotificationsGateway, NotificationReadService, DeviceTokenService, OrderNotificationTranslator,
     EmailService,
-    // WhatsApp provider (conditional based on WHATSAPP_ENABLED)
-    {
-      provide: BaileysWhatsAppProvider,
-      useFactory: (configService: ConfigService, eventEmitter: EventEmitter2) => {
-        const enabled = configService.get<string>('WHATSAPP_ENABLED', 'true') !== 'false';
-        if (!enabled) {
-          return {
-            isConnected: () => false, sendMessage: async () => {},
-            getStatus: async () => ({ connected: false, message: 'WhatsApp disabled' }),
-            listGroups: async () => [],
-          } as any;
-        }
-        return new BaileysWhatsAppProvider(configService, eventEmitter);
-      },
-      inject: [ConfigService, EventEmitter2],
-    },
-    WhatsAppNotificationService, WhatsAppNotificationListener, WhatsAppCancellationListener,
-    WhatsAppQueueWorker,
+    // Bot (broker side)
     WhatsAppCommandRouter, WhatsAppCommandDispatcher, WhatsAppCommandSession, WhatsAppCommandListener,
-    BalanceMlQuery, SalesQuery, PendingOrdersQuery, MovementsMlQuery, ProductSearchQuery,
-    NotificationReconcilerService, DailyReportService,
   ],
-  exports: [NotificationReadService, EmailService, WhatsAppNotificationService],
+  exports: [NotificationReadService, EmailService],
 })
 export class NotificationsModule {}

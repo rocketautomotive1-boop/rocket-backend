@@ -14,7 +14,6 @@ import { ProductModule } from '../product/product.module';
 import { QueueModule } from '../queue/queue.module';
 import { StockModule } from '../stock/stock.module';
 import { OutboxModule } from '../outbox/outbox.module';
-import { OrderSyncProcessor } from './processors/order-sync.processor';
 
 import { OrderRepository } from './order.repository';
 import { OrderController } from './order.controller';
@@ -37,7 +36,6 @@ import { OrderQueryService } from './query/order-query.service';
 import { OrderLifecycleService } from './lifecycle/order-lifecycle.service';
 import { OrderCancellationService } from './lifecycle/order-cancellation.service';
 import { OrderFulfillmentService } from './fulfillment/order-fulfillment.service';
-import { OrderSyncFlowService } from './services/order-sync-flow.service';
 
 // Observability
 import { OrderMetricsService } from './observability/order-metrics.service';
@@ -54,6 +52,14 @@ import { GenericPricingCalculator } from './strategies/generic-pricing.calculato
 import { MercadoLivrePricingCalculator } from './strategies/mercadolivre-pricing.calculator';
 import { OrderPricingListener } from './listeners/order-pricing.listener';
 import { OrderFinancialSummaryService } from './services/order-financial-summary.service';
+
+// WhatsApp sale-notification subsystem (business logic owned by order/)
+import { OrderSaleNotificationListener } from './listeners/order-sale-notification.listener';
+import { SaleNotificationReconcilerService } from './services/sale-notification-reconciler.service';
+import { DailyReportService } from './services/daily-report.service';
+import { OrderBotQueryService } from './services/order-bot-query.service';
+import { SALES_QUERY_PORT } from '../notifications/bot/ports/bot-query.ports';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 
 /**
  * Hexagonal order core. Inbound is event-driven (webhook domain commands → OrderIngestListener,
@@ -74,6 +80,7 @@ import { OrderFinancialSummaryService } from './services/order-financial-summary
         QueueModule,
         StockModule,
         OutboxModule,
+        WhatsAppModule, // WHATSAPP_PORT para daily-report (envio direto pelo dono do dado)
     ],
     controllers: [OrderController, OrderSyncController, OrderTestController],
     providers: [
@@ -83,7 +90,6 @@ import { OrderFinancialSummaryService } from './services/order-financial-summary
         OrderSyncPipeline,
         OrderIngestListener,
         OrderMapperService,
-        OrderSyncProcessor,
         // reconcile
         OrderReconciler,
         GapDetector,
@@ -93,7 +99,6 @@ import { OrderFinancialSummaryService } from './services/order-financial-summary
         OrderLifecycleService,
         OrderCancellationService,
         OrderFulfillmentService,
-        OrderSyncFlowService,
         // observability
         OrderMetricsService,
         // marketplace-detail / label / messaging
@@ -112,6 +117,12 @@ import { OrderFinancialSummaryService } from './services/order-financial-summary
         OrderPricingService,
         OrderPricingListener,
         OrderFinancialSummaryService,
+        // WhatsApp sale-notification (business logic in order/)
+        OrderSaleNotificationListener,
+        SaleNotificationReconcilerService,
+        DailyReportService,
+        OrderBotQueryService,
+        { provide: SALES_QUERY_PORT, useExisting: OrderBotQueryService },
     ],
     exports: [
         OrderRepository,
@@ -121,11 +132,12 @@ import { OrderFinancialSummaryService } from './services/order-financial-summary
         OrderRectifyService,
         OrderCancellationService,
         OrderFulfillmentService,
-        OrderSyncFlowService,
         OrderMarketplaceDetailsService,
         OrderPricingService,
         PricingCalculatorRegistry,
         OrderFinancialSummaryService,
+        // Bot read-port consumed by NotificationsModule
+        SALES_QUERY_PORT,
     ],
 })
 export class OrderModule { }

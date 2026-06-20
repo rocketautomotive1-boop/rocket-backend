@@ -25,6 +25,9 @@ import { MarketplaceAccountAuthController } from './controllers/marketplace-acco
 import { MarketplaceAuthController } from './controllers/marketplace-auth.controller';
 import { MarketplaceCallbackController } from './controllers/marketplace-callback.controller';
 
+import { MarketplaceBotQueryService } from '../services/marketplace-bot-query.service';
+import { BALANCE_QUERY_PORT } from '../../notifications/bot/ports/bot-query.ports';
+
 @Module({
     imports: [
         HttpModule,
@@ -54,9 +57,12 @@ import { MarketplaceCallbackController } from './controllers/marketplace-callbac
         MagaluAuthAdapter,
         ViaVarejoAuthAdapter,
         YampiAuthAdapter,
+        MarketplaceBotQueryService,
+        { provide: BALANCE_QUERY_PORT, useExisting: MarketplaceBotQueryService },
     ],
     exports: [
         MarketplaceAuthService,
+        BALANCE_QUERY_PORT,
         TokenManagerService,
         MarketplaceTokenBrokerService,
         MarketplaceSignerService,

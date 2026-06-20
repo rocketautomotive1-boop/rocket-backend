@@ -17,6 +17,7 @@ import { CompatibilitiesModule } from './compatibilities/compatibilities.module'
 import { OLXModule } from './marketplace/adapters/olx/olx.module';
 import { AiModule } from './ai/ai.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { WhatsAppModule } from './whatsapp/whatsapp.module';
 import { UserProductivityModule } from './monitoring/user-productivity.module';
 import { GatewaysModule } from './gateways/gateways.module';
 // import { PublishModule } from './publish/publish.module';
@@ -96,6 +97,7 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
     OLXModule,
     AiModule,
     NotificationsModule,
+    WhatsAppModule,
     // PublishModule,
     QuestionsModule,
     FiscalModule,
