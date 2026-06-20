@@ -31,8 +31,6 @@ export class CategorySyncService {
       throw new Error(`Marketplace ID ${marketplaceId} não encontrado`);
     }
 
-    const token = await this.marketplaceAuthService.ensureValidToken(marketplaceId);
-
     let categories = [];
 
     switch (marketplace.name) {
@@ -40,7 +38,8 @@ export class CategorySyncService {
         categories = await this.syncMercadoLivreCategories(marketplace, parentId);
         break;
       case 'Shopee':
-        categories = await this.syncShopeeCategories(marketplace, token, parentId);
+        // Token/shopId resolvidos pelo ShopeeHttpClient dentro do adapter.
+        categories = await this.syncShopeeCategories(marketplace, parentId);
         break;
       // Adicionar outros marketplaces conforme necessário
       default:
@@ -208,12 +207,12 @@ export class CategorySyncService {
     return { chain: saved, category: leaf };
   }
 
-  private async syncShopeeCategories(marketplace: MarketplaceConfig, token: any, parentId?: string): Promise<MarketplaceCategoryDocument[]> {
+  private async syncShopeeCategories(marketplace: MarketplaceConfig, parentId?: string): Promise<MarketplaceCategoryDocument[]> {
     this.logger.log(`Sincronizando categorias da Shopee${parentId ? ` para categoria pai ${parentId}` : ''}`);
 
     try {
       // Obter categorias da API da Shopee
-      const categories = await this.shopeeAdapter.getCategories(token.accessToken, token.additionalData.shopId, parentId);
+      const categories = await this.shopeeAdapter.getCategories(parentId);
 
       // Salvar categorias no banco de dados
       const savedCategories = [];
@@ -251,7 +250,7 @@ export class CategorySyncService {
           this.logger.log(`Categoria ${category.category_id} da Shopee possui subcategorias. Processando recursivamente...`);
 
           // Sincronizar subcategorias
-          await this.syncShopeeCategoryChildren(marketplace, token, category.category_id.toString());
+          await this.syncShopeeCategoryChildren(marketplace, category.category_id.toString());
         }
       }
 
@@ -263,12 +262,12 @@ export class CategorySyncService {
   }
 
   // Método para sincronizar recursivamente as subcategorias da Shopee
-  private async syncShopeeCategoryChildren(marketplace: MarketplaceConfig, token: any, parentId: string): Promise<void> {
+  private async syncShopeeCategoryChildren(marketplace: MarketplaceConfig, parentId: string): Promise<void> {
     this.logger.log(`Sincronizando subcategorias da Shopee para categoria pai ${parentId}`);
 
     try {
       // Obter subcategorias da API da Shopee
-      const childCategories = await this.shopeeAdapter.getCategories(token.accessToken, token.additionalData.shopId, parentId);
+      const childCategories = await this.shopeeAdapter.getCategories(parentId);
 
       for (const childCategory of childCategories) {
         const existingCategory = await this.categoryQueryService.findCategoryByExternalId(marketplace.id, childCategory.category_id.toString());
@@ -301,7 +300,7 @@ export class CategorySyncService {
           this.logger.log(`Subcategoria ${childCategory.category_id} da Shopee possui subcategorias. Processando recursivamente...`);
 
           // Chamada recursiva para processar as subcategorias
-          await this.syncShopeeCategoryChildren(marketplace, token, childCategory.category_id.toString());
+          await this.syncShopeeCategoryChildren(marketplace, childCategory.category_id.toString());
         }
       }
     } catch (error) {

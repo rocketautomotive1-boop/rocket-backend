@@ -89,8 +89,7 @@ export class ShopeeController {
   @Get('categories')
   async getCategories(@Query('parentId') parentId?: string) {
     try {
-      const token = await this.getShopeeToken()
-      return this.categories.getCategories(token.accessToken, token.additionalData.shopId, parentId)
+      return this.categories.getCategories(parentId)
     } catch (error) {
       throw this.toHttpException(error)
     }

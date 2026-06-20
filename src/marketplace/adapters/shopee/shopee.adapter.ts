@@ -77,8 +77,8 @@ export class ShopeeAdapter extends MarketplaceAdapter {
     return this.orderAdapter.updateOrderStatus(orderId, status);
   }
 
-  // Category methods
-  async getCategories(accessToken: string, shopId: string, parentId?: string): Promise<any[]> {
-    return this.categoryAdapter.getCategories(accessToken, shopId, parentId);
+  // Category methods — token/shopId resolvidos pelo ShopeeHttpClient.
+  async getCategories(parentId?: string): Promise<any[]> {
+    return this.categoryAdapter.getCategories(parentId);
   }
 }
