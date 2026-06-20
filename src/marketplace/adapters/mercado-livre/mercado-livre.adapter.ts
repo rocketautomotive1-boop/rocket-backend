@@ -5,6 +5,8 @@ import { MercadoLivreProductAdapter } from '../mercado-livre/mercado-livre-produ
 import { MercadoLivreOrderAdapter } from '../mercado-livre/mercado-livre-order.adapter';
 import { MercadoLivreCategoryAdapter } from '../mercado-livre/mercado-livre-category.adapter';
 import { MarketplaceToken } from '../../schemas/marketplace-token.schema';
+import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
+import { AuthRetryService } from '../shared/auth-retry.service';
 import axios from 'axios';
 
 @Injectable()
@@ -21,9 +23,17 @@ export class MercadoLivreAdapter extends MarketplaceAdapter {
     @Inject(forwardRef(() => MercadoLivreOrderAdapter))
     private readonly orderAdapter: MercadoLivreOrderAdapter,
     @Inject(forwardRef(() => MercadoLivreCategoryAdapter))
-    public readonly categoryAdapter: MercadoLivreCategoryAdapter
+    public readonly categoryAdapter: MercadoLivreCategoryAdapter,
+    private readonly marketplaceRegistry: MarketplaceRegistryService,
+    private readonly authRetry: AuthRetryService,
   ) {
     super();
+  }
+
+  /** marketplaceId (cache) p/ rotear o auth-retry de perguntas. */
+  private async mlId(): Promise<string> {
+    const mkt = await this.marketplaceRegistry.findByName(this.name);
+    return String(mkt._id);
   }
 
   // Auth methods
@@ -233,16 +243,23 @@ export class MercadoLivreAdapter extends MarketplaceAdapter {
     }
   }
 
-  async getQuestionById(accessToken: string, questionId: string): Promise<any> {
-    try {
-      const response = await axios.get(`${this.baseUrl}/questions/${questionId}`, {
-        headers: { 'Authorization': `Bearer ${accessToken}` }
-      });
-      return response.data;
-    } catch (error) {
-      this.logger.error(`Erro ao buscar pergunta ${questionId}: ${error.message}`);
-      throw error;
-    }
+  async getQuestionById(accessToken: string, questionId: string, accountId?: string): Promise<any> {
+    const marketplaceId = await this.mlId();
+    return this.authRetry.run(
+      { marketplaceId, selector: accountId ? { accountId } : undefined, context: 'getQuestionById' },
+      async (token) => {
+        try {
+          const response = await axios.get(`${this.baseUrl}/questions/${questionId}`, {
+            headers: { Authorization: `Bearer ${token.accessToken}` },
+          });
+          return response.data;
+        } catch (error: any) {
+          if (AuthRetryService.isAuthError(error)) throw error; // deixa o helper renovar
+          this.logger.error(`Erro ao buscar pergunta ${questionId}: ${error.message}`);
+          throw error;
+        }
+      },
+    );
   }
 
   /** Delta poll: newest-first questions, stopping once we pass `since`. Returns refs for the reconciler. */
@@ -250,37 +267,45 @@ export class MercadoLivreAdapter extends MarketplaceAdapter {
     accessToken: string,
     sellerId: string,
     since: Date,
+    accountId?: string,
   ): Promise<Array<{ id: string; item_id: string; status: string; date_created: string }>> {
-    const out: Array<{ id: string; item_id: string; status: string; date_created: string }> = [];
     const limit = 50;
     const HARD_CAP = 500; // safety bound
-    let offset = 0;
+    const marketplaceId = await this.mlId();
 
-    try {
-      while (offset < HARD_CAP) {
-        const response = await axios.get(
-          `${this.baseUrl}/questions/search?seller_id=${sellerId}&sort_fields=item_id,date_created&api_version=4`,
-          {
-            params: { sort: 'date_created_desc', limit, offset },
-            headers: { Authorization: `Bearer ${accessToken}` },
-          },
-        );
-        const page = response.data.questions || [];
-        if (page.length === 0) break;
+    return this.authRetry.run(
+      { marketplaceId, selector: accountId ? { accountId } : undefined, context: 'listQuestionsSince' },
+      async (token) => {
+        const out: Array<{ id: string; item_id: string; status: string; date_created: string }> = [];
+        let offset = 0;
+        try {
+          while (offset < HARD_CAP) {
+            const response = await axios.get(
+              `${this.baseUrl}/questions/search?seller_id=${sellerId}&sort_fields=item_id,date_created&api_version=4`,
+              {
+                params: { sort: 'date_created_desc', limit, offset },
+                headers: { Authorization: `Bearer ${token.accessToken}` },
+              },
+            );
+            const page = response.data.questions || [];
+            if (page.length === 0) break;
 
-        let crossedCursor = false;
-        for (const q of page) {
-          if (new Date(q.date_created) <= since) { crossedCursor = true; break; }
-          out.push({ id: String(q.id), item_id: q.item_id, status: q.status, date_created: q.date_created });
+            let crossedCursor = false;
+            for (const q of page) {
+              if (new Date(q.date_created) <= since) { crossedCursor = true; break; }
+              out.push({ id: String(q.id), item_id: q.item_id, status: q.status, date_created: q.date_created });
+            }
+            if (crossedCursor || page.length < limit) break;
+            offset += limit;
+          }
+          this.logger.log(`[Reconcile] ${out.length} ML questions newer than ${since.toISOString()}`);
+          return out;
+        } catch (error: any) {
+          if (AuthRetryService.isAuthError(error)) throw error; // helper renova e retenta
+          this.logger.error(`Erro ao listar perguntas (delta): ${error.message}`);
+          throw error;
         }
-        if (crossedCursor || page.length < limit) break;
-        offset += limit;
-      }
-      this.logger.log(`[Reconcile] ${out.length} ML questions newer than ${since.toISOString()}`);
-      return out;
-    } catch (error) {
-      this.logger.error(`Erro ao listar perguntas (delta): ${error.message}`);
-      throw error;
-    }
+      },
+    );
   }
 }

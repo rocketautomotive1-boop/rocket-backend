@@ -7,6 +7,9 @@ import { IMarketplaceProductAdapter } from '../../interfaces/marketplace-product
 import { MarketplaceDocument } from '../../schemas/marketplace.schema';
 import { ProductDocument } from '../../../product/product-types';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
+import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
+import { AuthRetryService } from '../shared/auth-retry.service';
+import { ResolvedToken } from '../../auth/services/token-manager.service';
 import { MarketplaceDescriptionService } from '../../services/marketplace-description.service';
 import { ListingService } from '../../../listing/listing.service'; // [NEW] Import
 
@@ -21,6 +24,8 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
     private readonly descriptionService: MarketplaceDescriptionService,
     private readonly listingService: ListingService, // [NEW] Inject
     private readonly signer: ShopeeSignerService,
+    private readonly marketplaceRegistry: MarketplaceRegistryService,
+    private readonly authRetry: AuthRetryService,
   ) { }
 
   onModuleInit() {
@@ -180,48 +185,19 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
   }
 
 
+  /**
+   * Auth-retry canônico. `token` legado (arg posicional) é ignorado — o token é
+   * resolvido/renovado pelo AuthRetryService (conta default Shopee; shopId vem
+   * de additionalData). A persistência do token renovado é do broker (não há
+   * mais side-channel result.token).
+   */
   private async executeWithRetry<T>(
-    operation: (token: any) => Promise<T>,
-    token: any,
-    context: string
+    operation: (token: ResolvedToken) => Promise<T>,
+    _legacyToken: any,
+    context: string,
   ): Promise<T> {
-    try {
-      return await operation(token);
-    } catch (error: any) {
-      const isAuthError = (error?.response?.status === 403) ||
-        (error?.response?.status === 401) ||
-        /invalid_acce?ess_token|invalid_access_token|error_auth/i.test(String(error?.response?.data?.error || error?.message || '')) ||
-        (error?.response?.data?.message && /Invalid access_token/i.test(error.response.data.message));
-
-      if (isAuthError) {
-        let newToken;
-
-        try {
-          newToken = await this.auth.refreshToken(token);
-        } catch (refreshError: any) {
-          throw error; // If refresh fails, throw original auth error
-        }
-
-        if (newToken) {
-
-          try {
-            // Execute operation with NEW token
-            const result: any = await operation(newToken);
-
-            // If successful, attach the new token so caller can persist it if needed
-            if (result && typeof result === 'object') {
-              result.token = newToken;
-            }
-            return result;
-          } catch (retryOperationError: any) {
-            // If the RETRY itself fails (e.g. data validation, timeout), we must throw THIS error,
-            // not the original auth error.
-            throw retryOperationError;
-          }
-        }
-      }
-      throw error;
-    }
+    const mkt = await this.marketplaceRegistry.findByName(this.name);
+    return this.authRetry.run({ marketplaceId: String(mkt._id), context }, operation);
   }
 
 
@@ -432,7 +408,7 @@ export class ShopeeProductAdapter implements IMarketplaceProductAdapter, OnModul
         const timestamp = Math.floor(Date.now() / 1000);
         const path = '/product/add_item';
         const accessToken = currentToken.accessToken;
-        const shopId = currentToken.additionalData?.shopId || currentToken.shopId;
+        const shopId = currentToken.additionalData?.shopId;
 
         if (!accessToken || !shopId) {
           return {

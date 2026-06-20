@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { MarketplaceToken } from '../schemas/marketplace-token.schema';
 import { MarketplaceRegistryService } from './marketplace-registry.service';
-import { MarketplaceAuthService } from '../auth/services/marketplace-auth.service';
 import { MarketplaceValidationResult, ValidationError } from '../interfaces/marketplace-validation-result.interface';
 import { ProductDocument } from '../../product/product-types';
 import { ProductModel } from '../../product/schemas/product.schema';
@@ -14,7 +13,6 @@ export class MarketplaceService {
 
   constructor(
     private readonly registryService: MarketplaceRegistryService,
-    private readonly authService: MarketplaceAuthService,
     private readonly listingService: ListingService, // [NEW]
   ) { }
 
@@ -57,11 +55,6 @@ export class MarketplaceService {
   async removeRequirement(marketplaceId: string, fieldName: string): Promise<void> {
     return this.registryService.removeRequirement(marketplaceId, fieldName);
   }
-
-  async refreshToken(marketplaceId: string) {
-    return this.authService.ensureValidToken(marketplaceId);
-  }
-
 
   async getRequirements(marketplaceId: string): Promise<any[]> {
     return this.registryService.getRequirements(marketplaceId);

@@ -3,6 +3,8 @@ import { Inject, forwardRef, Injectable, Logger, OnModuleInit } from '@nestjs/co
 import axios from 'axios';
 import { MercadoLivreAuthAdapter } from './mercado-livre-auth.adapter';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
+import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
+import { AuthRetryService } from '../shared/auth-retry.service';
 
 @Injectable()
 export class MercadoLivreCategoryAdapter implements OnModuleInit {
@@ -17,7 +19,9 @@ export class MercadoLivreCategoryAdapter implements OnModuleInit {
   constructor(
     @Inject(forwardRef(() => MercadoLivreAuthAdapter))
     private readonly authAdapter: MercadoLivreAuthAdapter,
-    private readonly registry: MarketplaceAdapterRegistry
+    private readonly registry: MarketplaceAdapterRegistry,
+    private readonly marketplaceRegistry: MarketplaceRegistryService,
+    private readonly authRetry: AuthRetryService,
   ) { }
 
   onModuleInit() {
@@ -41,31 +45,23 @@ export class MercadoLivreCategoryAdapter implements OnModuleInit {
   }
 
   /**
-   * Chamada ao Mercado Livre com retry forçado de token em caso de 401.
+   * Chamada ao Mercado Livre via auth-retry canônico. Categoria é catálogo
+   * conta-agnóstico → conta default (selector vazio). O token canônico
+   * (resolvido/renovado pelo helper) sobrescreve o Authorization do config.
    */
   private async requestWithRetry(config: any): Promise<any> {
-    try {
-      return await axios(config);
-    } catch (error: any) {
-      const status = error?.response?.status;
-      if (status === 401) {
-        this.logger.warn('Token Mercado Livre possivelmente expirado. Tentando refresh e retry...');
-        try {
-          const refreshed = await this.authAdapter.forceRefreshAccessToken(this.name);
-          const retryConfig = {
-            ...config,
-            headers: {
-              ...(config.headers || {}),
-              Authorization: `Bearer ${refreshed}`,
-            },
-          };
-          return await axios(retryConfig);
-        } catch (err) {
-          this.logger.error('Falha ao refrescar token do Mercado Livre.', err);
-        }
-      }
-      throw error;
-    }
+    const mkt = await this.marketplaceRegistry.findByName(this.name);
+    return this.authRetry.run(
+      { marketplaceId: String(mkt._id), context: 'category' },
+      (token) =>
+        axios({
+          ...config,
+          headers: {
+            ...(config.headers || {}),
+            Authorization: `Bearer ${token.accessToken}`,
+          },
+        }),
+    );
   }
 
   async getCategories(accessToken: string, parentId?: string): Promise<any[]> {

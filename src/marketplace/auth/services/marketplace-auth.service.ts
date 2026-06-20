@@ -80,22 +80,16 @@ export class MarketplaceAuthService {
         return this.tokenManager.resolveToken(idStr, domain);
     }
 
-    /** Força a renovação do token oauth2 (ignora o buffer) e devolve o renovado. */
-    async forceRefreshToken(marketplaceId: string | any, domain?: string): Promise<ResolvedToken> {
-        const idStr = String(marketplaceId);
-        const account = await this.broker.accountFor(idStr, domain);
-        if (account?.accountId) {
-            await this.broker.refreshToken(idStr, account.accountId, domain);
-        }
-        return this.tokenManager.resolveToken(idStr, domain);
-    }
-
     /**
-     * Refresh por marketplaceId — ponte de compatibilidade para callers legados
-     * (amazon/shopee/ml product adapters). Delega ao broker (accounts[]).
+     * Força a renovação do token oauth2 (ignora o buffer) e devolve o renovado.
+     * Selector: string (domain, legado) ou { accountId?, domain? } — accountId tem
+     * precedência (conta de entrada já determinada). Delega ao TokenManager.
      */
-    async refreshToken(marketplaceId: string | any, _token?: any): Promise<ResolvedToken> {
-        return this.forceRefreshToken(marketplaceId);
+    async forceRefreshToken(
+        marketplaceId: string | any,
+        selector?: string | { accountId?: string; domain?: string },
+    ): Promise<ResolvedToken> {
+        return this.tokenManager.forceRefresh(String(marketplaceId), selector);
     }
 
     /**

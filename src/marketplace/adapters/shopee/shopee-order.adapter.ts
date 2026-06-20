@@ -1,10 +1,12 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import axios from 'axios';
 import { getShopeeBaseUrl, buildHeaders } from './shopee-utils'
-import { ShopeeAuthAdapter } from './shopee-auth.adapter'
 import { ShopeeSignerService } from './shopee-signer.service'
 import { IMarketplaceOrderAdapter } from '../../interfaces/marketplace-order-adapter.interface';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
+import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
+import { AuthRetryService } from '../shared/auth-retry.service';
+import { ResolvedToken } from '../../auth/services/token-manager.service';
 import { StandardOrder } from '../../model/order.interface';
 
 @Injectable()
@@ -14,9 +16,10 @@ export class ShopeeOrderAdapter implements IMarketplaceOrderAdapter, OnModuleIni
   private name = 'Shopee';
 
   constructor(
-    private readonly auth: ShopeeAuthAdapter,
     private readonly registry: MarketplaceAdapterRegistry,
     private readonly signer: ShopeeSignerService,
+    private readonly marketplaceRegistry: MarketplaceRegistryService,
+    private readonly authRetry: AuthRetryService,
   ) { }
 
   onModuleInit() {
@@ -24,33 +27,11 @@ export class ShopeeOrderAdapter implements IMarketplaceOrderAdapter, OnModuleIni
   }
 
   private async executeWithRetry<T>(
-    operation: (token: any) => Promise<T>,
-    context: string
+    operation: (token: ResolvedToken) => Promise<T>,
+    context: string,
   ): Promise<T> {
-    const token = await this.auth.getValidToken(this.name);
-    try {
-      return await operation(token);
-    } catch (error: any) {
-      const isAuthError = (error?.response?.status === 403) ||
-        (error?.response?.status === 401) ||
-        /invalid_acce?ess_token|invalid_access_token|error_auth/i.test(String(error?.response?.data?.error || error?.message || '')) ||
-        (error?.response?.data?.message && /Invalid access_token/i.test(error.response.data.message));
-
-      if (isAuthError) {
-        this.logger.warn(`Erro de autenticação na Shopee (${context}), tentando renovar token...`);
-        try {
-          const newToken = await this.auth.refreshToken(token);
-          if (newToken) {
-            this.logger.log(`Token renovado com sucesso para ${context}, tentando novamente...`);
-            return await operation(newToken);
-          }
-        } catch (refreshError: any) {
-          this.logger.error(`Falha ao renovar token durante retry (${context}): ${refreshError.message}`);
-          throw error;
-        }
-      }
-      throw error;
-    }
+    const mkt = await this.marketplaceRegistry.findByName(this.name);
+    return this.authRetry.run({ marketplaceId: String(mkt._id), context }, operation);
   }
 
   async getOrders(params: any): Promise<StandardOrder[]> {

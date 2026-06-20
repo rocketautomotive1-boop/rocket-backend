@@ -43,7 +43,7 @@ export class QuestionIngestService {
     } catch { return; }
     if (!token) return;
 
-    const q = await this.mercadoLivreAdapter.getQuestionById(token, externalQuestionId);
+    const q = await this.mercadoLivreAdapter.getQuestionById(token, externalQuestionId, accountId);
     if (!q) return;
 
     const existing = await this.questionRepository.findOne({ externalId: String(q.id) });

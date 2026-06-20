@@ -56,7 +56,7 @@ describe('QuestionIngestService', () => {
       'ACC_B',
     );
     expect(auth.ensureValidToken).not.toHaveBeenCalled();
-    expect(adapter.getQuestionById).toHaveBeenCalledWith('tok-acc', '99');
+    expect(adapter.getQuestionById).toHaveBeenCalledWith('tok-acc', '99', 'ACC_B');
   });
 
   it('falls back to default account token when no accountId', async () => {

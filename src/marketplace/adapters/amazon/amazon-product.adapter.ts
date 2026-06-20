@@ -6,6 +6,8 @@ import { IMarketplaceProductAdapter } from '../../interfaces/marketplace-product
 import { MarketplaceDocument } from '../../schemas/marketplace.schema';
 import { ModuleRef } from '@nestjs/core';
 import { MarketplaceAuthService } from '../../auth/services/marketplace-auth.service';
+import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
+import { AuthRetryService } from '../shared/auth-retry.service';
 import { MarketplaceDescriptionService } from '../../services/marketplace-description.service';
 import { ListingService } from '../../../listing/listing.service'; // [NEW] Import
 
@@ -19,6 +21,14 @@ export class AmazonProductAdapter implements IMarketplaceProductAdapter {
 
   private getAuthService(): MarketplaceAuthService {
     return this.moduleRef.get(MarketplaceAuthService, { strict: false });
+  }
+
+  private getAuthRetry(): AuthRetryService {
+    return this.moduleRef.get(AuthRetryService, { strict: false });
+  }
+
+  private getMarketplaceRegistry(): MarketplaceRegistryService {
+    return this.moduleRef.get(MarketplaceRegistryService, { strict: false });
   }
 
   private getDescriptionService(): MarketplaceDescriptionService {
@@ -116,46 +126,27 @@ export class AmazonProductAdapter implements IMarketplaceProductAdapter {
     }
   }
 
+  /**
+   * Auth-retry canônico. Amazon sinaliza falha de auth de duas formas: lançando
+   * (401/403) OU no payload de sucesso (success:false + Unauthorized) — daí o
+   * isAuthFailureResult. O token renovado entra em product.token a cada tentativa.
+   */
   private async executeWithRetry(product: any, marketplace: MarketplaceDocument, externalId?: string): Promise<any> {
-    try {
-      const result = externalId
-        ? await this.updateProduct(externalId, product)
-        : await this.createProduct(product);
-
-      const isAuthError = !result.success &&
-        (/Unauthorized|access\s*token\s*expired/i.test(String(result.error || '')) ||
-          result.responsePayload?.errors?.some((e: any) => e.code === 'Unauthorized'));
-
-      if (isAuthError) {
-        try {
-          const newToken = await this.getAuthService().refreshToken(String(marketplace._id), product.token);
-          if (newToken) {
-            product.token = newToken;
-            return await this.createProduct(product);
-          }
-        } catch (refreshError: any) {
-          // Silent fail
-        }
-      }
-      return result;
-    } catch (error: any) {
-      const isAuthError = (error?.response?.status === 403) ||
-        (error?.response?.status === 401) ||
-        /Unauthorized|access\s*token\s*expired/i.test(String(error?.response?.data?.message || error?.message || ''));
-
-      if (isAuthError) {
-        try {
-          const newToken = await this.getAuthService().refreshToken(String(marketplace._id), product.token);
-          if (newToken) {
-            product.token = newToken;
-            return await this.createProduct(product);
-          }
-        } catch (refreshError: any) {
-          // Silent fail
-        }
-      }
-      throw error;
-    }
+    const mkt = await this.getMarketplaceRegistry().findByName('Amazon');
+    return this.getAuthRetry().run(
+      {
+        marketplaceId: String(mkt._id),
+        context: externalId ? 'updateProduct' : 'createProduct',
+        isAuthFailureResult: (r: any) =>
+          !r?.success &&
+          (/Unauthorized|access\s*token\s*expired/i.test(String(r?.error || '')) ||
+            r?.responsePayload?.errors?.some((e: any) => e.code === 'Unauthorized')),
+      },
+      (token) => {
+        product.token = token;
+        return externalId ? this.updateProduct(externalId, product) : this.createProduct(product);
+      },
+    );
   }
 
   private getCredentials() {

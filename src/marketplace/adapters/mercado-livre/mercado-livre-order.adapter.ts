@@ -1,9 +1,11 @@
-import { forwardRef, Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import axios from 'axios';
-import { MercadoLivreAuthAdapter } from './mercado-livre-auth.adapter';
 import FormData = require('form-data');
 import { IMarketplaceOrderAdapter } from '../../interfaces/marketplace-order-adapter.interface';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
+import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
+import { AuthRetryService } from '../shared/auth-retry.service';
+import { ResolvedToken } from '../../auth/services/token-manager.service';
 
 @Injectable()
 export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnModuleInit {
@@ -12,55 +14,49 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
   private name = 'Mercado Livre';
 
   constructor(
-    @Inject(forwardRef(() => MercadoLivreAuthAdapter))
-    private readonly authAdapter: MercadoLivreAuthAdapter,
     private readonly registry: MarketplaceAdapterRegistry,
+    private readonly marketplaceRegistry: MarketplaceRegistryService,
+    private readonly authRetry: AuthRetryService,
   ) { }
 
   onModuleInit() {
     this.registry.registerOrderAdapter(this.name, this);
   }
 
-  private async executeWithRetry<T>(
-    operation: (token: string) => Promise<T>,
+  /** Roda `op` com auth-retry canônico (refresh da conta certa via accountId). */
+  private async withRetry<T>(
     context: string,
-    accountId?: string,
+    accountId: string | undefined,
+    op: (token: ResolvedToken) => Promise<T>,
   ): Promise<T> {
-    try {
-      const token = await this.authAdapter.getValidToken(this.name, accountId ? { accountId } : undefined);
-      return await operation(token);
-    } catch (error: any) {
-      if (error.response?.status === 401 || error.response?.data?.message === 'invalid_token') {
-        this.logger.warn(`Erro de autenticação no Mercado Livre (${context}), forçando renovação do token...`);
-        try {
-          const newToken = await this.authAdapter.forceRefreshAccessToken(
-            this.name,
-            accountId ? { accountId } : undefined,
-          );
-          this.logger.log(`Token renovado com sucesso para ${context}, tentando novamente...`);
-          return await operation(newToken);
-        } catch (refreshError: any) {
-          this.logger.error(`Falha ao renovar token durante retry (${context}): ${refreshError.message}`);
-          throw error;
-        }
-      }
-      throw error;
-    }
+    const mkt = await this.marketplaceRegistry.findByName(this.name);
+    return this.authRetry.run(
+      { marketplaceId: String(mkt._id), selector: accountId ? { accountId } : undefined, context },
+      op,
+    );
+  }
+
+  /** GET /users/me com o token resolvido (sem reentrar no pipeline de auth). */
+  private async meWith(token: ResolvedToken): Promise<any> {
+    const res = await axios.get(`${this.baseUrl}/users/me`, {
+      headers: { Authorization: `Bearer ${token.accessToken}` },
+    });
+    return res.data;
   }
 
   async getOrders(params: any): Promise<any[]> {
     const accountId: string | undefined = params?.accountId;
-    return this.executeWithRetry(async (token) => {
+    return this.withRetry('getOrders', accountId, async (token) => {
       this.logger.log(`Buscando pedidos no Mercado Livre`);
 
-      const user = await this.authAdapter.me(this.name, accountId ? { accountId } : undefined);
+      const user = await this.meWith(token);
       if (!user) {
         throw new Error('Usuário não encontrado');
       }
 
       const response = await axios.get(`${this.baseUrl}/orders/search`, {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${token.accessToken}`,
         },
         params: {
           seller: user.id,
@@ -99,15 +95,15 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
         })),
         original_data: o
       }));
-    }, 'getOrders', accountId);
+    });
   }
 
   async getOrderDetails(orderId: string, accountId?: string): Promise<any> {
-    return this.executeWithRetry(async (token) => {
+    return this.withRetry('getOrderDetails', accountId, async (token) => {
       this.logger.log(`Buscando detalhes do pedido no Mercado Livre: ${orderId}`);
 
       const response = await axios.get(`${this.baseUrl}/orders/${orderId}`, {
-        headers: { 'Authorization': `Bearer ${token}` },
+        headers: { 'Authorization': `Bearer ${token.accessToken}` },
       });
 
       this.logger.log(`Detalhes do pedido ${orderId} obtidos com sucesso`);
@@ -118,7 +114,7 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
       if (o.shipping?.receiver_address || o.shipping?.id) {
         try {
           const shRes = await axios.get(`${this.baseUrl}/shipments/${o.shipping.id}`, {
-            headers: { 'Authorization': `Bearer ${token}` },
+            headers: { 'Authorization': `Bearer ${token.accessToken}` },
           });
           const ra = shRes.data?.receiver_address || {};
           buyerAddress = {
@@ -193,38 +189,38 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
         })),
         original_data: o,
       };
-    }, 'getOrderDetails', accountId);
+    });
   }
 
   async getBillingInfo(billingId: string, accountId?: string): Promise<any> {
-    return this.executeWithRetry(async (token) => {
+    return this.withRetry('getBillingInfo', accountId, async (token) => {
       this.logger.log(`Buscando dados de faturamento (billing info: ${billingId}) no Mercado Livre`);
 
       const response = await axios.get(`${this.baseUrl}/orders/billing-info/MLB/${billingId}`, {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${token.accessToken}`,
         },
       });
 
       this.logger.log(`Billing Info ${billingId} obtido com sucesso`);
       return response.data;
-    }, 'getBillingInfo', accountId);
+    });
   }
 
-  async updateOrderStatus(orderId: string, status: string): Promise<any> {
-    return this.executeWithRetry(async (token) => {
+  async updateOrderStatus(orderId: string, status: string, accountId?: string): Promise<any> {
+    return this.withRetry('updateOrderStatus', accountId, async (token) => {
       this.logger.log(`Atualizando status do pedido no Mercado Livre: ${orderId} para ${status}`);
 
       const response = await axios.post(`${this.baseUrl}/orders/${orderId}/${this.mapOrderStatus(status)}`, {}, {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${token.accessToken}`,
           'Content-Type': 'application/json',
         },
       });
 
       this.logger.log(`Status do pedido ${orderId} atualizado para ${status}`);
       return response.data;
-    }, 'updateOrderStatus');
+    });
   }
 
   /**
@@ -236,8 +232,8 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
    *
    * Accepts XML alone, or PDF + XML (max 2 files, 1 MB each).
    */
-  async uploadInvoice(orderId: string, xmlContent: string, options?: { packId?: string; pdfBase64?: string }): Promise<any> {
-    return this.executeWithRetry(async (token) => {
+  async uploadInvoice(orderId: string, xmlContent: string, options?: { packId?: string; pdfBase64?: string; accountId?: string }): Promise<any> {
+    return this.withRetry('uploadInvoice', options?.accountId, async (token) => {
       const packId = options?.packId;
       const resourcePath = packId
         ? `/packs/${packId}/fiscal_documents`
@@ -267,7 +263,7 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
 
       const response = await axios.post(`${this.baseUrl}${resourcePath}`, form, {
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${token.accessToken}`,
           ...form.getHeaders(),
         },
         maxBodyLength: Infinity,
@@ -275,7 +271,7 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
 
       this.logger.log(`NFe enviada com sucesso: ${JSON.stringify(response.data)}`);
       return response.data;
-    }, 'uploadInvoice');
+    });
   }
 
   private mapOrderStatus(status: string): string {

@@ -72,8 +72,8 @@ describe('QuestionReconciler', () => {
     await sut.runOnce();
     expect(broker.ensureValidTokenByAccount).toHaveBeenCalledWith(String(mlMarketplace._id), 'A');
     expect(broker.ensureValidTokenByAccount).toHaveBeenCalledWith(String(mlMarketplace._id), 'B');
-    expect(adapter.listQuestionsSince).toHaveBeenCalledWith('tok-A', 'seller-A', expect.any(Date));
-    expect(adapter.listQuestionsSince).toHaveBeenCalledWith('tok-B', 'seller-B', expect.any(Date));
+    expect(adapter.listQuestionsSince).toHaveBeenCalledWith('tok-A', 'seller-A', expect.any(Date), 'A');
+    expect(adapter.listQuestionsSince).toHaveBeenCalledWith('tok-B', 'seller-B', expect.any(Date), 'B');
   });
 
   it('propagates accountId into ingest for each delta question', async () => {
@@ -92,7 +92,7 @@ describe('QuestionReconciler', () => {
     });
     await sut.runOnce();
     expect(broker.ensureValidToken).toHaveBeenCalledWith(String(mlMarketplace._id));
-    expect(adapter.listQuestionsSince).toHaveBeenCalledWith('tok-default', 'seller-default', expect.any(Date));
+    expect(adapter.listQuestionsSince).toHaveBeenCalledWith('tok-default', 'seller-default', expect.any(Date), undefined);
     expect(ingest.ingest).toHaveBeenCalledWith('5', 'reconcile', undefined);
   });
 

@@ -2,10 +2,13 @@ import { Injectable, Logger, Inject, forwardRef, OnModuleInit } from '@nestjs/co
 import axios from 'axios';
 import { getTikTokShopBaseUrl, buildSignedParams, buildHeaders } from './tiktok-shop-utils';
 import { TikTokShopAuthAdapter } from './tiktok-shop-auth.adapter';
+import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
+import { AuthRetryService } from '../shared/auth-retry.service';
 
 @Injectable()
 export class TikTokShopCategoryAdapter implements OnModuleInit {
   private readonly logger = new Logger(TikTokShopCategoryAdapter.name);
+  private readonly name = 'TikTok Shop';
   private readonly baseUrl = getTikTokShopBaseUrl();
   private readonly cache = new Map<string, { data: any; timestamp: number }>();
   private readonly CACHE_TTL = 3600000; // 1 hour
@@ -13,6 +16,8 @@ export class TikTokShopCategoryAdapter implements OnModuleInit {
   constructor(
     @Inject(forwardRef(() => TikTokShopAuthAdapter))
     private readonly authAdapter: TikTokShopAuthAdapter,
+    private readonly marketplaceRegistry: MarketplaceRegistryService,
+    private readonly authRetry: AuthRetryService,
   ) {}
 
   onModuleInit() {
@@ -25,30 +30,28 @@ export class TikTokShopCategoryAdapter implements OnModuleInit {
     if (cached) return cached;
 
     const path = '/product/202309/categories';
-    const timestamp = Math.floor(Date.now() / 1000);
-    const params = buildSignedParams(path, timestamp, accessToken, shopCipher, {
-      locale: locale || 'pt-BR',
-    });
+    const mkt = await this.marketplaceRegistry.findByName(this.name);
 
-    try {
-      const response = await axios.get(`${this.baseUrl}${path}`, {
-        headers: buildHeaders(accessToken),
-        params,
-      });
+    // Auth-retry canônico: no 401 força refresh REAL (antes chamava getValidToken,
+    // que só relê o token e nunca renovava) e retenta 1x.
+    const categories = await this.authRetry.run(
+      { marketplaceId: String(mkt._id), context: 'tiktok.getCategories' },
+      async (token) => {
+        const cipher = token.additionalData?.shopCipher ?? shopCipher;
+        const timestamp = Math.floor(Date.now() / 1000);
+        const params = buildSignedParams(path, timestamp, token.accessToken, cipher, {
+          locale: locale || 'pt-BR',
+        });
+        const response = await axios.get(`${this.baseUrl}${path}`, {
+          headers: buildHeaders(token.accessToken),
+          params,
+        });
+        return response.data?.data?.categories || [];
+      },
+    );
 
-      const categories = response.data?.data?.categories || [];
-      this.setCache(cacheKey, categories);
-      return categories;
-    } catch (error: any) {
-      this.logger.error(`Erro ao buscar categorias do TikTok Shop: ${error.message}`);
-
-      if (error?.response?.status === 401) {
-        const newToken = await this.authAdapter.getValidToken('TikTok Shop');
-        return this.getCategories(newToken.accessToken, shopCipher, locale);
-      }
-
-      throw error;
-    }
+    this.setCache(cacheKey, categories);
+    return categories;
   }
 
   async getCategoryRules(categoryId: string, accessToken: string, shopCipher?: string): Promise<any> {

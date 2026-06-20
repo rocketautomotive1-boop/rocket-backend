@@ -55,17 +55,6 @@ export class MercadoLivreAuthAdapter implements IMarketplaceAuthAdapter, OnModul
     return String(userId);
   }
 
-  /** Força refresh e devolve o novo access token. Selector roteia a conta multi-client. */
-  async forceRefreshAccessToken(
-    marketplaceName: string,
-    selector?: string | { domain?: string; accountId?: string },
-  ): Promise<string> {
-    const marketplace = await this.marketplaceRegistry.findByName(marketplaceName);
-    if (!marketplace) throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);
-    const resolved = await this.tokenManager.forceRefresh(String(marketplace._id), selector);
-    return resolved.accessToken;
-  }
-
   /** GET /users/me autenticado. */
   async me(marketplaceName: string, selector?: string | { domain?: string; accountId?: string }): Promise<any> {
     const token = await this.getValidToken(marketplaceName, selector);
@@ -152,7 +141,18 @@ export class MercadoLivreAuthAdapter implements IMarketplaceAuthAdapter, OnModul
         isActive: true,
       };
     } catch (error: any) {
-      throw new Error(`Falha na renovação do token do Mercado Livre: ${error.message}`);
+      // A causa raiz do ML vem em response.data ({error, error_description}),
+      // não em error.message ("Request failed with status code 400"). Sem isto
+      // o "Falha ao renovar token" some o motivo (invalid_grant vs creds).
+      const apiErr = error.response?.data;
+      const detail = apiErr
+        ? `${apiErr.error ?? ''}: ${apiErr.message ?? apiErr.error_description ?? ''}`.trim()
+        : error.message;
+      this.logger.error(
+        `Falha na renovação do token do Mercado Livre (clientId=${clientId}): ${detail}`,
+        apiErr,
+      );
+      throw new Error(`Falha na renovação do token do Mercado Livre: ${detail}`);
     }
   }
 }

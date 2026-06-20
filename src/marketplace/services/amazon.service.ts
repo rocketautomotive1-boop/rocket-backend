@@ -5,7 +5,8 @@ import { ProductTitle } from '../../product/product-types';
 import { MarketplaceDocument } from '../schemas/marketplace.schema'
 
 import { AmazonAdapter } from '../adapters/amazon/amazon.adapter'
-import { MarketplaceAuthService } from '../auth/services/marketplace-auth.service'
+import { MarketplaceRegistryService } from './marketplace-registry.service'
+import { AuthRetryService } from '../adapters/shared/auth-retry.service'
 import { MarketplaceIntegrationHelperService } from './marketplace-integration-helper.service'
 import { ProductService } from '../../product/product.service';
 import { ListingService } from '../../listing/listing.service'; // [NEW] Import
@@ -17,7 +18,8 @@ export class AmazonService {
   constructor(
 
     private amazonAdapter: AmazonAdapter,
-    private marketplaceAuthService: MarketplaceAuthService,
+    private marketplaceRegistry: MarketplaceRegistryService,
+    private authRetry: AuthRetryService,
     @Inject(forwardRef(() => MarketplaceIntegrationHelperService))
     private helperService: MarketplaceIntegrationHelperService,
     @Inject(forwardRef(() => ProductService))
@@ -28,10 +30,8 @@ export class AmazonService {
   async createProduct(product: ProductDocument, marketplace: MarketplaceDocument): Promise<any> {
     this.logger.log(`Criando/atualizando item no Amazon SP-API para produto ID ${String(product._id)}`)
     try {
-      let token = await this.marketplaceAuthService.ensureValidToken(marketplace._id)
-      if (!token) throw new Error('Token LWA não disponível para a Amazon')
-
       const executeCreate = async (currentToken: any) => {
+        if (!currentToken?.accessToken) throw new Error('Token LWA não disponível para a Amazon')
         const sellerId = process.env.AMAZON_SELLER_ID || currentToken.additionalData?.sellerId
         if (!sellerId) throw new Error('SellerId não configurado (AMAZON_SELLER_ID)')
 
@@ -106,24 +106,12 @@ export class AmazonService {
         return { success: true, response, externalId: sku }
       }
 
-      try {
-        return await executeCreate(token);
-      } catch (error) {
-        // Check for 403 status via response property (if preserved) OR via error message string content
-        const isUnauthorized =
-          error.response?.status === 403 ||
-          error.message?.includes('Unauthorized') ||
-          error.message?.includes('Access to requested resource is denied') ||
-          error.message?.includes('token you provided has expired');
-
-        if (isUnauthorized) {
-          this.logger.warn('Amazon SP-API retornou 403/Unauthorized. Tentando renovar token e reenviar...');
-          token = await this.marketplaceAuthService.refreshToken(marketplace._id, token);
-          // Update the executed function to use the NEW token
-          return await executeCreate(token);
-        }
-        throw error;
-      }
+      // Auth-retry canônico: resolve/renova o token LWA (conta default Amazon) e
+      // retenta 1x no 403/Unauthorized/expirado.
+      return await this.authRetry.run(
+        { marketplaceId: String(marketplace._id), context: 'amazon.createProduct' },
+        (currentToken) => executeCreate(currentToken),
+      );
 
     } catch (error) {
       return this.helperService.handleError(error, marketplace, 'create')

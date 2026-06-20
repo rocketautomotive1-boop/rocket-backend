@@ -33,6 +33,7 @@ import { ProductFieldMapper } from './services/product-field-mapper.service';
 import { TemplateEngine } from './services/template-engine.service';
 import { TemplateConditionEvaluator } from './services/template-condition.evaluator';
 import { MarketplaceAdapterRegistry } from './registries/marketplace-adapter.registry';
+import { AuthRetryService } from './adapters/shared/auth-retry.service';
 import { MarketplaceCategoryService } from './services/marketplace-category.service';
 
 import { MarketplaceRegistryService } from './services/marketplace-registry.service';
@@ -180,6 +181,7 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
     OLXHighlightsService,
     OLXWebhookService,
     MarketplaceAdapterRegistry,
+    AuthRetryService,
     RocketProductAdapter,
     TikTokShopAdapter,
     TikTokShopAuthAdapter,

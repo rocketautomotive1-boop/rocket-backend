@@ -96,7 +96,14 @@ export class QuestionReconciler {
 
     const since = checkpoint.lastCreatedCursor;
 
-    const delta = await this.mercadoLivreAdapter.listQuestionsSince(token.accessToken, sellerId, since);
+    // accessToken é o token inicial; o adapter reabre via auth-retry pela conta
+    // (target.accountId) se levar 401.
+    const delta = await this.mercadoLivreAdapter.listQuestionsSince(
+      token.accessToken,
+      sellerId,
+      since,
+      target.accountId,
+    );
 
     for (const q of delta) {
       await this.ingestService.ingest(String(q.id), 'reconcile', target.accountId);
