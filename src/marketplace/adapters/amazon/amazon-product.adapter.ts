@@ -1,61 +1,22 @@
-import { Injectable, Inject, forwardRef } from '@nestjs/common';
-import axios from 'axios';
-import * as aws4 from 'aws4';
+import { Injectable } from '@nestjs/common';
 import { ProductDocument } from '../../../product/product-types';
 import { IMarketplaceProductAdapter } from '../../interfaces/marketplace-product-adapter.interface';
 import { MarketplaceDocument } from '../../schemas/marketplace.schema';
-import { ModuleRef } from '@nestjs/core';
-import { MarketplaceAuthService } from '../../auth/services/marketplace-auth.service';
-import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
-import { AuthRetryService } from '../shared/auth-retry.service';
 import { MarketplaceDescriptionService } from '../../services/marketplace-description.service';
-import { ListingService } from '../../../listing/listing.service'; // [NEW] Import
+import { ListingService } from '../../../listing/listing.service';
+import { AmazonHttpClient } from './amazon-http-client';
 
 @Injectable()
 export class AmazonProductAdapter implements IMarketplaceProductAdapter {
 
   constructor(
-    private readonly moduleRef: ModuleRef,
-    private readonly listingService: ListingService, // [NEW] Inject
+    private readonly listingService: ListingService,
+    private readonly descriptionService: MarketplaceDescriptionService,
+    private readonly http: AmazonHttpClient,
   ) { }
-
-  private getAuthService(): MarketplaceAuthService {
-    return this.moduleRef.get(MarketplaceAuthService, { strict: false });
-  }
-
-  private getAuthRetry(): AuthRetryService {
-    return this.moduleRef.get(AuthRetryService, { strict: false });
-  }
-
-  private getMarketplaceRegistry(): MarketplaceRegistryService {
-    return this.moduleRef.get(MarketplaceRegistryService, { strict: false });
-  }
-
-  private getDescriptionService(): MarketplaceDescriptionService {
-    return this.moduleRef.get(MarketplaceDescriptionService, { strict: false });
-  }
 
   async publishProduct(product: ProductDocument, marketplace: MarketplaceDocument, externalId?: string): Promise<any> {
     try {
-      // Ensure token exists
-      if (!(product as any).token) {
-        try {
-          const authService = this.getAuthService();
-          const marketplaceRepo = await authService.findByName('Amazon');
-          if (marketplaceRepo) {
-            const mId = marketplaceRepo._id;
-            if (mId) {
-              const token = await authService.ensureValidToken(String(mId));
-              if (token) {
-                (product as any).token = token;
-              }
-            }
-          }
-        } catch (e) {
-          // Silent fail
-        }
-      }
-
       if (!product) {
         throw new Error('Produto não encontrado');
       }
@@ -86,7 +47,11 @@ export class AmazonProductAdapter implements IMarketplaceProductAdapter {
           // We clear titles in the clone so createProduct uses the forced product.name
           const productClone = { ...product, name: title.title, titles: [] };
 
-          const amazonResult = await this.executeWithRetry(productClone, marketplace, finalExternalId);
+          // O auth-retry (refresh + 1 retry no 401/403) vive no AmazonHttpClient,
+          // então aqui chamamos create/update direto.
+          const amazonResult = finalExternalId
+            ? await this.updateProduct(finalExternalId, productClone)
+            : await this.createProduct(productClone);
 
           // Attach externalId if it was a create
           if (amazonResult.success && !amazonResult.externalId && amazonResult.result?.externalId) {
@@ -126,55 +91,13 @@ export class AmazonProductAdapter implements IMarketplaceProductAdapter {
     }
   }
 
-  /**
-   * Auth-retry canônico. Amazon sinaliza falha de auth de duas formas: lançando
-   * (401/403) OU no payload de sucesso (success:false + Unauthorized) — daí o
-   * isAuthFailureResult. O token renovado entra em product.token a cada tentativa.
-   */
-  private async executeWithRetry(product: any, marketplace: MarketplaceDocument, externalId?: string): Promise<any> {
-    const mkt = await this.getMarketplaceRegistry().findByName('Amazon');
-    return this.getAuthRetry().run(
-      {
-        marketplaceId: String(mkt._id),
-        context: externalId ? 'updateProduct' : 'createProduct',
-        isAuthFailureResult: (r: any) =>
-          !r?.success &&
-          (/Unauthorized|access\s*token\s*expired/i.test(String(r?.error || '')) ||
-            r?.responsePayload?.errors?.some((e: any) => e.code === 'Unauthorized')),
-      },
-      (token) => {
-        product.token = token;
-        return externalId ? this.updateProduct(externalId, product) : this.createProduct(product);
-      },
-    );
-  }
-
-  private getCredentials() {
-    const accessKeyId = process.env.AMAZON_AWS_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID;
-    const secretAccessKey = process.env.AMAZON_AWS_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY;
-    const region = process.env.AMAZON_AWS_REGION || process.env.AWS_REGION || 'us-east-1';
-    const endpoint = process.env.AMAZON_SPAPI_ENDPOINT || 'https://sellingpartnerapi-na.amazon.com';
-
-    if (!accessKeyId || !secretAccessKey) {
-      throw new Error('Credenciais AWS (Access Key/Secret) não configuradas para Amazon SP-API.');
-    }
-
-    return { accessKeyId, secretAccessKey, region, endpoint };
-  }
-
   async createProduct(product: any): Promise<any> {
-    const { token } = product;
-    if (!token || !token.accessToken) {
-      throw new Error('Token de acesso LWA não fornecido.');
-    }
-
-    const sellerId = process.env.AMAZON_SELLER_ID || token.additionalData?.sellerId;
+    const sellerId = process.env.AMAZON_SELLER_ID || product.token?.additionalData?.sellerId;
     if (!sellerId) {
-      throw new Error('Seller ID não encontrado no token ou env var.');
+      throw new Error('Seller ID não encontrado (AMAZON_SELLER_ID).');
     }
 
     const sku = String(product.id);
-    const { accessKeyId, secretAccessKey, region, endpoint } = this.getCredentials();
 
     const forcedName = product.name;
     let finalTitle = forcedName;
@@ -220,11 +143,8 @@ export class AmazonProductAdapter implements IMarketplaceProductAdapter {
 
     let description = product.description || product.shortDescription || product.name || 'Peça de reposição de qualidade.';
     try {
-      const service = this.getDescriptionService();
-      if (service) {
-        const templateDesc = await service.generateDescription(product, 'Amazon');
-        if (templateDesc) description = templateDesc;
-      }
+      const templateDesc = await this.descriptionService.generateDescription(product, 'Amazon');
+      if (templateDesc) description = templateDesc;
     } catch (e) {
       // silent
     }
@@ -307,7 +227,7 @@ export class AmazonProductAdapter implements IMarketplaceProductAdapter {
     }
 
     try {
-      return await this.putListingItem(sku, finalTitle, payload, token);
+      return await this.putListingItem(sku, finalTitle, payload, sellerId);
     } catch (error: any) {
       return {
         success: false,
@@ -321,33 +241,24 @@ export class AmazonProductAdapter implements IMarketplaceProductAdapter {
     return this.createProduct(product);
   }
 
-  private async putListingItem(sku: string, _sellerIdOrTitle: string, payload: any, token: any) {
-    const { accessKeyId, secretAccessKey, region, endpoint } = this.getCredentials();
-    const sellerId = process.env.AMAZON_SELLER_ID || token.additionalData?.sellerId;
+  private get defaultMarketplaceId(): string {
+    return process.env.AMAZON_MARKETPLACE_ID || 'A2Q3Y263D00KWC';
+  }
 
+  private async putListingItem(sku: string, _title: string, payload: any, sellerId: string) {
     if (!sellerId) throw new Error('Seller ID missing for Amazon PUT');
 
     const path = `/listings/2021-08-01/items/${sellerId}/${sku}`;
 
-    const requestOptions: aws4.Request = {
-      host: endpoint.replace('https://', ''),
-      path: `${path}?marketplaceIds=A2Q3Y263D00KWC`,
-      method: 'PUT',
-      headers: {
-        'x-amz-access-token': token.accessToken,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-      region,
-      service: 'execute-api',
-    };
-
-    aws4.sign(requestOptions, { accessKeyId, secretAccessKey });
-
     try {
-      const { data } = await axios.put(`${endpoint}${path}?marketplaceIds=A2Q3Y263D00KWC`, payload, {
-        headers: requestOptions.headers,
-      });
+      // O AmazonHttpClient assina SigV4 + LWA e faz auth-retry; a query é
+      // embutida na path assinada (não em params).
+      const data = await this.http.request({
+        method: 'PUT',
+        path,
+        query: { marketplaceIds: this.defaultMarketplaceId },
+        body: payload,
+      }, { context: 'putListingItem' }).then(r => r.data);
 
       if (data.status === 'INVALID') {
         const issues = JSON.stringify(data.issues);
@@ -378,38 +289,6 @@ export class AmazonProductAdapter implements IMarketplaceProductAdapter {
         requestPayload: payload,
         responsePayload: error.response?.data || null
       };
-    }
-  }
-
-  async getListingItem(sku: string, token: any): Promise<any> {
-    if (!token?.accessToken) throw new Error('Token inválido para Amazon');
-    const { accessKeyId, secretAccessKey, region, endpoint } = this.getCredentials();
-    const sellerId = token.additionalData?.sellerId || process.env.AMAZON_SELLER_ID;
-
-    const path = `/listings/2021-08-01/items/${encodeURIComponent(sellerId)}/${encodeURIComponent(sku)}`;
-    const url = new URL(endpoint);
-
-    const request = {
-      host: url.host,
-      path: `${path}?marketplaceIds=${process.env.AMAZON_MARKETPLACE_ID || 'A2Q3Y263D00KWC'}&includedData=summaries,offers,fulfillmentAvailability,issues`,
-      service: 'execute-api',
-      region,
-      method: 'GET',
-      headers: {
-        'x-amz-access-token': token.accessToken,
-      } as Record<string, string>
-    };
-
-    try {
-      if (!request.headers) request.headers = {};
-      aws4.sign(request as any, { accessKeyId, secretAccessKey });
-
-      const signedUrl = `${endpoint}${request.path}`;
-      const response = await axios.get(signedUrl, { headers: request.headers });
-      return response.data;
-    } catch (error) {
-      if (error.response?.status === 404) return null;
-      return null;
     }
   }
 }

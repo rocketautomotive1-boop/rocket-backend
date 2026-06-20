@@ -1,53 +1,60 @@
 import { AmazonProductAdapter } from './amazon-product.adapter';
-import { AuthRetryService } from '../shared/auth-retry.service';
 
 /**
- * Amazon sinaliza falha de auth no PAYLOAD (success:false + Unauthorized), não
- * só lançando. O executeWithRetry deve passar isso ao AuthRetryService e forçar
- * refresh + retry — sem usar o legado marketplaceService.refreshToken.
+ * Após a migração para AmazonHttpClient, o adapter de produto é negócio puro:
+ * monta o payload SP-API e chama http.request (PUT /listings). Token, SigV4 e
+ * auth-retry vivem no AmazonHttpClient — o adapter não vê nada disso.
  */
-describe('AmazonProductAdapter auth-retry (result-level)', () => {
-  const tokenManager = {
-    resolveToken: jest.fn().mockResolvedValue({ accessToken: 'OLD', additionalData: {}, strategy: 'oauth2', fromDatabase: true }),
-    forceRefresh: jest.fn().mockResolvedValue({ accessToken: 'NEW', additionalData: {}, strategy: 'oauth2', fromDatabase: true }),
-  };
-  const authRetry = new AuthRetryService(tokenManager as any);
-  const marketplaceRegistry = { findByName: jest.fn().mockResolvedValue({ _id: 'AMZID' }) };
+describe('AmazonProductAdapter', () => {
+  const OLD_SELLER = process.env.AMAZON_SELLER_ID;
+  beforeAll(() => { process.env.AMAZON_SELLER_ID = 'SELLER1'; });
+  afterAll(() => { process.env.AMAZON_SELLER_ID = OLD_SELLER; });
 
-  function makeAdapter(createProduct: jest.Mock): AmazonProductAdapter {
-    const adapter = new (AmazonProductAdapter as any)(
-      { get: () => undefined }, // moduleRef (overridden below)
-      {},                       // listingService
+  const descriptionService = { generateDescription: jest.fn().mockResolvedValue('') };
+
+  function makeAdapter(httpRequest: jest.Mock): AmazonProductAdapter {
+    const http = { request: httpRequest };
+    return new (AmazonProductAdapter as any)(
+      {},                  // listingService (não usado em createProduct direto)
+      descriptionService,
+      http,
     );
-    adapter.getAuthRetry = () => authRetry;
-    adapter.getMarketplaceRegistry = () => marketplaceRegistry;
-    adapter.createProduct = createProduct;
-    adapter.updateProduct = jest.fn();
-    return adapter;
   }
 
   beforeEach(() => jest.clearAllMocks());
 
-  it('refreshes + retries when the result payload is Unauthorized', async () => {
-    const createProduct = jest
-      .fn()
-      .mockResolvedValueOnce({ success: false, error: 'Unauthorized' })
-      .mockResolvedValueOnce({ success: true, externalId: 'ASIN1' });
-    const adapter = makeAdapter(createProduct);
+  it('PUTs the listing via http.request and returns success', async () => {
+    const httpRequest = jest.fn().mockResolvedValue({ data: { status: 'ACCEPTED' } });
+    const adapter = makeAdapter(httpRequest);
 
-    const out = await (adapter as any).executeWithRetry({ name: 'x' }, { _id: 'AMZID' });
+    const out = await adapter.createProduct({ id: 'SKU1', name: 'Pastilha', price: 99 });
 
     expect(out.success).toBe(true);
-    expect(tokenManager.forceRefresh).toHaveBeenCalledTimes(1);
-    expect(createProduct).toHaveBeenCalledTimes(2);
+    expect(out.externalId).toBe('SKU1');
+    const spec = httpRequest.mock.calls[0][0];
+    expect(spec.method).toBe('PUT');
+    expect(spec.path).toBe('/listings/2021-08-01/items/SELLER1/SKU1');
+    expect(spec.query).toMatchObject({ marketplaceIds: expect.any(String) });
+    expect(spec.body.attributes.item_name[0].value).toBe('Pastilha');
   });
 
-  it('no refresh when the create succeeds', async () => {
-    const createProduct = jest.fn().mockResolvedValueOnce({ success: true, externalId: 'ASIN2' });
-    const adapter = makeAdapter(createProduct);
+  it('maps an INVALID response to a failure result with issues', async () => {
+    const httpRequest = jest.fn().mockResolvedValue({ data: { status: 'INVALID', issues: [{ message: 'bad' }] } });
+    const adapter = makeAdapter(httpRequest);
 
-    await (adapter as any).executeWithRetry({ name: 'x' }, { _id: 'AMZID' });
+    const out = await adapter.createProduct({ id: 'SKU2', name: 'X', price: 10 });
 
-    expect(tokenManager.forceRefresh).not.toHaveBeenCalled();
+    expect(out.success).toBe(false);
+    expect(out.error).toContain('Issues');
+  });
+
+  it('rejects when no Seller ID is configured', async () => {
+    process.env.AMAZON_SELLER_ID = '';
+    const adapter = makeAdapter(jest.fn());
+
+    await expect(adapter.createProduct({ id: 'SKU3', name: 'X', price: 10 }))
+      .rejects.toThrow(/Seller ID/);
+
+    process.env.AMAZON_SELLER_ID = 'SELLER1';
   });
 });
