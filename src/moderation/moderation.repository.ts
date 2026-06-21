@@ -115,10 +115,39 @@ export class ModerationRepository {
       .exec();
   }
 
+  /**
+   * Open moderation rows for a set of listing ids, regardless of account. Used by the issues UI
+   * to join the evidence onto listings (read path). Returns a map keyed by listingId string.
+   */
+  async findOpenByListingIds(listingIds: string[]): Promise<Map<string, ModerationStateDocument>> {
+    if (!listingIds.length) return new Map();
+    const rows = await this.model
+      .find({
+        status: 'open',
+        listingId: { $in: listingIds.map((id) => new Types.ObjectId(id)) },
+      })
+      .exec();
+    return new Map(rows.map((r) => [String(r.listingId), r]));
+  }
+
   /** Close a moderation (resolved at the marketplace). Returns the updated row or null. */
   async markResolved(id: string | Types.ObjectId): Promise<ModerationStateDocument | null> {
     return this.model
       .findByIdAndUpdate(id, { $set: { status: 'resolved', resolvedAt: new Date() } }, { new: true })
       .exec();
+  }
+
+  /**
+   * Close any open moderation(s) for a listing — used when a successful (re)publish resolves the
+   * issue immediately, ahead of the reconciler. Returns how many rows were closed.
+   */
+  async markResolvedByListingId(listingId: string): Promise<number> {
+    const res = await this.model
+      .updateMany(
+        { listingId: new Types.ObjectId(listingId), status: 'open' },
+        { $set: { status: 'resolved', resolvedAt: new Date() } },
+      )
+      .exec();
+    return res.modifiedCount ?? 0;
   }
 }

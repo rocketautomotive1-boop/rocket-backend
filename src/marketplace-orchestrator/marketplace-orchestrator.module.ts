@@ -26,6 +26,7 @@ import { ProductCompatibilityModel, ProductCompatibilitySchema } from '../produc
 import { ProductModule } from '../product/product.module';
 import { GatewaysModule } from '../gateways/gateways.module';
 import { SyncResultConsumer } from './sync-result.consumer';
+import { ModerationModule } from '../moderation/moderation.module';
 
 /**
  * Backend half of the marketplace-sync contract. This module is NOT the orchestrator itself —
@@ -63,6 +64,7 @@ import { SyncResultConsumer } from './sync-result.consumer';
         UserProductivityModule,
         GatewaysModule,
         OutboxModule,
+        ModerationModule,
     ],
     controllers: [MarketplaceOrchestratorController],
     providers: [

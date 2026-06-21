@@ -6,6 +6,8 @@ import { CategoryDocument, CategoryModel } from '../../product/schemas/category.
 import { OrchestratorPublisherService } from '../orchestrator-publisher.service';
 import { ProductService } from '../../product/product.service';
 import { MarketplaceRegistryService } from '../../marketplace/services/marketplace-registry.service';
+import { ModerationRepository } from '../../moderation/moderation.repository';
+import { ModerationStateDocument } from '../../moderation/schemas/moderation-state.schema';
 
 @Injectable()
 export class MarketplaceIssuesService {
@@ -21,6 +23,7 @@ export class MarketplaceIssuesService {
         private readonly orchestratorPublisher: OrchestratorPublisherService,
         private readonly productService: ProductService,
         private readonly marketplaceRegistry: MarketplaceRegistryService,
+        private readonly moderationRepo: ModerationRepository,
     ) {}
 
     async listIssues(params: {
@@ -71,11 +74,14 @@ export class MarketplaceIssuesService {
                 .exec(),
             this.listingModel.countDocuments(query).exec(),
         ]);
-        const suggestedCategoryMap = await this.buildSuggestedInternalCategoryMap(items as any[]);
+        const stateMap = await this.moderationRepo.findOpenByListingIds(
+            (items as any[]).map((l) => String(l._id)),
+        );
+        const suggestedCategoryMap = await this.buildSuggestedInternalCategoryMap(items as any[], stateMap);
 
         return {
             items: items.map((l: any) => ({
-                ...this.buildIssueView(l, suggestedCategoryMap),
+                ...this.buildIssueView(l, suggestedCategoryMap, stateMap.get(String(l._id))),
             })),
             total,
             paging: { limit, offset },
@@ -98,8 +104,9 @@ export class MarketplaceIssuesService {
             .exec();
         if (!fresh) throw new NotFoundException(`Listing ${listingId} not found`);
 
-        const suggestedCategoryMap = await this.buildSuggestedInternalCategoryMap([fresh as any]);
-        const issueView = this.buildIssueView(fresh as any, suggestedCategoryMap);
+        const stateMap = await this.moderationRepo.findOpenByListingIds([String(fresh._id)]);
+        const suggestedCategoryMap = await this.buildSuggestedInternalCategoryMap([fresh as any], stateMap);
+        const issueView = this.buildIssueView(fresh as any, suggestedCategoryMap, stateMap.get(String(fresh._id)));
 
         return {
             ...issueView,
@@ -148,7 +155,7 @@ export class MarketplaceIssuesService {
         const listing = await this.listingModel.findById(listingId).exec();
         if (!listing) throw new NotFoundException(`Listing ${listingId} not found`);
 
-        const previousExternalId = listing.externalId || listing.marketplaceData?.closedExternalId || null;
+        const previousExternalId = listing.externalId || null;
         listing.externalId = null;
         listing.status = 'error';
         listing.synchronized = false;
@@ -156,8 +163,6 @@ export class MarketplaceIssuesService {
         listing.errorMessage = listing.errorMessage || 'Recreate requested manually';
         listing.marketplaceData = {
             ...listing.marketplaceData,
-            recreateRequired: true,
-            closedExternalId: previousExternalId,
             syncIssue: {
                 blocked: true,
                 issueKey: 'terminal_recreate_required',
@@ -189,42 +194,35 @@ export class MarketplaceIssuesService {
         };
     }
 
-    private buildIssueView(listing: any, suggestedCategoryMap: Map<string, any>) {
+    private buildIssueView(
+        listing: any,
+        suggestedCategoryMap: Map<string, any>,
+        state?: ModerationStateDocument,
+    ) {
         const classifier = String(listing.marketplaceData?.syncIssue?.classifier || '').toUpperCase();
-        const closedReason = String(listing.marketplaceData?.closedReason || '').toLowerCase();
-        const recreateRequiredRaw = listing.marketplaceData?.recreateRequired === true;
-        const recreateRequiredEffective =
-            recreateRequiredRaw &&
-            (classifier === 'TERMINAL_RECREATE' || (!classifier && closedReason === 'wrong_category'));
+        const recreateRequiredEffective = classifier === 'TERMINAL_RECREATE';
 
-        const isCompatibilityIssue = classifier === 'MISSING_COMPATIBILITIES';
-
-        const moderation = isCompatibilityIssue
+        // Moderation is sourced SOLELY from moderation_state — the listing carries only the
+        // operational syncIssue, never moderation evidence. No row → no moderation, full stop.
+        const moderation = state
             ? {
-                infractionId: listing.marketplaceData?.compatibilityModerationInfractionId || null,
-                filterSubgroup: listing.marketplaceData?.compatibilityModerationInfractionId ? 'COMPATS' : null,
-                reason: listing.marketplaceData?.compatibilityModerationReason || null,
-                remedy: listing.marketplaceData?.compatibilityModerationRemedy || null,
-                suggestedCategories: [],
-                suggestedInternalCategories: [],
-                blockedCategoryId: null,
-                at: listing.marketplaceData?.compatibilityModerationAt || null,
-            }
-            : {
-                infractionId: listing.marketplaceData?.moderationInfractionId || null,
-                filterSubgroup: listing.marketplaceData?.moderationFilterSubgroup || null,
-                reason: listing.marketplaceData?.moderationReason || null,
-                remedy: listing.marketplaceData?.moderationRemedy || null,
-                suggestedCategories: listing.marketplaceData?.moderationSuggestedCategories || [],
-                suggestedInternalCategories: (listing.marketplaceData?.moderationSuggestedCategories || [])
-                    .map((s: any) => suggestedCategoryMap.get(`${String(listing.marketplaceId)}:${String(s?.id || '')}`))
+                infractionId: state.infractionId || null,
+                filterSubgroup: state.subgroup || null,
+                type: state.type,
+                reason: state.reason || null,
+                remedy: state.remedy || null,
+                suggestedCategories: (state.suggestedCategories || []).map((c) => ({
+                    id: c.externalId,
+                    name: c.name,
+                    path: c.path,
+                })),
+                suggestedInternalCategories: (state.suggestedCategories || [])
+                    .map((c) => suggestedCategoryMap.get(`${String(listing.marketplaceId)}:${String(c.externalId)}`))
                     .filter(Boolean),
-                blockedCategoryId:
-                    listing.marketplaceData?.wrongCategoryOriginalCategoryId ||
-                    listing.marketplaceData?.syncMetadata?.itemCategoryId ||
-                    null,
-                at: listing.marketplaceData?.closedAt || null,
-            };
+                blockedCategoryId: state.blockedCategoryId || null,
+                at: state.detectedAt || null,
+            }
+            : null;
 
         return {
             listingId: String(listing._id),
@@ -238,24 +236,25 @@ export class MarketplaceIssuesService {
             syncMetadata: listing.marketplaceData?.syncMetadata || null,
             validationSummary: listing.marketplaceData?.syncMetadata?.validationSummary || null,
             moderation,
-            closedReason,
             recreateRequired: recreateRequiredEffective,
             lastSyncAt: listing.lastSyncAt || null,
             updatedAt: listing.updatedAt || null,
         };
     }
 
-    private async buildSuggestedInternalCategoryMap(listings: any[]): Promise<Map<string, any>> {
+    private async buildSuggestedInternalCategoryMap(
+        listings: any[],
+        stateMap: Map<string, ModerationStateDocument>,
+    ): Promise<Map<string, any>> {
         const byMarketplace = new Map<string, Set<string>>();
 
         for (const l of listings) {
             const mpId = String(l?.marketplaceId || '').trim();
             if (!mpId) continue;
-            const suggestions = Array.isArray(l?.marketplaceData?.moderationSuggestedCategories)
-                ? l.marketplaceData.moderationSuggestedCategories
-                : [];
+            const state = stateMap.get(String(l._id));
+            const suggestions = state?.suggestedCategories ?? [];
             for (const s of suggestions) {
-                const extId = String(s?.id || '').trim();
+                const extId = String(s?.externalId || '').trim();
                 if (!extId) continue;
                 if (!byMarketplace.has(mpId)) byMarketplace.set(mpId, new Set<string>());
                 byMarketplace.get(mpId)!.add(extId);

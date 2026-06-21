@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { MarketplaceModel } from '../../schemas/marketplace.schema';
 import { MarketplaceTokenBrokerService } from './marketplace-token-broker.service';
 import { TokenManagerService } from './token-manager.service';
@@ -21,6 +22,7 @@ import { MarketplaceConfigCacheService } from '../../services/marketplace-config
 describe('Auth subsystem DI graph (no forwardRef cycles)', () => {
   it('compila AuthService + TokenManager + Broker sem ciclo', async () => {
     const moduleRef = await Test.createTestingModule({
+      imports: [EventEmitterModule.forRoot()],
       providers: [
         MarketplaceAuthService,
         TokenManagerService,
