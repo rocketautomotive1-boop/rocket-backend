@@ -14,6 +14,10 @@ export class MercadoLivreAdapter implements WebhookAdapter {
     if (resource.startsWith('/packs/')) return { kind:'order_pack', eventId:`mercadolivre:packs:${resource}`, externalId:lastSeg(resource), resource, externalUserId, raw:ctx.payload };
     if (topic==='orders_v2'||resource.startsWith('/orders/')) return { kind:'order', eventId:`mercadolivre:orders_v2:${resource}`, externalId:lastSeg(resource), resource, externalUserId, raw:ctx.payload };
     if (topic==='questions'||resource.startsWith('/questions/')) return { kind:'question', eventId:`mercadolivre:questions:${resource}`, externalId:lastSeg(resource), resource, externalUserId, raw:ctx.payload };
+    // `items` is the only signal ML gives for moderation (no `moderations` topic exists): a
+    // moderated listing changes sub_status → fires `items`. Treat it as a low-latency probe;
+    // the moderation module checks /infractions for this item (no-op if there's none).
+    if (topic==='items'||resource.startsWith('/items/')) return { kind:'moderation', eventId:`mercadolivre:items:${resource}`, externalId:lastSeg(resource), resource, externalUserId, raw:ctx.payload };
     return { kind:'ignore', eventId:`mercadolivre:${topic}:${resource}`, resource, externalUserId, raw:ctx.payload };
   }
 }

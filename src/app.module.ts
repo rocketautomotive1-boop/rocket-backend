@@ -10,6 +10,7 @@ import { QueueModule } from './queue/queue.module';
 import { RabbitMqModule } from './common/rabbitmq/rabbitmq.module';
 import { AuthModule } from './auth/auth.module';
 import { WebhookModule } from './webhook/webhook.module';
+import { ModerationModule } from './moderation/moderation.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { StatsModule } from './stats/stats.module';
 import { CompatibilityModule } from './compatibility/compatibility.module';
@@ -90,6 +91,7 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
     RabbitMqModule,
     AuthModule,
     WebhookModule,
+    ModerationModule,
     MonitoringModule,
     StatsModule,
     CompatibilityModule,

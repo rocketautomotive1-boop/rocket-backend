@@ -2,7 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 export type WebhookInboxDocument = HydratedDocument<WebhookInboxModel>;
 export type WebhookInboxStatus = 'pending' | 'processing' | 'done' | 'failed' | 'dead';
-export type WebhookInboxKind = 'order' | 'order_pack' | 'question' | 'unparseable';
+export type WebhookInboxKind = 'order' | 'order_pack' | 'question' | 'moderation' | 'unparseable';
 @Schema({ collection: 'webhook_inbox', timestamps: true })
 export class WebhookInboxModel {
   @Prop({ required: true, index: true }) marketplace: string;

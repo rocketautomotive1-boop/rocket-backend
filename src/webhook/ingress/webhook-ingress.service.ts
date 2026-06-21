@@ -22,7 +22,7 @@ export class WebhookIngressService {
       return { success: true };
     }
     if (normalized.kind === 'ignore') return { success: true };
-    const idRequiringKinds = ['order', 'order_pack', 'question'];
+    const idRequiringKinds = ['order', 'order_pack', 'question', 'moderation'];
     if (
       idRequiringKinds.includes(normalized.kind) &&
       (!normalized.externalId || normalized.externalId.trim() === '')
