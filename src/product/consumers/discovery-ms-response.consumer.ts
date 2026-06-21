@@ -5,6 +5,7 @@ import { Model } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CategoryResolutionService } from '../services/category-resolution.service';
 import { DiscoveryRealtimeEvent, DiscoveryRealtimeStatus } from '../types/discovery-realtime-event';
+import { mapDiscoveryDocToAppData } from '../dto/discovery-app.mapper';
 
 @Injectable()
 export class DiscoveryMsResponseConsumer {
@@ -169,13 +170,14 @@ export class DiscoveryMsResponseConsumer {
 
         const realtimeStatus: DiscoveryRealtimeStatus = status === 'completed' ? 'COMPLETED' : 'FAILED';
 
+        // Emite EXATAMENTE o mesmo shape normalizado do REST (DiscoveryAppData),
+        // para o frontend ter um contrato único — sem dialeto cru no WebSocket.
         const eventResult = realtimeStatus === 'COMPLETED'
-            ? {
-                ...updateData.final,
-                // Attach rawItems so frontend can populate inventory without a REST fetch
-                rawItems: updateData.sources?.mercadolivre?.items ?? [],
-                resolvedCategoryId: updateData.resolvedCategoryId ?? null,
-              }
+            ? mapDiscoveryDocToAppData({
+                final: updateData.final,
+                sources: updateData.sources,
+                resolvedCategoryId: updateData.resolvedCategoryId,
+              })
             : undefined;
 
         const event: DiscoveryRealtimeEvent = {

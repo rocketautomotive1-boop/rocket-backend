@@ -2,7 +2,6 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { SearchService } from '../search/search.service';
 import { ProductRepository } from '../product/product.repository';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
 import { InjectModel } from '@nestjs/mongoose';
@@ -18,7 +17,6 @@ export class AiService {
 
     constructor(
         private readonly configService: ConfigService,
-        @Inject(forwardRef(() => SearchService)) private readonly searchService: SearchService,
         @InjectModel(UserModel.name) private userModel: Model<UserDocument>,
         @InjectModel(VehicleModel.name) private vehicleModel: Model<VehicleDocument>,
         private readonly productRepository: ProductRepository,
@@ -182,9 +180,12 @@ export class AiService {
 
                         if (searchQuery) {
                             this.logger.log(`Searching item: ${searchQuery}`);
-                            // Buscando produtos
-                            const searchResult: any = await this.searchService.search(searchQuery);
-                            const searchResults = searchResult.data || [];
+                            // Buscando produtos (MongoDB regex - Elasticsearch removido)
+                            const regex = new RegExp(searchQuery.trim().split(/\s+/).map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'i');
+                            const searchResults = await this.productRepository.findAllClean(
+                                { active: true, $or: [{ name: regex }, { partNumber: regex }] },
+                                { limit: 2 }
+                            );
                             // Take top 2 results for each item to build the "Counter"
                             productsFound.push(...searchResults.slice(0, 2));
                         }

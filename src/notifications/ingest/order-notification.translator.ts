@@ -89,10 +89,18 @@ export class OrderNotificationTranslator {
     };
     this.emitter.emit(NOTIFICATION_EVENTS.REQUESTED, req);
 
-    // Notificação WhatsApp de cancelamento só para cancelamentos vindos de webhook.
-    if (event.triggeredBy === 'webhook') {
+    // WhatsApp dispara em detecções REAL-TIME (webhook/reconcile/gap-detector): o reconciler
+    // existe para pegar o que o webhook perdeu, então um cancelamento que ele detecta é tão
+    // real quanto um de webhook. Só 'sync' (fix em massa) fica silencioso. A deduplicationKey
+    // abaixo evita duplicar caso webhook e reconcile peguem o mesmo cancelamento.
+    if (event.triggeredBy !== 'sync') {
       const waBody = formatCancellationMessage({
         externalId: event.externalId,
+        marketplace: event.marketplaceName,
+        soldAt: event.soldAt,
+        firstItemTitle: event.firstItemTitle,
+        firstQty: event.firstQty,
+        extraItemsCount: event.extraItemsCount,
         totalAmount: event.totalAmount,
         cancelledBy: event.cancelledBy,
         cancelReason: event.cancelReason,
@@ -104,7 +112,7 @@ export class OrderNotificationTranslator {
         severity: 'warning',
         channels: ['whatsapp'],
         deduplicationKey: `order.cancelled.whatsapp:${event.marketplaceId}:${event.externalId}`,
-        source: 'webhook',
+        source: event.triggeredBy as any,
         data: { externalId: event.externalId },
       } as NotificationRequested);
     }

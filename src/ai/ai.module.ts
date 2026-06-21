@@ -1,7 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
-import { SearchModule } from '../search/search.module';
 import { ProductModule } from '../product/product.module';
 import { AiBatchController } from './ai-batch.controller';
 import { AiBatchService } from './ai-batch.service';
@@ -19,7 +18,6 @@ import { OpenAiImageClient } from './openai-image.client';
 @Module({
   imports: [
     ConfigModule,
-    forwardRef(() => SearchModule),
     forwardRef(() => ProductModule),
     S3Module,
     ProcessedImageModule,

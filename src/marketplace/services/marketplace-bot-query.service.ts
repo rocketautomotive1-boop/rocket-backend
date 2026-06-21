@@ -2,9 +2,19 @@ import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { MercadoLivreAuthAdapter } from '../adapters/mercado-livre/mercado-livre-auth.adapter';
 import { BalanceQueryPort } from '../../notifications/bot/ports/bot-query.ports';
+import { MercadoPagoBalanceService } from '../../mercado-pago/mercado-pago-balance.service';
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+
+const relativeAge = (date: Date | null): string => {
+  if (!date) return 'ainda não atualizado';
+  const mins = Math.round((Date.now() - date.getTime()) / 60_000);
+  if (mins < 1) return 'agora';
+  if (mins < 60) return `há ${mins} min`;
+  const hours = Math.round(mins / 60);
+  return `há ${hours} h`;
+};
 
 const truncate = (s: string, max = 40) => (s.length > max ? s.slice(0, max - 1) + '…' : s);
 
@@ -26,33 +36,33 @@ export class MarketplaceBotQueryService implements BalanceQueryPort {
   private readonly mpBaseUrl = 'https://api.mercadopago.com';
   private readonly ML_NAME = 'Mercado Livre';
 
-  constructor(private readonly mlAuth: MercadoLivreAuthAdapter) {}
+  constructor(
+    private readonly mlAuth: MercadoLivreAuthAdapter,
+    private readonly mpBalance: MercadoPagoBalanceService,
+  ) {}
 
+  /**
+   * Saldo Mercado Pago para o bot. A fonte é o MercadoPagoBalanceService (módulo
+   * dedicado); aqui apenas formatamos o texto. O disponível vem do cache do
+   * release_report (atualizado por job); o a-liberar é calculado ao vivo.
+   */
   async getMlBalance(): Promise<string> {
     try {
-      const token = await this.mlAuth.getValidToken(this.ML_NAME);
-      const userId = await this.mlAuth.getUserId(this.ML_NAME);
-      const headers = { Authorization: `Bearer ${token}` };
-
-      const { data: balance } = await axios.get(
-        `${this.mpBaseUrl}/users/${userId}/mercadopago_account/balance`,
-        { headers },
-      );
-
-      const available = Number(balance.available_balance ?? 0);
-      const unavailable = Number(balance.unavailable_balance ?? 0);
-      const total = Number(balance.total_amount ?? available + unavailable);
+      const { available, pending, total, availableCapturedAt } =
+        await this.mpBalance.getBalance();
 
       return [
         `💰 *Saldo Mercado Pago*`,
         `✅ Disponível: ${fmt(available)}`,
-        `⏳ A liberar: ${fmt(unavailable)}`,
+        `⏳ A liberar: ${fmt(pending)}`,
         `💵 Total: ${fmt(total)}`,
+        ``,
+        `_Disponível atualizado ${relativeAge(availableCapturedAt)}._`,
       ].join('\n');
     } catch (err) {
       const message = this.toReadableMessage(err);
       this.logger.error(`getMlBalance failed: ${message}`);
-      return `❌ Não foi possível buscar o saldo do Mercado Livre: ${message}`;
+      return `❌ Não foi possível buscar o saldo do Mercado Pago: ${message}`;
     }
   }
 

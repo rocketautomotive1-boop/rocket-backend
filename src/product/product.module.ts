@@ -2,7 +2,6 @@ import { Module, forwardRef } from '@nestjs/common';
 
 import { MongooseModule } from '@nestjs/mongoose';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { ElasticsearchModule } from '@nestjs/elasticsearch';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { SearchModule } from '../search/search.module';
 
@@ -79,7 +78,6 @@ import { BoxItemService } from './services/box-item.service';
 import { BoxItemController } from './controllers/box-item.controller';
 import { ProductPublicationLogService } from './services/product-publication-log.service';
 import { ProductPublicationLogController } from './controllers/product-publication-log.controller';
-import { ProductSyncService } from './services/product-sync.service';
 import { OrderEventsListener } from './listeners/order-events.listener';
 import { MigrationService } from './services/migration.service';
 import { MigrationController } from './controllers/migration.controller';
@@ -199,7 +197,6 @@ import { PricingModule } from '../pricing/pricing.module';
     BoxService,
     BoxItemService,
     ProductPublicationLogService,
-    ProductSyncService,
     OrderEventsListener, // Event listener for order sync
     MigrationService,
     CrossReferenceService,
@@ -238,7 +235,6 @@ import { PricingModule } from '../pricing/pricing.module';
     BoxService,
     BoxItemService,
     ProductPublicationLogService,
-    ProductSyncService,
     MigrationService,
     CrossReferenceService,
     CatalogMigrationService,

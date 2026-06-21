@@ -242,9 +242,11 @@ export class OrderSyncPipeline {
 
         // ── PASSO 3: PUBLISH (pós-commit) ─────────────────────────────────────
         if (!isConfirmedSale) {
-            // Direct cancellation (never deducted) — only notify, no stock revert
-            if ((orderData.status ?? '').toLowerCase() === 'cancelled' && source === 'webhook') {
+            // Direct cancellation (never deducted) — only notify, no stock revert.
+            // Real-time (webhook/reconcile/gap-detector) notifica; só 'sync' fica silencioso.
+            if ((orderData.status ?? '').toLowerCase() === 'cancelled' && source !== 'sync') {
                 const cancelDetail = externalOrder.original_data?.cancel_detail ?? externalOrder.cancel_detail ?? null;
+                const ctx = this.cancelItemContext(savedOrder.items, orderData.marketplaceCreatedAt);
                 const event = new OrderCancelledEvent(
                     savedOrder._id.toString(),
                     externalId,
@@ -254,7 +256,11 @@ export class OrderSyncPipeline {
                     cancelDetail?.description ?? cancelDetail?.code ?? null,
                     cancelDetail?.requested_by ?? cancelDetail?.group ?? null,
                     false,
-                    source as 'webhook' | 'sync',
+                    source as any,
+                    ctx.firstItemTitle,
+                    ctx.firstQty,
+                    ctx.extraItemsCount,
+                    ctx.soldAt,
                 );
                 this.eventEmitter.emit(ORDER_EVENTS.CANCELLED, event);
             }
@@ -332,6 +338,7 @@ export class OrderSyncPipeline {
             },
         });
 
+        const ctx = this.cancelItemContext(existing.items, (existing as any).marketplaceCreatedAt);
         const event = new OrderCancelledEvent(
             existing._id.toString(),
             externalId,
@@ -341,8 +348,29 @@ export class OrderSyncPipeline {
             cancelDetail?.description ?? cancelDetail?.code ?? null,
             cancelDetail?.requested_by ?? cancelDetail?.group ?? null,
             stockReverted,
-            source as 'webhook' | 'sync',
+            source as any,
+            ctx.firstItemTitle,
+            ctx.firstQty,
+            ctx.extraItemsCount,
+            ctx.soldAt,
         );
         this.eventEmitter.emit(ORDER_EVENTS.CANCELLED, event);
+    }
+
+    /** Extrai contexto do 1º item + data real da venda para a mensagem de cancelamento. */
+    private cancelItemContext(
+        items: Array<{ title?: string; quantity?: number }> | undefined,
+        marketplaceCreatedAt?: Date | string | null,
+    ): { firstItemTitle?: string; firstQty?: number; extraItemsCount?: number; soldAt?: string | null } {
+        const list = items ?? [];
+        const first = list[0];
+        return {
+            firstItemTitle: first?.title,
+            firstQty: first?.quantity,
+            extraItemsCount: Math.max(0, list.length - 1),
+            soldAt: marketplaceCreatedAt
+                ? new Date(marketplaceCreatedAt).toISOString()
+                : null,
+        };
     }
 }

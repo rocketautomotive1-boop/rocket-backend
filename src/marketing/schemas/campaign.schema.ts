@@ -5,7 +5,7 @@ export type CampaignDocument = Campaign & Document;
 
 export enum CampaignType {
     MANUAL_SELECTION = 'manual_selection',
-    AUTO_QUERY = 'auto_query', // Uses Elasticsearch query
+    AUTO_QUERY = 'auto_query', // Uses MongoDB regex query
 }
 
 @Schema({ timestamps: true })

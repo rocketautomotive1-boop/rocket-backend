@@ -13,11 +13,14 @@ describe('DiscoveryMsResponseConsumer — sources.menorPreco', () => {
             }),
         };
         const eventEmitter = { emit: jest.fn() };
-        const categoryResolution = { resolve: jest.fn().mockResolvedValue(null) };
+        const categoryResolution = {
+            resolve: jest.fn().mockResolvedValue(null),
+            resolveByExternalId: jest.fn().mockResolvedValue(null),
+        };
         const consumer = new DiscoveryMsResponseConsumer(
             discoveryModel, eventEmitter as any, categoryResolution as any,
         );
-        return { consumer, setCalls };
+        return { consumer, setCalls, eventEmitter };
     }
 
     it('persiste sources.menorPreco a partir de results.menorPreco', async () => {
@@ -55,5 +58,36 @@ describe('DiscoveryMsResponseConsumer — sources.menorPreco', () => {
         const persisted = setCalls.find((s) => s.sources)?.sources;
         expect(persisted.menorPreco.offers).toEqual([]);
         expect(persisted.menorPreco.confidence).toBe('none');
+    });
+
+    it('emite queue.job.update no contrato normalizado (DiscoveryAppData), não no shape cru', async () => {
+        const { consumer, eventEmitter } = makeConsumer();
+        await consumer.handleResponse({
+            jobId: 'job3',
+            status: 'completed',
+            scrapedAt: new Date().toISOString(),
+            results: {
+                titles: ['Filtro X'],
+                mercadolivre: {
+                    items: [{ id: 'MLB1', images: ['http://img/1.jpg'] }],
+                    breadcrumb: 'Acessórios > Filtros',
+                },
+                serp: { items: [] },
+            },
+        });
+
+        const completion = (eventEmitter.emit as jest.Mock).mock.calls.find(
+            ([name, ev]) => name === 'queue.job.update' && ev?.status === 'COMPLETED',
+        );
+        expect(completion).toBeDefined();
+        const result = completion![1].result;
+
+        // Contrato único: chaves normalizadas, sem dialeto cru.
+        expect(result.titles).toEqual(['Filtro X']);
+        expect(result.breadcrumbPath).toBe('Acessórios > Filtros');
+        expect(result.winningSource).toBe('mercadolivre'); // não `preferredSource`
+        expect(result.rawItems).toHaveLength(1);
+        expect(result).not.toHaveProperty('preferredSource');
+        expect(result).not.toHaveProperty('breadcrumb');
     });
 });

@@ -121,7 +121,7 @@ export class QueueService {
       } catch (err) {
         console.error(`[QueueService] Error emitting ${pattern} to PRODUCT_SERVICE:`, err);
       }
-    } else if (pattern.startsWith('marketplace-') || pattern === 'orders-sync') {
+    } else if (pattern.startsWith('marketplace-')) {
       try {
         await lastValueFrom(this.marketplaceClient.emit(pattern, payload.data).pipe(timeout(2000)));
       } catch (err) {

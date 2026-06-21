@@ -1,9 +1,8 @@
-import { Injectable, Logger, ConflictException, NotFoundException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, ConflictException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ReviewModel, ReviewDocument } from '../schemas/review.schema';
 import { ProductModel, ProductDocument } from '../schemas/product.schema';
-import { SearchService } from '../../search/search.service';
 
 @Injectable()
 export class ReviewsService {
@@ -12,8 +11,6 @@ export class ReviewsService {
     constructor(
         @InjectModel(ReviewModel.name) private reviewModel: Model<ReviewDocument>,
         @InjectModel(ProductModel.name) private productModel: Model<ProductDocument>,
-        @Inject(forwardRef(() => SearchService))
-        private readonly searchService: SearchService
     ) { }
 
     async create(productId: string, userId: string, rating: number, comment: string, photos: string[] = []) {
@@ -82,26 +79,18 @@ export class ReviewsService {
                 }
             ]);
 
-            let updatedProduct: ProductDocument | null = null;
-
             if (stats.length > 0) {
                 const { avgRating, count } = stats[0];
-                updatedProduct = await this.productModel.findByIdAndUpdate(productId, {
+                await this.productModel.findByIdAndUpdate(productId, {
                     ratingAverage: parseFloat(avgRating.toFixed(1)), // 1 decimal place
                     ratingCount: count
-                }, { new: true });
+                });
             } else {
                 // If last review deleted
-                updatedProduct = await this.productModel.findByIdAndUpdate(productId, {
+                await this.productModel.findByIdAndUpdate(productId, {
                     ratingAverage: 0,
                     ratingCount: 0
-                }, { new: true });
-            }
-
-            if (updatedProduct) {
-                // Sync to Elasticsearch with new Ratings + Existing Data
-                // Note: indexProduct will refetch compatibilities/cross-refs automatically
-                await this.searchService.indexProduct(updatedProduct);
+                });
             }
 
         } catch (error) {

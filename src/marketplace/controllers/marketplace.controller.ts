@@ -467,14 +467,6 @@ export class MarketplaceController {
     return this.marketplaceOrderService.ignoreOrder(marketplaceIdRaw, orderId);
   }
 
-  @Post(':marketplaceId/orders/sync-movements')
-  async syncOrdersToMovements(
-    @Param('marketplaceId') marketplaceId: string,
-    @Body() body: any
-  ) {
-    return this.marketplaceOrderService.syncOrdersToMovements(marketplaceId, body || {});
-  }
-
   // attach-fiscal moved to OrderController (POST /marketplaces/:marketplaceId/orders/:orderId/attach-fiscal)
   // so the marketplace module no longer depends on the order module (cycle removed).
 

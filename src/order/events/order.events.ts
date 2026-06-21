@@ -70,7 +70,14 @@ export class OrderCancelledEvent {
         public readonly cancelReason: string | null,
         public readonly cancelledBy: string | null, // 'buyer' | 'seller' | 'system'
         public readonly stockReverted: boolean,
-        public readonly triggeredBy: 'webhook' | 'sync',
+        // Fonte da detecção. 'webhook'/'reconcile'/'gap-detector' = real-time (notifica
+        // WhatsApp); 'sync' = fix em massa (silencioso). Mantido como string ampla.
+        public readonly triggeredBy: 'webhook' | 'reconcile' | 'gap-detector' | 'sync',
+        // Contexto autocontido p/ a mensagem (notifications não lê OrderModel).
+        public readonly firstItemTitle?: string,
+        public readonly firstQty?: number,
+        public readonly extraItemsCount?: number,
+        public readonly soldAt?: string | null, // marketplaceCreatedAt (data real da venda)
     ) {}
 }
 

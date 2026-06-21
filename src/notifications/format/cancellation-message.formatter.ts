@@ -1,8 +1,17 @@
 /**
  * Formatação pura da mensagem de cancelamento em markdown WhatsApp.
+ * Recebe um payload já resolvido (itens + contexto) pelo domínio (order/) — o tradutor
+ * NÃO lê o banco; espelha a convenção da mensagem de venda (sale-message.formatter).
  */
 export interface CancellationMessagePayload {
   externalId: string;
+  marketplace: string;
+  /** Data real da venda no marketplace (marketplaceCreatedAt). ISO/Date. */
+  soldAt?: string | Date | null;
+  firstItemTitle?: string;
+  firstQty?: number;
+  /** Quantos itens além do primeiro o pedido tinha. */
+  extraItemsCount?: number;
   totalAmount: number;
   cancelledBy: string | null;
   cancelReason: string | null;
@@ -24,22 +33,46 @@ const CANCEL_REASON_LABELS: Record<string, string> = {
   'There is a mediation with status cancel_purchase': 'Mediação de cancelamento',
 };
 
+// ML usa 'buyer'/'seller'/'respondent' (e grupos como 'buyer'/'seller'/'system') para
+// quem pediu o cancelamento. 'respondent' = quem respondeu à mediação = o vendedor.
+const CANCELLED_BY_LABELS: Record<string, string> = {
+  buyer: 'Comprador',
+  seller: 'Vendedor',
+  respondent: 'Vendedor',
+  collector: 'Vendedor',
+  system: 'Sistema',
+  admin: 'Mercado Livre',
+};
+
 export function formatCancellationMessage(p: CancellationMessagePayload): string {
   const reasonRaw = p.cancelReason ?? '';
   const reason = CANCEL_REASON_LABELS[reasonRaw] ?? (reasonRaw || 'Não informado');
-  const cancelledBy =
-    p.cancelledBy === 'buyer' ? 'Comprador' :
-    p.cancelledBy === 'seller' ? 'Vendedor' :
-    p.cancelledBy ?? 'Sistema';
+
+  const byRaw = (p.cancelledBy ?? '').toLowerCase();
+  const cancelledBy = CANCELLED_BY_LABELS[byRaw] ?? (p.cancelledBy || 'Sistema');
+
+  const itemBlock: string[] = [];
+  if (p.firstItemTitle) {
+    itemBlock.push(``, `*${p.firstItemTitle}*`);
+    if ((p.extraItemsCount ?? 0) > 0) itemBlock.push(`(+ ${p.extraItemsCount} item(ns))`);
+    if (p.firstQty != null) itemBlock.push(`Quantidade: ${p.firstQty}`);
+  }
+
+  const dateLine = p.soldAt
+    ? [`📅 Venda: ${new Date(p.soldAt).toLocaleDateString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`]
+    : [];
 
   const lines = [
-    `❌ *Pedido Cancelado*`,
+    `❌ *PEDIDO CANCELADO*`,
+    `🏪 Marketplace: ${(p.marketplace ?? '').toUpperCase()}`,
+    ...dateLine,
+    ...itemBlock,
     ``,
-    `📦 Pedido: ${p.externalId}`,
     `💰 Valor: ${fmt(p.totalAmount)}`,
     `👤 Cancelado por: ${cancelledBy}`,
     `📋 Motivo: ${reason}`,
     ...(p.stockReverted ? [`♻️ Estoque revertido automaticamente`] : []),
+    `🔗 Pedido: ${p.externalId}`,
   ];
 
   return lines.join('\n');

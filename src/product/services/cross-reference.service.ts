@@ -3,7 +3,6 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CrossReferenceGroupModel, CrossReferenceGroupDocument } from '../schemas/cross-reference-group.schema';
 import { ProductService } from '../product.service';
-import { SearchService } from '../../search/search.service';
 import { ProductModel, ProductDocument } from '../schemas/product.schema';
 
 @Injectable()
@@ -17,8 +16,6 @@ export class CrossReferenceService {
         private readonly productModel: Model<ProductDocument>, // Injected directly for bulk updates
         @Inject(forwardRef(() => ProductService))
         private readonly productService: ProductService,
-        @Inject(forwardRef(() => SearchService))
-        private readonly searchService: SearchService,
     ) { }
 
     async findGroupById(id: string): Promise<CrossReferenceGroupDocument> {
@@ -60,9 +57,6 @@ export class CrossReferenceService {
             product.oemCodes = group.codes.map(c => c.partNumber);
         }
         await (product as any).save();
-
-        // Trigger Index Update
-        await this.searchService.indexProduct(product);
     }
 
     /**
@@ -137,22 +131,10 @@ export class CrossReferenceService {
     private async handleGroupUpdate(group: CrossReferenceGroupDocument) {
         const allCodes = group.codes.map(c => c.partNumber);
 
-        // 1. Bulk Update Mongo
+        // Bulk Update Mongo
         await this.productModel.updateMany(
             { crossReferenceGroupId: group._id },
             { $set: { oemCodes: allCodes } }
         );
-
-        // 2. Re-index in Elastic
-        // Fetch all IDs to re-index one by one (safer for triggers) or bulk.
-        // For simplicity and safety, we rely on the scheduled sync or individual triggers, 
-        // OR we fetch and trigger re-index loop here.
-        const products = await this.productModel.find({ crossReferenceGroupId: group._id });
-        for (const prod of products) {
-            // Re-fetch to get new state is redundant if we passed data, but indexProduct expects Doc.
-            // Since we did updateMany, 'prod' here MIGHT be stale if not careful? 
-            // Actually 'find' *after* 'updateMany' returns updated docs.
-            await this.searchService.indexProduct(prod);
-        }
     }
 }

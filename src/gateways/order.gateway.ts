@@ -56,24 +56,6 @@ export class OrderGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.logger.debug(`[OrderGateway] Broadcasted orderProcessed: ${event.externalId}`);
     }
 
-    @OnEvent(ORDER_EVENTS.SYNC_COMPLETED)
-    handleSyncCompleted(event: any) {
-        this.server.to('order_updates').emit('orderSyncCompleted', {
-            externalId: event.externalId,
-            marketplaceId: event.marketplaceId,
-            timestamp: new Date(),
-        });
-        this.logger.log(`[OrderGateway] Broadcasted orderSyncCompleted: ${event.externalId}`);
-    }
-
-    @OnEvent(ORDER_EVENTS.SYNC_FAILED)
-    handleSyncFailed(event: any) {
-        this.server.to('order_updates').emit('orderSyncFailed', {
-            externalId: event.externalId,
-            marketplaceId: event.marketplaceId,
-            error: event.error,
-            timestamp: new Date(),
-        });
-        this.logger.warn(`[OrderGateway] Broadcasted orderSyncFailed: ${event.externalId} — ${event.error}`);
-    }
+    // Listeners SYNC_COMPLETED/FAILED removidos: vinham só do caminho de fila aposentado
+    // (OrderSyncProcessor). O sync manual hoje é ingest direto + polling de syncedAt no app.
 }

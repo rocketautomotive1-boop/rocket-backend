@@ -178,6 +178,14 @@ export class OrderModel {
     @Prop()
     syncedAt: Date;
 
+    /**
+     * Data real de criação do pedido NO MARKETPLACE (ML date_created etc.). Distinta de
+     * `createdAt` (timestamps), que é o momento da nossa ingestão. Indexada para filtros
+     * e relatórios de vendas por data de venda real. Ausente em pedidos legados.
+     */
+    @Prop({ index: true })
+    marketplaceCreatedAt?: Date;
+
     @Prop({ type: SchemaFactory.createForClass(OrderPricingSnapshot) })
     pricing?: OrderPricingSnapshot; // Pricing calculation snapshot
 

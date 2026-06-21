@@ -5,6 +5,7 @@ import { MarketplaceTokenBrokerService, canonicalDomain } from './marketplace-to
 import { MarketplaceCredentialsService } from '../../credentials/marketplace-credentials.service';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
 import { MarketplaceConfigCacheService } from '../../services/marketplace-config-cache.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { encrypt } from '../../credentials/credentials-crypto.helper';
 
 /**
@@ -55,6 +56,7 @@ describe('MarketplaceTokenBrokerService', () => {
         { provide: MarketplaceCredentialsService, useValue: { get: jest.fn().mockResolvedValue(undefined) } },
         { provide: MarketplaceAdapterRegistry, useValue: registry },
         { provide: MarketplaceConfigCacheService, useValue: { resolveId: jest.fn().mockResolvedValue(null), invalidate: jest.fn() } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 

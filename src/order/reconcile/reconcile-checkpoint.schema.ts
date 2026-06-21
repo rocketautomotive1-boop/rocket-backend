@@ -10,7 +10,7 @@ export type ReconcileCheckpointDocument = HydratedDocument<ReconcileCheckpointMo
  */
 @Schema({ collection: 'reconcile_checkpoints', timestamps: true })
 export class ReconcileCheckpointModel {
-  @Prop({ required: true, index: true })
+  @Prop({ required: true })
   marketplaceId: string;
 
   /** Conta multi-client. Ausente (null) = checkpoint da conta default/legado. */

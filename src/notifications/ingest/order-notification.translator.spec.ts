@@ -28,4 +28,33 @@ describe('OrderNotificationTranslator', () => {
       type: 'order.cancelled', aggregateType: 'order', severity: 'warning',
     }));
   });
+
+  // Helper: encontra a NotificationRequested de canal WhatsApp entre as emissões.
+  const whatsappCall = (spy: jest.SpyInstance) =>
+    spy.mock.calls.find(
+      ([evt, req]: any[]) =>
+        evt === NOTIFICATION_EVENTS.REQUESTED && req?.channels?.includes('whatsapp'),
+    );
+
+  it('dispara WhatsApp de cancelamento quando detectado pelo RECONCILER', () => {
+    const emitter = new EventEmitter2();
+    const spy = jest.spyOn(emitter, 'emit');
+    new OrderNotificationTranslator(emitter).onCancelled({
+      orderId: 'o1', externalId: 'EXT', marketplaceId: 'm1', marketplaceName: 'ML',
+      totalAmount: 100, cancelReason: 'x', cancelledBy: 'buyer', stockReverted: true,
+      triggeredBy: 'reconcile',
+    } as any);
+    expect(whatsappCall(spy)).toBeDefined();
+  });
+
+  it('NÃO dispara WhatsApp de cancelamento em fix em massa (sync)', () => {
+    const emitter = new EventEmitter2();
+    const spy = jest.spyOn(emitter, 'emit');
+    new OrderNotificationTranslator(emitter).onCancelled({
+      orderId: 'o1', externalId: 'EXT', marketplaceId: 'm1', marketplaceName: 'ML',
+      totalAmount: 100, cancelReason: 'x', cancelledBy: 'buyer', stockReverted: true,
+      triggeredBy: 'sync',
+    } as any);
+    expect(whatsappCall(spy)).toBeUndefined();
+  });
 });

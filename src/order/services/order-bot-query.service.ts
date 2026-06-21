@@ -36,7 +36,15 @@ export class OrderBotQueryService implements SalesQueryPort {
       const since = this.periodStart(period);
 
       const rows: SalesRow[] = await this.orderModel.aggregate([
-        { $match: { status: { $in: PAID_STATUSES }, createdAt: { $gte: since } } },
+        {
+          // Filtra pela DATA REAL da venda no marketplace (marketplaceCreatedAt), não pela
+          // data de ingestão (createdAt) — pedidos reconciliados são gravados hoje mas
+          // foram vendidos antes. Legados sem marketplaceCreatedAt caem no createdAt.
+          $match: {
+            status: { $in: PAID_STATUSES },
+            $expr: { $gte: [{ $ifNull: ['$marketplaceCreatedAt', '$createdAt'] }, since] },
+          },
+        },
         { $lookup: { from: 'marketplaces', localField: 'marketplaceId', foreignField: '_id', as: 'mkt' } },
         {
           $group: {

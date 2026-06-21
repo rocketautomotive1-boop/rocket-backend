@@ -138,7 +138,7 @@ export class ProductCategoryController {
   }
 
   @Get('es-tree')
-  @ApiOperation({ summary: 'Obter árvore de categorias via Elasticsearch' })
+  @ApiOperation({ summary: 'Obter árvore de categorias (MongoDB Atlas Search)' })
   async getEsTree() {
     return this.productCategoryService.getEsTree();
   }

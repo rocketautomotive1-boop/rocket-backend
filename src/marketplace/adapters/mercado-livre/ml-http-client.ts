@@ -4,6 +4,8 @@ import {
   HttpRequestSpec,
   SignedRequest,
 } from '../shared/marketplace-http-client';
+import { AuthRetryService } from '../shared/auth-retry.service';
+import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
 import { ResolvedToken } from '../../auth/services/token-manager.service';
 
 /**
@@ -12,6 +14,13 @@ import { ResolvedToken } from '../../auth/services/token-manager.service';
  */
 @Injectable()
 export class MlHttpClient extends MarketplaceHttpClient {
+  // Constructor explícito OBRIGATÓRIO: sem ele, a subclasse @Injectable() não
+  // emite design:paramtypes e o Nest instancia sem deps (authRetry/registry
+  // viram undefined → "Cannot read properties of undefined (reading 'findByName')").
+  constructor(authRetry: AuthRetryService, marketplaceRegistry: MarketplaceRegistryService) {
+    super(authRetry, marketplaceRegistry);
+  }
+
   protected marketplaceName(): string {
     return 'Mercado Livre';
   }

@@ -267,118 +267,13 @@ export class MarketplaceOrderService {
         return ignored.save();
     }
 
-    async syncOrdersToMovements(
-        marketplaceId: string,
-        params?: { status?: string; limit?: number; offset?: number; batchSize?: number; orderIds?: string[]; orders?: any[] }
-    ): Promise<any> {
-        const marketplace = await this.registryService.findOne(marketplaceId);
-        if (!marketplace) throw new BadRequestException(`Marketplace ID ${marketplaceId} não encontrado`);
-
-        if (params?.orders && Array.isArray(params.orders) && params.orders.length > 0) {
-            return this.processOrdersSync(params.orders, marketplace, params.batchSize);
-        }
-
-        const adapter = this.adapterRegistry.getOrderAdapter(marketplace.name);
-        let orders: StandardOrder[] = [];
-
-        if (params?.orderIds && params.orderIds.length > 0) {
-            for (const orderId of params.orderIds) {
-                try {
-                    const detail = await adapter.getOrderDetails(orderId);
-                    if (detail) orders.push(detail);
-                } catch (e) {
-                    this.logger.error(`Failed to fetch ${marketplace.name} order detail for ${orderId}: ${e.message}`);
-                }
-            }
-        } else {
-            orders = await adapter.getOrders({
-                status: params?.status,
-                limit: params?.limit,
-                offset: params?.offset
-            });
-        }
-
-        return this.processOrdersSync(orders, marketplace, params?.batchSize);
-    }
-
     hasOrderAdapter(marketplaceName: string): boolean {
         return this.adapterRegistry.hasOrderAdapter(marketplaceName);
     }
 
-    private async processOrdersSync(orders: any[], marketplace: any, batchSizeParam?: number) {
-        const results: any[] = [];
-        let movementsCreated = 0;
-        const mId = marketplace._id;
-
-        const flatItems: Array<{ orderId: string; externalId: string; qty: number }> = [];
-        for (const order of orders) {
-            const orderId = String(order.id || '');
-            // Order-level check for skipping already processed orders
-            const alreadySynced = await this.productService.existsMovementReference(orderId);
-            if (alreadySynced) {
-                results.push({ orderId, status: 'skipped', reason: 'already_synced' });
-                continue;
-            }
-
-            const items = order.items || [];
-            for (const item of items) {
-                let externalId = item.id;
-                if (!externalId && item.item?.id) externalId = item.item.id;
-
-                const qty = Number(item.quantity || 0);
-                if (externalId && qty) flatItems.push({ orderId, externalId, qty });
-            }
-        }
-
-        if (flatItems.length === 0) return { marketplace: marketplace.name, ordersCount: orders.length, movementsCreated: 0, results };
-
-        const externalIds = [...new Set(flatItems.map(i => i.externalId))];
-
-        // [REF] Fetch Listings directly
-        const listings = await this.listingService.listingModel.find({
-            externalId: { $in: externalIds },
-            marketplaceId: mId
-        }).lean().exec();
-
-        // Map listings by externalId for item enrichment
-        const ptMap = new Map<string, any>();
-        for (const l of listings) {
-            if (l.productId) {
-                ptMap.set(l.externalId, { ...l, productSku: String(l.productId) });
-            }
-        }
-
-        for (const item of flatItems) {
-            const pt = ptMap.get(item.externalId);
-            if (!pt) {
-                results.push({ orderId: item.orderId, externalId: item.externalId, status: 'failed', reason: 'product_not_mapped' });
-                continue;
-            }
-
-            try {
-                // Individual item creation with built-in compound index for safety
-                await this.productService.createMovement(pt.productSku, {
-                    type: 'outbound',
-                    quantity: item.qty,
-                    reference: item.orderId,
-                    reason: `Venda ${marketplace.name}`,
-                    status: 'completed'
-                });
-                movementsCreated++;
-                results.push({ orderId: item.orderId, externalId: item.externalId, productId: pt.productSku, status: 'created', quantity: item.qty });
-            } catch (error) {
-                if (error.code === 11000) { // MongoDB duplicate key error
-                    results.push({ orderId: item.orderId, externalId: item.externalId, status: 'skipped', reason: 'duplicate_detected' });
-                } else {
-                    this.logger.error(`Failed to sync item ${item.externalId} for order ${item.orderId}: ${error.message}`);
-                    results.push({ orderId: item.orderId, externalId: item.externalId, status: 'failed', reason: error.message });
-                }
-            }
-        }
-
-        const batchSize = Math.max(1, Number(batchSizeParam ?? 20));
-        return { marketplace: marketplace.name, ordersCount: orders.length, movementsCreated, batchSize, results };
-    }
+    // syncOrdersToMovements/processOrdersSync (bulk-sync legado, dedução manual de movimentos
+    // pré-StockModule) foram removidos. A reconciliação de pedidos perdidos pelo webhook vive
+    // no OrderReconciler (cursor + delta) → OrderIngestService.ingest → OrderSyncPipeline.
 
     async getBillingInfo(billingId: string, marketplaceId: string): Promise<any> {
         const marketplace = await this.registryService.findOne(marketplaceId);

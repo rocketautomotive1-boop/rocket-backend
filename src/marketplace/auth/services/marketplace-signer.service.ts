@@ -1,7 +1,7 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHmac } from 'crypto';
 import * as aws4 from 'aws4';
-import { MarketplaceCredentialsService } from '../../credentials/marketplace-credentials.service';
+import { MarketplaceTokenBrokerService } from './marketplace-token-broker.service';
 
 /**
  * Assinatura de requests de marketplace NO BACKEND — o segredo (partnerKey/
@@ -9,25 +9,41 @@ import { MarketplaceCredentialsService } from '../../credentials/marketplace-cre
  * públicos (path, timestamp, accessToken, etc.) e recebe a assinatura/headers
  * prontos. Substitui o antigo getCredentials() cru do orchestrator.
  *
- * Segredos resolvidos via MarketplaceCredentialsService (marketplaces.credentials
- * cifrado + fallback env MP_<TAG>_<KEY>).
+ * Segredos resolvidos por DOMÍNIO via MarketplaceTokenBrokerService: a conta que
+ * atende o domínio do produto (multi-client) tem suas próprias credenciais
+ * cifradas em accounts[].credentials, com fallback para marketplaces.credentials
+ * e env (MP_<TAG>_<KEY>). Sem isso, produtos 'general' seriam assinados com o
+ * segredo da conta 'autopecas' (assinatura inválida / conta errada).
  */
 @Injectable()
 export class MarketplaceSignerService {
-  constructor(private readonly credentials: MarketplaceCredentialsService) {}
+  constructor(private readonly broker: MarketplaceTokenBrokerService) {}
 
-  /** Roteia por tag. Lança se a tag não tem assinatura suportada. */
+  /** Roteia por tag, resolvendo segredos para o domínio informado no payload. */
   async sign(tag: string, payload: Record<string, any>): Promise<Record<string, any>> {
+    const domain: string | undefined = payload?.domain;
     switch (tag) {
       case 'shopee':
-        return this.signShopee(payload as any);
+        return this.signShopee(payload as any, domain);
       case 'tiktokshop':
-        return this.signTikTok(payload as any);
+        return this.signTikTok(payload as any, domain);
       case 'amazon':
-        return this.signAmazon(payload as any);
+        return this.signAmazon(payload as any, domain);
       default:
         throw new BadRequestException(`Assinatura não suportada para marketplace '${tag}'.`);
     }
+  }
+
+  /** Segredo da conta do domínio; lança NotFound (semântica "required") se ausente. */
+  private async requireSecret(tag: string, domain: string | undefined, key: string): Promise<string> {
+    const value = await this.broker.signingCredentialForDomain(tag, domain, key);
+    if (!value) {
+      throw new NotFoundException(
+        `Credencial '${key}' não configurada para '${tag}'${domain ? ` (domínio ${domain})` : ''}. ` +
+          `Configure na conta (accounts[].credentials), em marketplaces.credentials ou via MP_<TAG>_${key.toUpperCase()}.`,
+      );
+    }
+    return value;
   }
 
   // ── Shopee: HMAC-SHA256, chave = partnerKey ────────────────────────────────
@@ -37,9 +53,9 @@ export class MarketplaceSignerService {
     accessToken?: string;
     shopId?: string | number;
     extra?: Record<string, any>;
-  }): Promise<{ params: Record<string, any> }> {
-    const partnerId = await this.credentials.getRequired('shopee', 'partnerId');
-    const partnerKey = await this.credentials.getRequired('shopee', 'partnerKey');
+  }, domain?: string): Promise<{ params: Record<string, any> }> {
+    const partnerId = await this.requireSecret('shopee', domain, 'partnerId');
+    const partnerKey = await this.requireSecret('shopee', domain, 'partnerKey');
 
     const fullPath = p.path.startsWith('/api/v2') ? p.path : `/api/v2${p.path}`;
     const shopIdStr = p.shopId !== undefined && p.shopId !== null ? String(p.shopId) : undefined;
@@ -66,9 +82,9 @@ export class MarketplaceSignerService {
     shopCipher?: string;
     extra?: Record<string, any>;
     body?: string;
-  }): Promise<{ params: Record<string, any> }> {
-    const appKey = await this.credentials.getRequired('tiktokshop', 'appKey');
-    const appSecret = await this.credentials.getRequired('tiktokshop', 'appSecret');
+  }, domain?: string): Promise<{ params: Record<string, any> }> {
+    const appKey = await this.requireSecret('tiktokshop', domain, 'appKey');
+    const appSecret = await this.requireSecret('tiktokshop', domain, 'appSecret');
 
     const baseParams: Record<string, any> = { app_key: appKey, timestamp: p.timestamp };
     if (p.shopCipher) baseParams.shop_cipher = p.shopCipher;
@@ -95,9 +111,9 @@ export class MarketplaceSignerService {
     accessToken?: string;
     body?: string;
     region?: string;
-  }): Promise<{ headers: Record<string, string> }> {
-    const accessKeyId = await this.credentials.getRequired('amazon', 'awsAccessKey');
-    const secretAccessKey = await this.credentials.getRequired('amazon', 'awsSecretKey');
+  }, domain?: string): Promise<{ headers: Record<string, string> }> {
+    const accessKeyId = await this.requireSecret('amazon', domain, 'awsAccessKey');
+    const secretAccessKey = await this.requireSecret('amazon', domain, 'awsSecretKey');
     const region = p.region || process.env.AMAZON_AWS_REGION || process.env.AWS_REGION || 'us-east-1';
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };

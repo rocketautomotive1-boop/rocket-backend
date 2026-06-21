@@ -10,7 +10,6 @@ import { MonitoringController } from './monitoring.controller';
 import { HealthController } from './health.controller';
 import { S3HealthIndicator } from './indicators/s3.health';
 import { S3Module } from '../common/s3/s3.module';
-import { ElasticsearchModule } from '@nestjs/elasticsearch';
 import { AuthModule } from '../auth/auth.module';
 import { MongooseModule } from '@nestjs/mongoose';
 import { QueueRecordModel, QueueRecordSchema } from '../queue/schemas/queue-record.schema';
@@ -20,16 +19,6 @@ import { QueueRecordModel, QueueRecordSchema } from '../queue/schemas/queue-reco
     TerminusModule,
     HttpModule,
     S3Module,
-    ElasticsearchModule.registerAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: async (configService: ConfigService) => ({
-        node: configService.get<string>('ELASTICSEARCH_NODE'),
-        auth: {
-          apiKey: configService.get<string>('ELASTICSEARCH_API_KEY')
-        }
-      }),
-    }),
     MongooseModule.forFeature([{ name: QueueRecordModel.name, schema: QueueRecordSchema }]),
     ClientsModule.registerAsync([
       {

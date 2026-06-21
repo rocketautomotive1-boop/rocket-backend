@@ -5,7 +5,6 @@ import {
   MicroserviceHealthIndicator,
   MongooseHealthIndicator,
   HttpHealthIndicator,
-  //ElasticsearchHealthIndicator,
   MemoryHealthIndicator,
   DiskHealthIndicator,
 } from '@nestjs/terminus';
@@ -20,7 +19,6 @@ export class HealthController {
     private microservice: MicroserviceHealthIndicator,
     private mongoose: MongooseHealthIndicator,
     private http: HttpHealthIndicator,
-  // private elasticsearch: ElasticsearchHealthIndicator,
     private memory: MemoryHealthIndicator,
     private disk: DiskHealthIndicator,
     private s3: S3HealthIndicator,
@@ -43,10 +41,7 @@ export class HealthController {
           },
         }),
 
-      // 3. Mecanismo de Busca (Elasticsearch)
-      //() => this.elasticsearch.pingCheck('elasticsearch'),
-
-      // 4. Armazenamento de Arquivos (AWS S3)
+      // 3. Armazenamento de Arquivos (AWS S3)
       () => this.s3.isHealthy('aws-s3'),
 
       // 5. APIs Externas (Marketplaces)

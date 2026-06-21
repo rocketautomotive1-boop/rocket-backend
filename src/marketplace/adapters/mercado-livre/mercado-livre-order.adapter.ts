@@ -33,13 +33,28 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
       throw new Error('Usuário não encontrado');
     }
 
-    const data = await this.http.get<any>('/orders/search', this.ctx('getOrders', accountId), {
+    // ML cap: /orders/search rejeita limit>51 (400 limit.maximum_exceeded). Mantemos ≤ 50.
+    const limit = Math.min(params.limit || 50, 50);
+
+    // Delta incremental: quando o chamador passa `since` (cursor do reconciler), filtramos no
+    // SERVIDOR via order.date_last_updated.from + sort date_asc — o ML devolve só o delta,
+    // sem baixar o histórico. Sem `since`, mantém o comportamento legado (página recente desc).
+    const since: Date | string | undefined = params.since;
+    const query: Record<string, any> = {
       seller: user.id,
       status: params.status || 'paid',
-      sort: 'date_desc',
-      limit: params.limit || 50,
+      limit,
       offset: params.offset || 0,
-    });
+    };
+    if (since) {
+      query.sort = 'date_asc';
+      query['order.date_last_updated.from'] =
+        since instanceof Date ? since.toISOString() : String(since);
+    } else {
+      query.sort = 'date_desc';
+    }
+
+    const data = await this.http.get<any>('/orders/search', this.ctx('getOrders', accountId), query);
 
     this.logger.log(`${data.results.length} pedidos encontrados no Mercado Livre`);
 
@@ -49,6 +64,7 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
         marketplaceName: this.name,
         status: o.status,
         date_created: o.date_created,
+        date_last_updated: o.date_last_updated,
         total_amount: o.total_amount,
         currency_id: o.currency_id,
         buyer: {

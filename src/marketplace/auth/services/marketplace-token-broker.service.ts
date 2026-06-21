@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
 import { MarketplaceModel, MarketplaceDocument, MarketplaceAccountSnapshot } from '../../schemas/marketplace.schema';
 import { MarketplaceCredentialsService } from '../../credentials/marketplace-credentials.service';
@@ -14,6 +15,15 @@ export interface ResolvedAccountToken {
   expiresAt?: Date;
   tokenType?: string;
   additionalData: Record<string, any>;
+}
+
+/** Emitido após persistir um token. O TokenRefreshScheduler ouve para (re)agendar o refresh proativo. */
+export const TOKEN_SAVED_EVENT = 'marketplace.token.saved';
+
+export interface TokenSavedEvent {
+  marketplaceId: string;
+  accountId: string;
+  expiresAt?: Date | null;
 }
 
 /** Referência leve à conta resolvida dentro do marketplace. */
@@ -55,6 +65,7 @@ export class MarketplaceTokenBrokerService {
     private readonly credentials: MarketplaceCredentialsService,
     private readonly registry: MarketplaceAdapterRegistry,
     private readonly configCache: MarketplaceConfigCacheService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // ── Resolução de conta ─────────────────────────────────────────────────────
@@ -216,24 +227,26 @@ export class MarketplaceTokenBrokerService {
     await this.saveAccountToken(account, newToken);
   }
 
-  /** Refresh proativo (scheduler): renova tokens expirando em todos os accounts[]. */
-  async refreshExpiringTokens(bufferMinutes = 30): Promise<number> {
+  /**
+   * Tokens renováveis de todos os accounts[] habilitados, com seu expiresAt.
+   * Usado pelo TokenRefreshScheduler para rehidratar os timers no boot (um por
+   * token). Pula tokens sem refreshToken — não há como renová-los proativamente.
+   */
+  async listSchedulableTokens(): Promise<Array<{ marketplaceId: string; accountId: string; expiresAt?: Date | null }>> {
     const marketplaces = await this.marketplaceModel.find({ enabled: true }).lean().exec();
-    let refreshed = 0;
+    const out: Array<{ marketplaceId: string; accountId: string; expiresAt?: Date | null }> = [];
     for (const mp of marketplaces) {
       const accounts: any[] = (mp as any).accounts ?? [];
       for (const acc of accounts) {
         if (!acc?.token?.refreshToken) continue;
-        if (!this.isExpiringSoon(acc.token, bufferMinutes)) continue;
-        try {
-          await this.refreshToken(String((mp as any)._id), String(acc._id), (acc.domains ?? [])[0]);
-          refreshed++;
-        } catch (err: any) {
-          this.logger.warn(`refreshExpiringTokens: conta ${acc.label} falhou: ${err?.message}`);
-        }
+        out.push({
+          marketplaceId: String((mp as any)._id),
+          accountId: String(acc._id),
+          expiresAt: acc.token.expiresAt ?? null,
+        });
       }
     }
-    return refreshed;
+    return out;
   }
 
   // ── Token: escrita ─────────────────────────────────────────────────────────
@@ -294,6 +307,13 @@ export class MarketplaceTokenBrokerService {
       { $set: { 'accounts.$[a].token': token } },
       { arrayFilters: [{ 'a._id': new Types.ObjectId(account.accountId) }] } as any,
     ).exec();
+    // (Re)agenda o refresh proativo a partir do novo expiresAt. Único ponto de
+    // escrita de token → cobre refresh, callback OAuth e registro de conta.
+    this.eventEmitter.emit(TOKEN_SAVED_EVENT, {
+      marketplaceId: account.marketplaceId,
+      accountId: account.accountId,
+      expiresAt: token.expiresAt ?? null,
+    } as TokenSavedEvent);
   }
 
   // ── Registro de conta (admin) ──────────────────────────────────────────────

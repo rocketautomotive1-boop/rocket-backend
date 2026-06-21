@@ -22,7 +22,6 @@ import { parseSourceName } from './dto/source-refresh.dto';
 import { ZodError } from 'zod';
 import { CategorySnapshotService } from './services/category-snapshot.service';
 import { CreateFromDiscoveryDto } from './dto/create-from-discovery.dto';
-import { SearchService } from '../search/search.service';
 // import { PublishService } from '../publish/publish.service';
 // import { calculatePublishPriority } from '../queue/publish-priority';
 import { BoxItemService } from './services/box-item.service';
@@ -46,7 +45,6 @@ export class ProductController {
     private readonly productTitleService: ProductTitleService,
     private readonly boxItemService: BoxItemService,
     private readonly boxService: BoxService,
-    private readonly searchService: SearchService,
     private readonly discoveryService: ProductDiscoveryService,
     private readonly sourceRefreshService: SourceRefreshService,
     private readonly categorySnapshotService: CategorySnapshotService,
@@ -211,44 +209,6 @@ export class ProductController {
     return { found: true, product };
   }
 
-  @Get('elastic')
-  @ApiOperation({
-    summary: 'Busca via Elasticsearch',
-    description: 'Endpoint para busca semântica/fuzzy usando Elasticsearch.'
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Resultados da busca'
-  })
-  @ApiQuery({
-    name: 'q',
-    required: true,
-    type: String,
-    description: 'Termo de busca',
-    example: 'disco embreagem'
-  })
-  async searchElastic(
-    @Query('q') searchTerm: string,
-    @Query('brand') brand?: string[],
-    @Query('category') category?: string[],
-    @Query('categoryId') categoryId?: string[],
-    @Query('minPrice') minPrice?: number,
-    @Query('maxPrice') maxPrice?: number,
-    @Query('page') page: number = 1,
-    @Query('limit') limit: number = 40
-  ) {
-    if (!searchTerm && (!brand && !category && !categoryId)) {
-      throw new BadRequestException('Termo de busca ou filtro obrigatório');
-    }
-    return this.searchService.search(searchTerm || '', {
-      brand: Array.isArray(brand) ? brand : brand ? [brand] : undefined,
-      category: Array.isArray(category) ? category : category ? [category] : undefined,
-      categoryId: Array.isArray(categoryId) ? categoryId : categoryId ? [categoryId] : undefined,
-      minPrice,
-      maxPrice
-    }, page, limit);
-  }
-
   @Get('discovery/search')
   @ApiOperation({ summary: 'Buscar rascunhos de descoberta' })
   @ApiQuery({ name: 'q', required: true })
@@ -266,64 +226,6 @@ export class ProductController {
     if (!body.productId) throw new BadRequestException('productId is required');
     await this.discoveryService.associateProduct(id, body.productId);
     return { ok: true };
-  }
-
-  @Get('autocomplete')
-  @ApiOperation({ summary: 'Autocomplete de produtos (desabilitado - migração para MongoDB Search)' })
-  @ApiQuery({ name: 'q', required: true })
-  async autocomplete(@Query('q') term: string) {
-    return [];
-  }
-
-  @Delete('elastic/index')
-  @ApiOperation({ summary: 'Deletar índice do Elasticsearch (Reset)' })
-  async deleteIndex() {
-    return this.searchService.deleteIndex();
-  }
-
-  @Post('elastic/sync')
-  @ApiOperation({ summary: 'Sincronizar todos os produtos para o Elasticsearch (Reindex Full)' })
-  async syncAllProducts() {
-    this.logger.log('Starting full reindex...');
-
-    // 1. Delete and Recreate Index
-    await this.searchService.deleteIndex().catch(() => { });
-    await this.searchService.createIndex();
-
-    // 2. Fetch all products (batching would be better but keeping simple for now)
-    // We'll rely on ProductService to give us everything or use a cursor if available.
-    // For MVP, assuming memory holds (or we can pagination). 
-    // safer: limit to 2000 recent or active? User said "sync".
-    // Let's index ALL.
-    const products = await this.productService.findAllModels();
-
-    // 3. Index loop
-    let count = 0;
-    for (const product of products) {
-      await this.searchService.indexProduct(product);
-      count++;
-      if (count % 100 === 0) this.logger.log(`Indexed ${count} products...`);
-    }
-
-    this.logger.log(`Full reindex complete. Total: ${count}`);
-    return { message: `Indexed ${count} products`, success: true };
-  }
-
-
-
-  @Get('debug-elastic/:id')
-  @ApiOperation({ summary: 'Debug: Ver documento no Elastic' })
-  async debugElastic(@Param('id') id: string) {
-    const result = await this.searchService.search(id, {}); // Simple search to find it? No.
-    // We need 'get' by ID.
-    // SearchService doesn't expose 'get'.
-    // Let's implement a quick get or just search by _id.
-    const product = await this.searchService.search('', {});
-    // Wait, let's expose specific get in SearchService or use a hack.
-    // Better: Add a temporary method in SearchService 'getDocument(id)'
-
-    // For now, let's assume I can add it to SearchService first.
-    return { message: "Endpoint pending SearchService update" };
   }
 
   async create(@Body() createProductDto: CreateProductDto, @Req() req: any): Promise<ProductModel> {

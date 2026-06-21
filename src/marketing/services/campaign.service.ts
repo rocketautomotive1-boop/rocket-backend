@@ -4,14 +4,13 @@ import { Model } from 'mongoose';
 import { Campaign, CampaignDocument, CampaignType } from '../schemas/campaign.schema';
 import { CreateCampaignDto } from '../dto/create-campaign.dto';
 import { UpdateCampaignDto } from '../dto/update-campaign.dto';
-import { SearchService } from '../../search/search.service';
+import { ProductRepository } from '../../product/product.repository';
 
 @Injectable()
 export class CampaignService {
     constructor(
         @InjectModel(Campaign.name) private campaignModel: Model<CampaignDocument>,
-        // Assuming SearchService exists and can search products
-        private readonly searchService: SearchService,
+        private readonly productRepository: ProductRepository,
     ) { }
 
     async create(createCampaignDto: CreateCampaignDto): Promise<Campaign> {
@@ -59,14 +58,27 @@ export class CampaignService {
     async getCampaignProducts(slug: string, page = 1, limit = 20): Promise<any> {
         const campaign = await this.findBySlug(slug);
 
+        // Product lookup runs on MongoDB (Elasticsearch removido).
         if (campaign.type === CampaignType.MANUAL_SELECTION) {
             // Fetch products by ID
-            return this.searchService.search(null, {
-                ids: campaign.productIds,
-            });
+            const data = await this.productRepository.findAllClean(
+                { _id: { $in: campaign.productIds || [] }, active: true },
+                { page, limit },
+            );
+            return { data };
         } else if (campaign.type === CampaignType.AUTO_QUERY) {
-            // Execute Query
-            return this.searchService.search(campaign.query);
+            // Execute Query (regex sobre nome / partNumber)
+            const term = (campaign.query || '').trim();
+            const query: any = { active: true };
+            if (term) {
+                const regex = new RegExp(
+                    term.split(/\s+/).map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'),
+                    'i',
+                );
+                query.$or = [{ name: regex }, { partNumber: regex }];
+            }
+            const data = await this.productRepository.findAllClean(query, { page, limit });
+            return { data };
         }
     }
 }

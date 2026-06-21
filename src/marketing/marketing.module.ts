@@ -6,7 +6,7 @@ import { BannerService } from './services/banner.service';
 import { CampaignService } from './services/campaign.service';
 import { BannerController } from './controllers/banner.controller';
 import { CampaignController } from './controllers/campaign.controller';
-import { SearchModule } from '../search/search.module'; // Import to use ProductSearchService
+import { ProductModule } from '../product/product.module'; // ProductRepository for campaign product lookup
 
 @Module({
     imports: [
@@ -14,7 +14,7 @@ import { SearchModule } from '../search/search.module'; // Import to use Product
             { name: Banner.name, schema: BannerSchema },
             { name: Campaign.name, schema: CampaignSchema },
         ]),
-        SearchModule,
+        ProductModule,
     ],
     controllers: [BannerController, CampaignController],
     providers: [BannerService, CampaignService],

@@ -6,19 +6,35 @@ import { MarketplaceSignerService } from './marketplace-signer.service';
  * canônica de cada marketplace com segredos fixos e confere o `sign`/headers.
  */
 describe('MarketplaceSignerService', () => {
-  const creds: Record<string, Record<string, string>> = {
-    shopee: { partnerId: '2013835', partnerKey: 'shpk_test_key' },
-    tiktokshop: { appKey: 'app_key_x', appSecret: 'app_secret_y' },
-    amazon: { awsAccessKey: 'AKIA_TEST', awsSecretKey: 'aws_secret_test' },
+  // Credenciais por conta-de-domínio: 'general' tem segredo PRÓPRIO, distinto de
+  // 'autopecas' (o default). É exatamente a segregação que o signer deve honrar.
+  const creds: Record<string, Record<string, Record<string, string>>> = {
+    shopee: {
+      autopecas: { partnerId: '2013835', partnerKey: 'shpk_test_key' },
+      general: { partnerId: '9999999', partnerKey: 'shpk_general_key' },
+    },
+    tiktokshop: {
+      autopecas: { appKey: 'app_key_x', appSecret: 'app_secret_y' },
+      general: { appKey: 'app_key_g', appSecret: 'app_secret_g' },
+    },
+    amazon: {
+      autopecas: { awsAccessKey: 'AKIA_TEST', awsSecretKey: 'aws_secret_test' },
+      general: { awsAccessKey: 'AKIA_GEN', awsSecretKey: 'aws_secret_gen' },
+    },
   };
-  const credentialsMock = {
-    getRequired: jest.fn((tag: string, key: string) => {
-      const v = creds[tag]?.[key];
-      if (!v) throw new Error(`missing ${tag}/${key}`);
-      return Promise.resolve(v);
-    }),
+  const brokerMock = {
+    signingCredentialForDomain: jest.fn(
+      (tag: string, domain: string | undefined, key: string) =>
+        Promise.resolve(creds[tag]?.[domain ?? 'autopecas']?.[key]),
+    ),
   };
-  const signer = new MarketplaceSignerService(credentialsMock as any);
+  const signer = new MarketplaceSignerService(brokerMock as any);
+  // Atalho para o segredo default (autopecas) usado nas asserções base.
+  const def = {
+    shopee: creds.shopee.autopecas,
+    tiktokshop: creds.tiktokshop.autopecas,
+    amazon: creds.amazon.autopecas,
+  };
 
   it('Shopee: HMAC-SHA256 sobre partnerId+fullPath+ts (sem token)', async () => {
     const path = '/product/add_item';
@@ -26,12 +42,12 @@ describe('MarketplaceSignerService', () => {
     const { params } = (await signer.sign('shopee', { path, timestamp })) as { params: any };
 
     const fullPath = `/api/v2${path}`;
-    const expected = createHmac('sha256', creds.shopee.partnerKey).update(`${creds.shopee.partnerId}${fullPath}${timestamp}`).digest('hex');
+    const expected = createHmac('sha256', def.shopee.partnerKey).update(`${def.shopee.partnerId}${fullPath}${timestamp}`).digest('hex');
     expect(params.sign).toBe(expected);
     expect(params.partner_id).toBe(2013835);
     expect(params.timestamp).toBe(timestamp);
     // segredo nunca aparece na resposta
-    expect(JSON.stringify(params)).not.toContain(creds.shopee.partnerKey);
+    expect(JSON.stringify(params)).not.toContain(def.shopee.partnerKey);
   });
 
   it('Shopee: inclui access_token+shop_id na base quando presentes', async () => {
@@ -40,7 +56,7 @@ describe('MarketplaceSignerService', () => {
     const { params } = (await signer.sign('shopee', { path, timestamp, accessToken: 'AT', shopId: 555 })) as { params: any };
 
     const fullPath = `/api/v2${path}`;
-    const expected = createHmac('sha256', creds.shopee.partnerKey).update(`${creds.shopee.partnerId}${fullPath}${timestamp}AT555`).digest('hex');
+    const expected = createHmac('sha256', def.shopee.partnerKey).update(`${def.shopee.partnerId}${fullPath}${timestamp}AT555`).digest('hex');
     expect(params.sign).toBe(expected);
     expect(params.shop_id).toBe(555);
     expect(params.access_token).toBe('AT');
@@ -52,14 +68,14 @@ describe('MarketplaceSignerService', () => {
     const body = '{"x":1}';
     const { params } = (await signer.sign('tiktokshop', { path, timestamp, accessToken: 'AT', body })) as { params: any };
 
-    const baseParams: Record<string, any> = { app_key: creds.tiktokshop.appKey, timestamp };
+    const baseParams: Record<string, any> = { app_key: def.tiktokshop.appKey, timestamp };
     const paramString = Object.keys(baseParams).sort().map((k) => `${k}${baseParams[k]}`).join('');
     const content = `${path}${paramString}${body}`;
-    const wrapped = `${creds.tiktokshop.appSecret}${content}${creds.tiktokshop.appSecret}`;
-    const expected = createHmac('sha256', creds.tiktokshop.appSecret).update(wrapped).digest('hex');
+    const wrapped = `${def.tiktokshop.appSecret}${content}${def.tiktokshop.appSecret}`;
+    const expected = createHmac('sha256', def.tiktokshop.appSecret).update(wrapped).digest('hex');
     expect(params.sign).toBe(expected);
     expect(params.access_token).toBe('AT');
-    expect(JSON.stringify(params)).not.toContain(creds.tiktokshop.appSecret);
+    expect(JSON.stringify(params)).not.toContain(def.tiktokshop.appSecret);
   });
 
   it('Amazon: devolve headers SigV4 (Authorization + x-amz-*) sem expor o secret', async () => {
@@ -75,10 +91,32 @@ describe('MarketplaceSignerService', () => {
     expect(headers.Authorization).toMatch(/^AWS4-HMAC-SHA256/);
     expect(headers['X-Amz-Date'] || headers['x-amz-date']).toBeDefined();
     expect(headers['x-amz-access-token']).toBe('AMZ_AT');
-    expect(JSON.stringify(headers)).not.toContain(creds.amazon.awsSecretKey);
+    expect(JSON.stringify(headers)).not.toContain(def.amazon.awsSecretKey);
   });
 
   it('lança para marketplace sem assinatura suportada', async () => {
     await expect(signer.sign('mercadolivre', {})).rejects.toBeDefined();
+  });
+
+  // ── Regressão: domínio roteia o SEGREDO, não só o token ────────────────────
+  it('Shopee: produto general usa o partnerKey da conta general (não o de autopecas)', async () => {
+    const path = '/product/add_item';
+    const timestamp = 1700000010;
+    const { params } = (await signer.sign('shopee', { path, timestamp, domain: 'general' })) as { params: any };
+
+    const fullPath = `/api/v2${path}`;
+    const expectedGeneral = createHmac('sha256', creds.shopee.general.partnerKey).update(`${creds.shopee.general.partnerId}${fullPath}${timestamp}`).digest('hex');
+    const wouldBeAutopecas = createHmac('sha256', def.shopee.partnerKey).update(`${def.shopee.partnerId}${fullPath}${timestamp}`).digest('hex');
+
+    expect(params.sign).toBe(expectedGeneral);
+    expect(params.sign).not.toBe(wouldBeAutopecas);
+    expect(params.partner_id).toBe(9999999);
+    expect(brokerMock.signingCredentialForDomain).toHaveBeenCalledWith('shopee', 'general', 'partnerKey');
+  });
+
+  it('lança NotFound quando o segredo do domínio não existe', async () => {
+    await expect(
+      signer.sign('shopee', { path: '/x', timestamp: 1, domain: 'inexistente' }),
+    ).rejects.toThrow(/Credencial 'partnerId'/);
   });
 });

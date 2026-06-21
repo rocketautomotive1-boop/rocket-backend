@@ -24,7 +24,6 @@ import {
   SortDto,
   PaginationDto
 } from '../dto/product-filter.dto';
-import { SearchService } from '../../search/search.service';
 
 @Injectable()
 export class ProductFilterService {
@@ -37,8 +36,6 @@ export class ProductFilterService {
     private readonly categoryModel: Model<CategoryDocument>,
     @Inject(forwardRef(() => ProductService))
     private readonly productService: ProductService,
-    @Inject(forwardRef(() => SearchService))
-    private readonly searchService: SearchService,
     @InjectModel(ListingModel.name) private listingModel: Model<ListingDocument>,
     private readonly productRepository: ProductRepository,
     @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
@@ -301,46 +298,17 @@ export class ProductFilterService {
   }
 
   async findProductsIntelligent(term: string, options: any): Promise<PaginatedResponseDto<ProductModel>> {
-    try {
-      this.logger.log(`Performing intelligent search for: ${term}`);
-
-      // ES returns mapped objects that look like ProductModel
-      // ES returns mapped objects that look like ProductModel
-      const searchResult: any = await this.searchService.search(term);
-      const esResults = searchResult.data || [];
-
-      if (!esResults || esResults.length === 0) {
-        return {
-          data: [],
-          pagination: {
-            page: options.page || 1, // 1-indexed
-            limit: options.limit || 10,
-            total: 0,
-            totalPages: 0,
-            hasNext: false,
-            hasPrev: false
-          }
-        };
-      }
-
-      // Return ES results directly (Already sorted by relevance/score)
-      // Note: This bypasses MongoDB completely for speed.
-      return {
-        data: esResults,
-        pagination: {
-          page: 1, // ES simple search usually returns top hits
-          limit: esResults.length,
-          total: esResults.length,
-          totalPages: 1,
-          hasNext: false,
-          hasPrev: false
-        }
-      };
-
-    } catch (error) {
-      this.logger.error(`Intelligent search failed: ${error.message}, falling back to Regex`);
-      return this.findProducts({ search: term, page: options.page, limit: options.limit });
-    }
+    // Product search runs entirely on MongoDB (Elasticsearch was removed).
+    return this.findProducts({
+      search: term,
+      page: options.page,
+      limit: options.limit,
+      includeBrand: options.includeBrand,
+      includeCategory: options.includeCategory,
+      includeImages: options.includeImages,
+      includeInventory: options.includeInventory,
+      includeTitles: options.includeTitles,
+    } as ProductFilterDto);
   }
 
   async findProductsByAttributes(attributes: any): Promise<ProductModel[]> {

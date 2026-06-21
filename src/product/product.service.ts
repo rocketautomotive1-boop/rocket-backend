@@ -19,7 +19,6 @@ import { resolveMovementCondition, resolveMovementType } from '../stock/domain/m
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 import { MarketplaceDocument } from '../marketplace/schemas/marketplace.schema';
-import { SearchService } from '../search/search.service';
 import { ValidateMongoId } from '../common/decorators/validate-mongo-id.decorator';
 import { PublicationLogService } from '../marketplace/services/publication-log.service';
 import { CategoryMappingService } from '../marketplace/services/category/category-mapping.service';
@@ -71,8 +70,6 @@ export class ProductService {
     private readonly stockService: StockService,
     @Inject(forwardRef(() => MarketplaceDescriptionService))
     private readonly marketplaceDescriptionService: MarketplaceDescriptionService,
-    @Inject(forwardRef(() => SearchService))
-    private readonly searchService: SearchService,
     private readonly publicationLogService: PublicationLogService,
     @Inject(forwardRef(() => CategoryMappingService))
     private readonly categoryMappingService: CategoryMappingService,
@@ -470,9 +467,6 @@ export class ProductService {
         await this.productRepository.save(existingProduct);
         const updated = await this.productRepository.findByIdClean(existingProduct.id);
 
-        // Indexing
-        this.searchService.indexProduct(updated).catch(e => this.logger.error(`Failed to index product on update: ${e.message}`));
-
         return updated;
       }
 
@@ -565,9 +559,6 @@ export class ProductService {
         this.productCategoryService.updateProductCounts().catch(e => this.logger.error(`Failed to update product counts on create: ${e.message}`));
       }
 
-      // Indexing
-      this.searchService.indexProduct(newProductClean).catch(e => this.logger.error(`Failed to index product on create: ${e.message}`));
-
       // Log Productivity - Create
       if (userId) {
         this.userProductivityService.logActivity(userId, ProductivityType.CREATE, {
@@ -624,10 +615,6 @@ export class ProductService {
     }
 
     await this.productRepository.update(id, { $set: update });
-
-    // Indexing
-    const updatedProduct = await this.productRepository.findByIdClean(id);
-    this.searchService.indexProduct(updatedProduct).catch(e => this.logger.error(`Failed to index product on updateDetails: ${e.message}`));
 
     try {
       this.eventEmitter.emit(PRODUCT_SECTION_EVENTS.DIMENSIONS_SAVED, new ProductDimensionsSavedEvent(id));
@@ -1305,9 +1292,6 @@ export class ProductService {
     });
 
     const result = await this.productRepository.findByIdClean(created.id);
-
-    // 6. Elasticsearch indexing
-    this.searchService.indexProduct(result).catch(e => this.logger.error(`Failed to index product on createFromDiscovery: ${e.message}`));
 
     return result;
   }

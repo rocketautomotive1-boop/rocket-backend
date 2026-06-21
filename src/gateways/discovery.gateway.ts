@@ -13,6 +13,7 @@ import { Model } from 'mongoose';
 import { Namespace, Socket } from 'socket.io';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ProductDiscoveryDocument, ProductDiscoveryModel } from '../product/schemas/product-discovery.schema';
+import { mapDiscoveryDocToAppData } from '../product/dto/discovery-app.mapper';
 
 @Injectable()
 @WebSocketGateway({
@@ -61,7 +62,7 @@ export class DiscoveryGateway implements OnGatewayConnection, OnGatewayDisconnec
         // Catch-up: if the job already finished before the client subscribed, emit now
         const doc = await this.discoveryModel
             .findOne({ batchId: jobId })
-            .select('status data final error')
+            .select('status data final sources resolvedCategoryId query error')
             .lean()
             .exec();
 
@@ -69,10 +70,11 @@ export class DiscoveryGateway implements OnGatewayConnection, OnGatewayDisconnec
 
         if (doc.status === 'done') {
             this.logger.log(`Catch-up: job ${jobId} already done — emitting to ${client.id}`);
+            // Mesmo contrato normalizado (DiscoveryAppData) do REST e do WS live.
             client.emit('discoveryStatus', {
                 jobId,
                 status: 'COMPLETED',
-                result: doc.final ?? doc.data,
+                result: mapDiscoveryDocToAppData(doc),
             });
         } else if (doc.status === 'failed') {
             this.logger.log(`Catch-up: job ${jobId} failed — emitting to ${client.id}`);

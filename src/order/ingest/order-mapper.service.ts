@@ -106,6 +106,11 @@ export class OrderMapperService {
             totalAmount: externalOrder.total_amount,
             shippingAmount: externalOrder.shipping?.cost || 0,
             syncedAt: new Date(),
+            // Data real de criação do pedido no marketplace (date_created). Distinta do
+            // createdAt (timestamps = momento da nossa ingestão). Ausente → undefined.
+            marketplaceCreatedAt: externalOrder.date_created
+                ? new Date(externalOrder.date_created)
+                : undefined,
             // ML-specific: pack_id is needed for fiscal document upload
             packId: externalOrder.pack_id ? String(externalOrder.pack_id) : undefined,
             marketplaceTag: externalOrder.marketplaceName || undefined,

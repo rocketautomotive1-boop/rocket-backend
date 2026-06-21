@@ -36,29 +36,50 @@ export class MarketplaceOrderGatewayProvider implements MarketplaceOrderGateway 
     } as ExternalOrder;
   }
 
+  /** Teto de página seguro p/ qualquer marketplace (ML rejeita /orders/search com limit>51). */
+  private static readonly PAGE_SIZE = 50;
+  /** Trava dura anti-loop caso um adapter ignore offset/since e devolva sempre página cheia. */
+  private static readonly MAX_PAGES = 200;
+
   async listOrdersSince(marketplaceId: string, cursor: Date, accountId?: string): Promise<ExternalOrderRef[]> {
     const mkt = await this.registry.findOne(marketplaceId);
     if (!mkt) return [];
     if (!this.adapters.hasOrderAdapter(mkt.name)) return [];
     const adapter = this.adapters.getOrderAdapter(mkt.name);
 
-    // Adapters expose getOrders({status,limit,offset}); an incremental date filter is
-    // adapter-specific and not yet part of the interface. Until it is, fetch a recent page
-    // and filter client-side by cursor (sliding-window degradation). Returns refs only.
-    const orders = await adapter.getOrders({ limit: 100, offset: 0, accountId });
-    return (orders || [])
-      .map((o: any) => ({
-        id: String(o.id),
-        status: String(o.status ?? 'unknown'),
-        date_last_updated: String(
-          o.date_last_updated ?? o.date_created ?? new Date().toISOString(),
-        ),
-      }))
-      .filter((o: ExternalOrderRef) => new Date(o.date_last_updated) > cursor)
-      .sort(
-        (a, b) =>
-          new Date(a.date_last_updated).getTime() - new Date(b.date_last_updated).getTime(),
-      );
+    // Delta SERVER-SIDE: o filtro de data fica no marketplace (passamos `since: cursor`), que
+    // devolve só os pedidos atualizados após o cursor, em ordem crescente. Não baixamos o
+    // histórico para filtrar no cliente — com 1M de pedidos lemos apenas o delta (O(delta)).
+    // Paginamos enquanto o servidor devolver páginas cheias. Retorna apenas refs.
+    const { PAGE_SIZE, MAX_PAGES } = MarketplaceOrderGatewayProvider;
+    const collected: ExternalOrderRef[] = [];
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const batch = await adapter.getOrders({
+        since: cursor,
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
+        accountId,
+      });
+      if (!batch || batch.length === 0) break;
+
+      for (const o of batch as any[]) {
+        collected.push({
+          id: String(o.id),
+          status: String(o.status ?? 'unknown'),
+          date_last_updated: String(
+            o.date_last_updated ?? o.date_created ?? new Date().toISOString(),
+          ),
+        });
+      }
+
+      if (batch.length < PAGE_SIZE) break; // última página
+    }
+
+    return collected.sort(
+      (a, b) =>
+        new Date(a.date_last_updated).getTime() - new Date(b.date_last_updated).getTime(),
+    );
   }
 
   async getBillingInfo(billingId: string, marketplaceId: string, accountId?: string): Promise<any> {

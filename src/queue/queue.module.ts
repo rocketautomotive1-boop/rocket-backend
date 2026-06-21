@@ -5,10 +5,11 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { HttpModule } from '@nestjs/axios';
 import { QueueService } from './queue.service';
+import { QueueCleanupScheduler } from './queue-cleanup.scheduler';
 import { QueueController } from './queue.controller';
 import { QueueRecordModel, QueueRecordSchema } from './schemas/queue-record.schema';
 // ProductProcessor removed
-import { OrderProcessor } from './processors/order.processor';
+// OrderProcessor removed — orders-sync queue aposentada (ingest direto + OrderReconciler)
 import { CompatibilityProcessor } from './processors/compatibility.processor';
 
 
@@ -55,8 +56,8 @@ import { ProductModule } from '../product/product.module';
       },
     ]),
   ],
-  controllers: [QueueController, OrderProcessor, CompatibilityProcessor],
-  providers: [QueueService],
+  controllers: [QueueController, CompatibilityProcessor],
+  providers: [QueueService, QueueCleanupScheduler],
   exports: [QueueService, MongooseModule],
 })
 export class QueueModule { }

@@ -5,6 +5,7 @@ import { MarketplaceModel, MarketplaceSchema } from '../schemas/marketplace.sche
 import { MarketplaceAuthService } from './services/marketplace-auth.service';
 import { TokenManagerService } from './services/token-manager.service';
 import { MarketplaceTokenBrokerService } from './services/marketplace-token-broker.service';
+import { TokenRefreshScheduler } from './services/token-refresh.scheduler';
 import { MarketplaceSignerService } from './services/marketplace-signer.service';
 import { MarketplaceCredentialsController } from './controllers/marketplace-credentials.controller';
 
@@ -27,6 +28,7 @@ import { MarketplaceCallbackController } from './controllers/marketplace-callbac
 
 import { MarketplaceBotQueryService } from '../services/marketplace-bot-query.service';
 import { BALANCE_QUERY_PORT } from '../../notifications/bot/ports/bot-query.ports';
+import { MercadoPagoModule } from '../../mercado-pago/mercado-pago.module';
 
 @Module({
     imports: [
@@ -38,6 +40,7 @@ import { BALANCE_QUERY_PORT } from '../../notifications/bot/ports/bot-query.port
         ]),
         forwardRef(() => MarketplaceRegistryModule),
         forwardRef(() => MarketplaceModule),
+        MercadoPagoModule,
     ],
     controllers: [
         MarketplaceAuthController,
@@ -49,6 +52,7 @@ import { BALANCE_QUERY_PORT } from '../../notifications/bot/ports/bot-query.port
         MarketplaceAuthService,
         TokenManagerService,
         MarketplaceTokenBrokerService,
+        TokenRefreshScheduler,
         MarketplaceSignerService,
         AmazonAuthAdapter,
         ShopeeAuthAdapter,
