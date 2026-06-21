@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException, ConflictException } from '@nestj
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { ListingModel, ListingDocument } from '../../listing/schemas/listing.schema';
 import { PublicationLogService } from '../../marketplace/services/publication-log.service';
 import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
@@ -82,7 +82,7 @@ export class ListingRemovalService {
             throw new ConflictException(`Listing ${listingId} has an in-flight operation. Try again later.`);
         }
 
-        const jobId = uuidv4();
+        const jobId = randomUUID();
 
         // Create publication attempt log
         const attempt = await this.publicationLogService.createAttempt(

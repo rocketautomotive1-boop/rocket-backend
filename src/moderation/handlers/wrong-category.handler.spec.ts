@@ -4,7 +4,6 @@ import { NOTIFICATION_EVENTS } from '../../notifications/events/notification.eve
 
 describe('WrongCategoryHandler', () => {
   let handler: WrongCategoryHandler;
-  let publisher: { requestSync: jest.Mock };
   let events: { emit: jest.Mock };
 
   const makeCtx = (over: Partial<ModerationHandlerContext> = {}): ModerationHandlerContext => {
@@ -41,9 +40,8 @@ describe('WrongCategoryHandler', () => {
   };
 
   beforeEach(() => {
-    publisher = { requestSync: jest.fn().mockResolvedValue(undefined) };
     events = { emit: jest.fn() };
-    handler = new WrongCategoryHandler(publisher as any, events as any);
+    handler = new WrongCategoryHandler(events as any);
   });
 
   it('marks the listing pending_removal with a terminal syncIssue ONLY (no evidence in listing)', async () => {
@@ -78,20 +76,14 @@ describe('WrongCategoryHandler', () => {
     );
   });
 
-  it('emits a sync command (detector, not executor — never calls ML API)', async () => {
+  it('does NOT re-publish (ML blocks editing a wrong-category listing; republish waits for user fix)', async () => {
     const ctx = makeCtx();
+    // handler no longer takes a publisher; assert via the events-only constructor + no extra calls
     await handler.handle(ctx);
 
-    expect(publisher.requestSync).toHaveBeenCalledWith(
-      expect.objectContaining({
-        productId: 'P1',
-        reason: 'moderation_wrong_category',
-        resolutionSignal: 'category_change',
-        force: true,
-        targetMarketplaceIds: ['M1'],
-      }),
-      undefined,
-    );
+    // The only outward signal is the notification — no sync command is emitted here.
+    expect(events.emit).toHaveBeenCalledTimes(1);
+    expect(events.emit).toHaveBeenCalledWith(NOTIFICATION_EVENTS.REQUESTED, expect.anything());
   });
 
   it('emits a moderation notification', async () => {
@@ -113,7 +105,7 @@ describe('WrongCategoryHandler', () => {
     await handler.handle(ctx);
 
     expect(ctx.listing.save).not.toHaveBeenCalled();
-    expect(publisher.requestSync).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalled();
   });
 
   it('does not duplicate a warning already present for the same externalId', async () => {
@@ -122,8 +114,8 @@ describe('WrongCategoryHandler', () => {
     await handler.handle(ctx);
 
     expect(ctx.product!.updateOne).not.toHaveBeenCalled();
-    // but the listing + command still happen
+    // but the listing block + notification still happen
     expect(ctx.listing.save).toHaveBeenCalled();
-    expect(publisher.requestSync).toHaveBeenCalled();
+    expect(events.emit).toHaveBeenCalled();
   });
 });

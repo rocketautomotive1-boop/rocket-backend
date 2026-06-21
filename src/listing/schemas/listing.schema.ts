@@ -21,7 +21,7 @@ export class ListingModel {
 
     @Prop({
         type: String,
-        enum: ['active', 'paused', 'error', 'pending_creation', 'pending_removal', 'removed'],
+        enum: ['active', 'paused', 'error', 'pending_creation', 'pending_removal', 'removal_failed', 'removed'],
         default: 'pending_creation'
     })
     status: string;

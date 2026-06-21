@@ -2,28 +2,24 @@ import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ModerationHandler, ModerationHandlerContext } from './moderation-handler.interface';
 import { ModerationType } from '../providers/moderation-provider.types';
-import { OrchestratorPublisherService } from '../../marketplace-orchestrator/orchestrator-publisher.service';
 import { ProductWarning } from '../../product/schemas/product.schema';
 import { NOTIFICATION_EVENTS, NotificationRequested } from '../../notifications/events/notification.events';
 
 /**
- * Wrong-category moderation (ML DOMAIN). The marketplace finalized the listing because it was in
- * the wrong category. We:
- *  - mark the listing pending_removal with a terminal recreate syncIssue (operational consequence
- *    only — the EVIDENCE lives in moderation_state, not in the listing blob);
- *  - unset the product category + add a single warning (domain decision);
- *  - emit a sync command so the ORCHESTRATOR removes the listing and recreates it. Moderation
- *    detects; the orchestrator executes — we never call the ML API from here.
+ * Wrong-category moderation (ML DOMAIN). The marketplace finalized the listing because it was in the
+ * wrong category. ML does NOT allow editing a listing while its category is wrong, so the flow is:
+ *  - unset the product category + add a single warning (domain decision: user must pick a new one);
+ *  - mark the listing pending_removal so the (already-finalized) listing is deleted from ML — the
+ *    EVIDENCE lives in moderation_state, the listing keeps only status + syncIssue.
+ * It does NOT re-publish: that waits for the user to fix the category (resolveSignal). Moderation
+ * detects + blocks; it never calls the ML API.
  */
 @Injectable()
 export class WrongCategoryHandler implements ModerationHandler {
   readonly type: ModerationType = 'WRONG_CATEGORY';
   private readonly logger = new Logger(WrongCategoryHandler.name);
 
-  constructor(
-    private readonly publisher: OrchestratorPublisherService,
-    private readonly events: EventEmitter2,
-  ) {}
+  constructor(private readonly events: EventEmitter2) {}
 
   async handle(ctx: ModerationHandlerContext): Promise<void> {
     const { listing, product, state, canonical, session } = ctx;
@@ -87,17 +83,12 @@ export class WrongCategoryHandler implements ModerationHandler {
       `[WrongCategory] Listing ${listing._id} pending_removal (externalId: ${externalId}); product ${product?._id} category dropped`,
     );
 
-    // Command (transactional via outbox): orchestrator removes + recreates the listing.
-    await this.publisher.requestSync(
-      {
-        productId: String(listing.productId),
-        reason: 'moderation_wrong_category',
-        resolutionSignal: 'category_change',
-        force: true,
-        targetMarketplaceIds: [String(listing.marketplaceId)],
-      },
-      session,
-    );
+    // NO re-publish here. ML doesn't allow editing a listing whose category is wrong, so the flow is:
+    // delete the (already-finalized) listing → WAIT for the user to fix the category → only then
+    // re-publish. The delete is driven by `pending_removal` (RemovalWorker); the re-publish is driven
+    // by the user correcting the category (marketplace-issues.resolveSignal('category_change')).
+    // Emitting requestSync now would re-publish a product with NO category → ML failure or a repeat
+    // of the same wrong category, re-entering moderation.
 
     this.emitNotification(externalId, reason, remedy, ctx);
   }
