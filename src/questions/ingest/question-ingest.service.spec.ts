@@ -18,12 +18,20 @@ function makeSut(existing: any) {
       date_created: new Date().toISOString(), from: { id: 1, nickname: 'b' },
     }),
   };
-  const resolver = { resolve: jest.fn().mockResolvedValue(new Types.ObjectId()) };
+  const mlService = {
+    getItem: jest.fn().mockResolvedValue({ seller_custom_field: 'SKU1', title: 'Item' }),
+  };
+  const productService = {
+    findOne: jest.fn().mockResolvedValue({ name: 'Produto X' }),
+  };
+  // Canonical resolver port: resolveProduct(externalItemId, sku, marketplaceId, title).
+  const resolver = { resolveProduct: jest.fn().mockResolvedValue(new Types.ObjectId().toString()) };
   const emitter = { emit: jest.fn() };
   const sut = new QuestionIngestService(
-    repo as any, registry as any, adapter as any, resolver as any, emitter as any,
+    repo as any, registry as any, adapter as any,
+    mlService as any, productService as any, resolver as any, emitter as any,
   );
-  return { sut, repo, emitter, resolver, adapter };
+  return { sut, repo, emitter, resolver, adapter, mlService, productService };
 }
 
 describe('QuestionIngestService', () => {
@@ -33,6 +41,18 @@ describe('QuestionIngestService', () => {
     expect(repo.create).toHaveBeenCalled();
     expect(emitter.emit).toHaveBeenCalledWith(NOTIFICATION_EVENTS.REQUESTED, expect.objectContaining({
       type: 'question.received', aggregateId: '99',
+    }));
+  });
+
+  it('CREATE: resolves product via canonical port and enriches the notification', async () => {
+    const { sut, emitter, resolver, productService } = makeSut(null);
+    await sut.ingest('99', 'webhook');
+    // First a cheap externalId-only lookup; on miss, retried with SKU+title.
+    expect(resolver.resolveProduct).toHaveBeenCalled();
+    expect(productService.findOne).toHaveBeenCalled();
+    expect(emitter.emit).toHaveBeenCalledWith(NOTIFICATION_EVENTS.REQUESTED, expect.objectContaining({
+      body: expect.stringContaining('Produto X'),
+      data: expect.objectContaining({ actionRoute: '/(drawer)/questions?focus=99' }),
     }));
   });
 

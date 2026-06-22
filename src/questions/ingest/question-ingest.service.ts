@@ -1,9 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Types } from 'mongoose';
 import { QuestionRepository } from '../question.repository';
 import { MarketplaceRegistryService } from '../../marketplace/services/marketplace-registry.service';
 import { MercadoLivreAdapter } from '../../marketplace/adapters/mercado-livre/mercado-livre.adapter';
-import { QuestionProductResolver } from '../resolve/question-product.resolver';
+import { MercadoLivreService } from '../../marketplace/services/mercado-livre.service';
+import { ProductService } from '../../product/product.service';
+import {
+  PRODUCT_RESOLVER_PORT,
+  ProductResolverPort,
+} from '../../order/ports/product-resolver.port';
 import { NOTIFICATION_EVENTS } from '../../notifications/events/notification.events';
 import { decideQuestionAction, QuestionIngestSource } from './question-ingest.decision';
 
@@ -15,7 +21,10 @@ export class QuestionIngestService {
     private readonly questionRepository: QuestionRepository,
     private readonly marketplaceRegistry: MarketplaceRegistryService,
     private readonly mercadoLivreAdapter: MercadoLivreAdapter,
-    private readonly resolver: QuestionProductResolver,
+    private readonly mercadoLivreService: MercadoLivreService,
+    private readonly productService: ProductService,
+    @Inject(PRODUCT_RESOLVER_PORT)
+    private readonly productResolver: ProductResolverPort,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -58,7 +67,7 @@ export class QuestionIngestService {
         await existing!.save();
         return;
       case 'LINK_PRODUCT': {
-        const pid = await this.resolver.resolve(q.item_id, mkt);
+        const pid = await this.resolveProductId(q.item_id, mkt._id);
         if (pid) {
           existing!.product = pid;
           existing!.itemId = q.item_id;
@@ -67,12 +76,12 @@ export class QuestionIngestService {
         return;
       }
       case 'RECOVER_NOTIFICATION':
-        this.emitNotification(q);
+        await this.emitNotification(q, (existing!.product as any) ?? null);
         (existing as any).notified = true;
         await existing!.save();
         return;
       case 'CREATE': {
-        const pid = await this.resolver.resolve(q.item_id, mkt);
+        const pid = await this.resolveProductId(q.item_id, mkt._id);
         const status = q.status === 'ANSWERED' ? 'ANSWERED' : 'UNANSWERED';
         const created = await this.questionRepository.create({
           externalId: String(q.id),
@@ -92,7 +101,7 @@ export class QuestionIngestService {
           notified: false,
         });
         if (status === 'UNANSWERED') {
-          this.emitNotification(q);
+          await this.emitNotification(q, pid);
           (created as any).notified = true;
           await created.save();
         }
@@ -101,16 +110,62 @@ export class QuestionIngestService {
     }
   }
 
-  private emitNotification(q: any): void {
+  /**
+   * Resolve internal product _id from the ML item id via the single canonical
+   * PRODUCT_RESOLVER_PORT (alias → sku-alias → title → listing → title-match).
+   * When the cheap externalId lookups miss, we enrich with the ML item's SKU and
+   * title (one getItem call) so the resolver can match by SELLER_SKU and create
+   * the alias for next time — preserving the old auto-link-by-SKU behaviour.
+   */
+  private async resolveProductId(
+    itemId: string,
+    marketplaceId: Types.ObjectId,
+  ): Promise<Types.ObjectId | null> {
+    if (!itemId) return null;
+    const mktId = marketplaceId.toString();
+
+    // Cheap path: externalId-only resolution (alias/title/listing).
+    let pid = await this.productResolver.resolveProduct(itemId, '', mktId);
+    if (!pid) {
+      // Enrich with SKU + title from the live ML item, then retry.
+      const { sku, title } = await this.fetchItemSkuAndTitle(itemId);
+      if (sku || title) {
+        pid = await this.productResolver.resolveProduct(itemId, sku, mktId, title);
+      }
+    }
+
+    return pid ? new Types.ObjectId(pid) : null;
+  }
+
+  private async fetchItemSkuAndTitle(itemId: string): Promise<{ sku: string; title: string }> {
+    try {
+      const item = await this.mercadoLivreService.getItem(itemId);
+      const sku =
+        item?.seller_custom_field ||
+        item?.attributes?.find((a: any) => a.id === 'SELLER_SKU')?.value_name ||
+        '';
+      return { sku: String(sku || ''), title: String(item?.title || '') };
+    } catch (e) {
+      this.logger.warn(`[Resolve] getItem failed for ${itemId}: ${(e as Error).message}`);
+      return { sku: '', title: '' };
+    }
+  }
+
+  private async emitNotification(q: any, productId: Types.ObjectId | null): Promise<void> {
+    const externalId = String(q.id);
+    const productName = await this.resolveProductName(productId);
+    const subject = productName || q.item_id;
+
     this.eventEmitter.emit(NOTIFICATION_EVENTS.REQUESTED, {
       type: 'question.received',
       aggregateType: 'question',
-      aggregateId: String(q.id),
+      aggregateId: externalId,
       title: 'Nova Pergunta!',
-      body: `${(q.text ?? '').substring(0, 100)} - ${q.item_id}`,
+      body: `${(q.text ?? '').substring(0, 100)} - ${subject}`,
       data: {
-        actionRoute: '/(drawer)/questions',
-        externalId: String(q.id),
+        actionRoute: `/(drawer)/questions?focus=${externalId}`,
+        externalId,
+        productId: productId ? productId.toString() : null,
         marketplace: 'mercadolivre',
       },
       channels: ['push', 'websocket', 'persist'],
@@ -118,5 +173,16 @@ export class QuestionIngestService {
       deduplicationKey: `question:mercadolivre:${q.id}`,
       source: 'webhook',
     });
+  }
+
+  private async resolveProductName(productId: Types.ObjectId | null): Promise<string | null> {
+    if (!productId) return null;
+    try {
+      const product: any = await this.productService.findOne(productId.toString(), { lean: true });
+      return product?.name || null;
+    } catch (e) {
+      this.logger.warn(`[Notify] product name lookup failed for ${productId}: ${(e as Error).message}`);
+      return null;
+    }
   }
 }

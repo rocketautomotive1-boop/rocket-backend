@@ -12,7 +12,6 @@ import { MarketplaceAuthModule } from '../marketplace/auth/marketplace-auth.modu
 import { QuestionRepository } from './question.repository';
 import { AiModule } from '../ai/ai.module';
 import { QuestionIngestService } from './ingest/question-ingest.service';
-import { QuestionProductResolver } from './resolve/question-product.resolver';
 import { QuestionReconciler } from './reconcile/question-reconciler.service';
 import {
     QuestionReconcileCheckpointModel,
@@ -37,7 +36,6 @@ import {
         QuestionsService,
         QuestionRepository,
         QuestionIngestService,
-        QuestionProductResolver,
         QuestionReconciler,
     ],
     exports: [QuestionsService, QuestionRepository, QuestionIngestService],
