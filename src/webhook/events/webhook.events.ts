@@ -3,6 +3,7 @@ export const WEBHOOK_DOMAIN_COMMANDS = {
   ORDER_PACK_SYNC_REQUESTED: 'order.pack_sync_requested',
   QUESTION_INGEST_REQUESTED: 'question.ingest_requested',
   MODERATION_PROBE_REQUESTED: 'moderation.probe_requested',
+  RETURN_INGEST_REQUESTED: 'return.ingest_requested',
 } as const;
 
 export interface OrderSyncRequestedCommand {
@@ -40,6 +41,21 @@ export interface QuestionIngestRequestedCommand {
 export interface ModerationProbeRequestedCommand {
   marketplace: string;
   /** Listing id at the marketplace (ML item id). */
+  externalId: string;
+  /** Seller id no marketplace (ML user_id) → conta multi-client destino. */
+  externalUserId?: string | null;
+  resource?: string | null;
+  receivedAt: Date;
+  source: 'webhook';
+}
+
+/**
+ * Pós-venda: comprador abriu uma reclamação/devolução (ML topic `claims`). O listener resolve a
+ * conta dona via broker, busca o claim na API e notifica (app + WhatsApp). Detector, não executor.
+ */
+export interface ReturnIngestRequestedCommand {
+  marketplace: string;
+  /** Claim id no marketplace (ML claim id). */
   externalId: string;
   /** Seller id no marketplace (ML user_id) → conta multi-client destino. */
   externalUserId?: string | null;

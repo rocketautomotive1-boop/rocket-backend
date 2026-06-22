@@ -2,7 +2,7 @@ import { SetMetadata } from '@nestjs/common';
 
 export const WEBHOOK_ADAPTER_METADATA = 'webhook:adapter:marketplace';
 
-export type WebhookKind = 'order' | 'order_pack' | 'question' | 'moderation' | 'ignore';
+export type WebhookKind = 'order' | 'order_pack' | 'question' | 'moderation' | 'return' | 'ignore';
 
 export interface WebhookContext {
   readonly marketplace: string;

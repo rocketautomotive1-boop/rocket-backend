@@ -5,7 +5,12 @@ const lastSeg = (r: string) => r.split('/').filter(Boolean).pop() ?? '';
 @RegisterWebhookAdapter('mercadolivre')
 export class MercadoLivreAdapter implements WebhookAdapter {
   readonly marketplace = 'mercadolivre';
-  readonly signatureScheme: SignatureScheme = { type:'hmac-sha256', header:'x-signature', secretKey:'webhookSecret', baseString:'rawBody' };
+  // ML webhooks de tópico (items/orders_v2/questions/stock-locations) NÃO são assinados:
+  // não enviam x-signature nem x-request-id (confirmado via captura do rawBody real). A
+  // verificação de origem é feita downstream ao buscar o `resource` na API com o token da
+  // conta dona — só o seller legítimo consegue lê-lo. (x-signature ts/v1 é do Mercado PAGO,
+  // não dos webhooks de tópico do ML.)
+  readonly signatureScheme: SignatureScheme = { type: 'none' };
   parse(ctx: WebhookContext): NormalizedWebhook {
     const topic = String(ctx.topic||'').toLowerCase();
     const resource = String(ctx.payload?.resource||'');
@@ -18,6 +23,9 @@ export class MercadoLivreAdapter implements WebhookAdapter {
     // moderated listing changes sub_status → fires `items`. Treat it as a low-latency probe;
     // the moderation module checks /infractions for this item (no-op if there's none).
     if (topic==='items'||resource.startsWith('/items/')) return { kind:'moderation', eventId:`mercadolivre:items:${resource}`, externalId:lastSeg(resource), resource, externalUserId, raw:ctx.payload };
+    // `claims` = reclamação/devolução pós-venda. O resource é /post-purchase/v1/claims/{id};
+    // o listener resolve a conta dona e busca o claim na API (só o seller legítimo o lê).
+    if (topic==='claims'||resource.includes('/claims/')) return { kind:'return', eventId:`mercadolivre:claims:${resource}`, externalId:lastSeg(resource), resource, externalUserId, raw:ctx.payload };
     return { kind:'ignore', eventId:`mercadolivre:${topic}:${resource}`, resource, externalUserId, raw:ctx.payload };
   }
 }

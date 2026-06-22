@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { WEBHOOK_DOMAIN_COMMANDS } from '../events/webhook.events';
 export interface DispatchInput {
   marketplace: string; topic: string;
-  kind: 'order' | 'order_pack' | 'question' | 'moderation' | 'unparseable';
+  kind: 'order' | 'order_pack' | 'question' | 'moderation' | 'return' | 'unparseable';
   externalId?: string; externalUserId?: string; resource?: string; payload: any; receivedAt: Date;
 }
 @Injectable()
@@ -25,6 +25,9 @@ export class WebhookDispatcher {
         return;
       case 'moderation':
         await this.emitter.emitAsync(WEBHOOK_DOMAIN_COMMANDS.MODERATION_PROBE_REQUESTED, { marketplace: input.marketplace, externalId: input.externalId, externalUserId: input.externalUserId ?? null, resource: input.resource ?? null, receivedAt: input.receivedAt, source: 'webhook' });
+        return;
+      case 'return':
+        await this.emitter.emitAsync(WEBHOOK_DOMAIN_COMMANDS.RETURN_INGEST_REQUESTED, { marketplace: input.marketplace, externalId: input.externalId, externalUserId: input.externalUserId ?? null, resource: input.resource ?? null, receivedAt: input.receivedAt, source: 'webhook' });
         return;
     }
   }
