@@ -81,6 +81,27 @@ export class MarketplaceAuthService {
     }
 
     /**
+     * true se o domínio está EXPLICITAMENTE desligado neste marketplace (seletor
+     * "Não publicar" da tela). Caminho de saída usa para PULAR sem erro.
+     */
+    async isDomainDisabled(marketplaceId: string | any, domain?: string): Promise<boolean> {
+        const idStr = String(marketplaceId);
+        if (!/^[0-9a-fA-F]{24}$/.test(idStr)) return false;
+        return this.broker.isDomainDisabled(idStr, domain);
+    }
+
+    /**
+     * Roteamento de SAÍDA por domínio do marketplace. `null` = desligar o domínio.
+     * Não invalida o ConfigCache — o controller faz (ele conhece o cache).
+     */
+    async setRouting(
+        marketplaceId: string | any,
+        entries: Record<string, string | null>,
+    ): Promise<Record<string, string | null>> {
+        return this.broker.setRouting(String(marketplaceId), entries);
+    }
+
+    /**
      * Força a renovação do token oauth2 (ignora o buffer) e devolve o renovado.
      * Selector: string (domain, legado) ou { accountId?, domain? } — accountId tem
      * precedência (conta de entrada já determinada). Delega ao TokenManager.

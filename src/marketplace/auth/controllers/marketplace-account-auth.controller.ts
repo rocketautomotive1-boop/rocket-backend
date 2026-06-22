@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { MarketplaceTokenBrokerService } from '../services/marketplace-token-broker.service';
@@ -9,6 +9,11 @@ interface RegisterAccountBody {
   domains: string[];
   clientId: string;
   clientSecret: string;
+}
+
+/** Mapa de roteamento por domínio. `null` = "Não publicar" (desligar o domínio). */
+interface SetRoutingBody {
+  routing: Record<string, string | null>;
 }
 
 /**
@@ -57,6 +62,52 @@ export class MarketplaceAccountAuthController {
 
     const { authUrl } = await this.broker.buildAuthUrl(account.accountId, this.callbackUri());
     return { accountId: account.accountId, label: account.label, domains: account.domains, authUrl };
+  }
+
+  /**
+   * Lista as contas multi-client de um marketplace + o mapa de roteamento atual.
+   * Não expõe secret nem accessToken — só o STATUS do token (hasToken/expira/seller).
+   *
+   * Usage: GET /marketplace-account/mercadolivre
+   */
+  @Get(':tag')
+  @ApiOperation({ summary: 'Lista contas (multi-client) e o roteamento por domínio de um marketplace' })
+  async listAccounts(@Param('tag') tag: string) {
+    const marketplace = await this.registry.findByTag(tag);
+    if (!marketplace) throw new NotFoundException(`Marketplace not found: ${tag}`);
+    return this.broker.listAccounts(marketplace._id.toString());
+  }
+
+  /**
+   * Define o roteamento de SAÍDA por domínio. Body: { routing: { autopecas: id|null, general: id|null } }.
+   * `null` = "Não publicar" (desliga o domínio neste marketplace).
+   *
+   * Usage: PUT /marketplace-account/mercadolivre/routing
+   */
+  @Put(':tag/routing')
+  @ApiOperation({ summary: 'Define o roteamento de publicação por domínio (seletor da tela)' })
+  async setRouting(@Param('tag') tag: string, @Body() body: SetRoutingBody) {
+    if (!body?.routing || typeof body.routing !== 'object') {
+      throw new BadRequestException('routing é obrigatório.');
+    }
+    const marketplace = await this.registry.findByTag(tag);
+    if (!marketplace) throw new NotFoundException(`Marketplace not found: ${tag}`);
+    const routing = await this.broker.setRouting(marketplace._id.toString(), body.routing);
+    return { routing };
+  }
+
+  /**
+   * Remove uma conta multi-client. Limpa as entradas de roteamento que a apontavam.
+   *
+   * Usage: DELETE /marketplace-account/mercadolivre/:accountId
+   */
+  @Delete(':tag/:accountId')
+  @ApiOperation({ summary: 'Remove uma conta multi-client de um marketplace' })
+  async deleteAccount(@Param('tag') tag: string, @Param('accountId') accountId: string) {
+    const marketplace = await this.registry.findByTag(tag);
+    if (!marketplace) throw new NotFoundException(`Marketplace not found: ${tag}`);
+    await this.broker.deleteAccount(marketplace._id.toString(), accountId);
+    return { deleted: true };
   }
 
   // NOTA: o callback OAuth é atendido na RAIZ por MarketplaceCallbackController

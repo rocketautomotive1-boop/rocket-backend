@@ -70,7 +70,17 @@ export class MarketplaceTokenBrokerService {
 
   // ── Resolução de conta ─────────────────────────────────────────────────────
 
-  /** Conta que atende o domínio: match exato (normalizado) → fallback isDefault → 1ª. */
+  /**
+   * Conta de SAÍDA (publicação) que atende o domínio, conforme o mapa EXPLÍCITO
+   * `marketplace.routing` configurado na tela. Três situações:
+   *  - routing[dom] = accountId → resolve essa conta (se existir).
+   *  - routing[dom] = null      → domínio DESLIGADO → retorna null (publish pula).
+   *  - routing[dom] AUSENTE     → fallback (isDefault → 1ª) — preserva o legado
+   *    enquanto a tela não roteia o domínio.
+   *
+   * O fallback ainda consulta `accounts[].domains` (compat até a migração rodar);
+   * uma vez que `routing` está populado, ele é a fonte da verdade.
+   */
   async accountFor(marketplaceId: string, domain?: string): Promise<AccountRef | null> {
     const dom = canonicalDomain(domain);
     const mp = await this.marketplaceModel.findById(marketplaceId).lean().exec();
@@ -78,11 +88,133 @@ export class MarketplaceTokenBrokerService {
     const accounts: (MarketplaceAccountSnapshot & { _id?: any })[] = (mp as any).accounts ?? [];
     if (accounts.length === 0) return null;
 
+    const routing: Record<string, string | null> = (mp as any).routing ?? {};
+    if (Object.prototype.hasOwnProperty.call(routing, dom)) {
+      const routedId = routing[dom];
+      if (routedId === null) return null; // domínio explicitamente desligado
+      const routed = accounts.find((a) => String(a._id) === String(routedId));
+      if (routed) return this.toRef(marketplaceId, (mp as any).tag, routed);
+      // accountId roteado não existe mais (conta removida) → cai no fallback abaixo.
+    }
+
     const chosen =
       accounts.find((a) => (a.domains ?? []).map(canonicalDomain).includes(dom)) ??
       accounts.find((a) => a.isDefault) ??
       accounts[0];
     return chosen ? this.toRef(marketplaceId, (mp as any).tag, chosen) : null;
+  }
+
+  /**
+   * true se o domínio está EXPLICITAMENTE desligado neste marketplace
+   * (`routing[dom] === null`). Distingue "desligado" de "sem token/sem conta",
+   * para o caminho de saída PULAR (não é erro) em vez de falhar.
+   */
+  async isDomainDisabled(marketplaceId: string, domain?: string): Promise<boolean> {
+    const dom = canonicalDomain(domain);
+    const mp = await this.marketplaceModel.findById(marketplaceId).lean().exec();
+    if (!mp) return false;
+    const routing: Record<string, string | null> = (mp as any).routing ?? {};
+    return Object.prototype.hasOwnProperty.call(routing, dom) && routing[dom] === null;
+  }
+
+  /**
+   * Grava o mapa de roteamento do marketplace (merge raso sobre o existente).
+   * Valida que cada accountId apontado existe em accounts[]; `null` = desligar.
+   * Não invalida cache aqui — o chamador (controller) o faz, pois é quem conhece
+   * o ConfigCache (evita dependência circular broker↔cache de escrita).
+   */
+  async setRouting(
+    marketplaceId: string,
+    entries: Record<string, string | null>,
+  ): Promise<Record<string, string | null>> {
+    const mp = await this.marketplaceModel.findById(marketplaceId).exec();
+    if (!mp) throw new BadRequestException(`Marketplace ${marketplaceId} não encontrado.`);
+    const accountIds = new Set(((mp as any).accounts ?? []).map((a: any) => String(a._id)));
+
+    const next: Record<string, string | null> = { ...((mp as any).routing ?? {}) };
+    for (const [rawDom, accountId] of Object.entries(entries)) {
+      const dom = canonicalDomain(rawDom);
+      if (accountId === null) {
+        next[dom] = null;
+        continue;
+      }
+      if (!accountIds.has(String(accountId))) {
+        throw new BadRequestException(
+          `Conta ${accountId} não existe no marketplace ${marketplaceId}.`,
+        );
+      }
+      next[dom] = String(accountId);
+    }
+
+    (mp as any).routing = next;
+    mp.markModified('routing');
+    await mp.save();
+    // routing é config cacheada → invalidar.
+    this.configCache.invalidate();
+    return next;
+  }
+
+  /**
+   * Lista as contas de um marketplace para a tela de Configurações: id, label,
+   * isDefault e o STATUS do token (sem expor secret/accessToken). Usado pelo
+   * controller de administração das contas multi-client.
+   */
+  async listAccounts(marketplaceId: string): Promise<{
+    accounts: Array<{
+      accountId: string;
+      label: string;
+      isDefault: boolean;
+      hasToken: boolean;
+      tokenExpiresAt: Date | null;
+      externalUserId: string | null;
+    }>;
+    routing: Record<string, string | null>;
+  }> {
+    const mp = await this.marketplaceModel.findById(marketplaceId).lean().exec();
+    if (!mp) throw new BadRequestException(`Marketplace ${marketplaceId} não encontrado.`);
+    const accounts: any[] = (mp as any).accounts ?? [];
+    return {
+      accounts: accounts.map((a) => ({
+        accountId: String(a._id),
+        label: a.label,
+        isDefault: !!a.isDefault,
+        hasToken: !!a?.token?.accessToken,
+        tokenExpiresAt: a?.token?.expiresAt ?? null,
+        externalUserId: a?.token?.additionalData?.userId
+          ? String(a.token.additionalData.userId)
+          : null,
+      })),
+      routing: (mp as any).routing ?? {},
+    };
+  }
+
+  /**
+   * Remove uma conta de accounts[]. Limpa também qualquer entrada de `routing`
+   * que aponte para ela (evita roteamento órfão). Não deixa remover a única
+   * conta isDefault se houver outras (mantém um default coerente).
+   */
+  async deleteAccount(marketplaceId: string, accountId: string): Promise<void> {
+    const mp = await this.marketplaceModel.findById(marketplaceId).exec();
+    if (!mp) throw new BadRequestException(`Marketplace ${marketplaceId} não encontrado.`);
+    const accounts: any[] = (mp as any).accounts ?? [];
+    const target = accounts.find((a) => String(a._id) === String(accountId));
+    if (!target) throw new BadRequestException(`Conta ${accountId} não encontrada.`);
+    if (target.isDefault && accounts.length > 1) {
+      throw new BadRequestException(
+        'Não é possível remover a conta padrão enquanto houver outras contas. Defina outra como padrão primeiro.',
+      );
+    }
+
+    (mp as any).accounts = accounts.filter((a) => String(a._id) !== String(accountId));
+    const routing: Record<string, string | null> = { ...((mp as any).routing ?? {}) };
+    for (const [dom, id] of Object.entries(routing)) {
+      if (String(id) === String(accountId)) delete routing[dom];
+    }
+    (mp as any).routing = routing;
+    mp.markModified('accounts');
+    mp.markModified('routing');
+    await mp.save();
+    this.configCache.invalidate();
   }
 
   /** Resolve uma conta multi-client pelo accountId (público — usado por forceRefresh por conta). */

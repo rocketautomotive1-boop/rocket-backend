@@ -21,10 +21,11 @@ describe('MarketplaceTokenBrokerService', () => {
   let modelMock: any;
   let adapterMock: any;
 
-  const marketplaceDoc = (accounts: any[]) => ({
+  const marketplaceDoc = (accounts: any[], routing?: Record<string, string | null>) => ({
     _id: MP_ID,
     tag: 'mercadolivre',
     accounts,
+    ...(routing ? { routing } : {}),
   });
 
   beforeAll(() => {
@@ -99,6 +100,46 @@ describe('MarketplaceTokenBrokerService', () => {
 
     const acc = await broker.accountFor(MP_ID, 'inexistente');
     expect(acc?.label).toBe('def');
+  });
+
+  it('accountFor: routing explícito tem precedência sobre domains[]', async () => {
+    const accounts = [
+      { _id: ACC_ID, label: 'general', isDefault: false, domains: ['general'], credentials: {}, token: { accessToken: 'AT', isActive: true } },
+      { _id: '111111111111111111111111', label: 'def', isDefault: true, domains: ['autopecas'], credentials: {}, token: { accessToken: 'AT2', isActive: true } },
+    ];
+    // routing manda 'general' para a conta 'def', contrariando o domains[].
+    modelMock.findById.mockReturnValue({ lean: () => ({ exec: () => Promise.resolve(marketplaceDoc(accounts, { general: '111111111111111111111111' })) }) });
+
+    const acc = await broker.accountFor(MP_ID, 'general');
+    expect(acc?.label).toBe('def');
+  });
+
+  it('accountFor: routing null (desligado) retorna null', async () => {
+    const accounts = [
+      { _id: ACC_ID, label: 'def', isDefault: true, domains: ['autopecas', 'general'], credentials: {}, token: { accessToken: 'AT', isActive: true } },
+    ];
+    modelMock.findById.mockReturnValue({ lean: () => ({ exec: () => Promise.resolve(marketplaceDoc(accounts, { general: null })) }) });
+
+    const acc = await broker.accountFor(MP_ID, 'general');
+    expect(acc).toBeNull();
+  });
+
+  it('accountFor: routing ausente cai no fallback por domains[] (legado)', async () => {
+    const accounts = [
+      { _id: ACC_ID, label: 'general', isDefault: false, domains: ['general'], credentials: {}, token: { accessToken: 'AT', isActive: true } },
+      { _id: '111111111111111111111111', label: 'def', isDefault: true, domains: ['autopecas'], credentials: {}, token: { accessToken: 'AT2', isActive: true } },
+    ];
+    modelMock.findById.mockReturnValue({ lean: () => ({ exec: () => Promise.resolve(marketplaceDoc(accounts, {})) }) });
+
+    const acc = await broker.accountFor(MP_ID, 'general');
+    expect(acc?.label).toBe('general');
+  });
+
+  it('isDomainDisabled: true só quando routing[dom] === null', async () => {
+    const accounts = [{ _id: ACC_ID, label: 'def', isDefault: true, domains: ['autopecas'], credentials: {}, token: { accessToken: 'AT', isActive: true } }];
+    modelMock.findById.mockReturnValue({ lean: () => ({ exec: () => Promise.resolve(marketplaceDoc(accounts, { general: null })) }) });
+    expect(await broker.isDomainDisabled(MP_ID, 'general')).toBe(true);
+    expect(await broker.isDomainDisabled(MP_ID, 'autopecas')).toBe(false);
   });
 
   it('ensureValidToken: devolve o accessToken válido (não expirando)', async () => {

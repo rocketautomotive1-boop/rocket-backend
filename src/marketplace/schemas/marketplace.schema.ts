@@ -119,6 +119,21 @@ export class MarketplaceModel {
     accounts: MarketplaceAccountSnapshot[];
 
     /**
+     * Mapa EXPLÍCITO de roteamento de SAÍDA (publicação) por domínio do produto:
+     * `{ autopecas: accountId, general: accountId }`. Configurado na tela de
+     * Configurações (substitui o vínculo implícito via `accounts[].domains`).
+     *
+     * Semântica das três situações que `accountFor` distingue:
+     *  - chave AUSENTE  → domínio nunca configurado → fallback (isDefault → 1ª conta).
+     *  - chave = accountId → publica com essa conta.
+     *  - chave = null     → domínio DESLIGADO neste marketplace → não publicar.
+     *
+     * Config estável (servida via cache); escrita só pela tela → invalida cache.
+     */
+    @Prop({ type: Object, default: {} })
+    routing: Record<string, string | null>;
+
+    /**
      * Credenciais semi-estáticas do marketplace que NÃO variam por conta
      * (ex.: partnerKey Shopee). Cifradas (enc:v1:...). Escritas por
      * MarketplaceCredentialsService — declaradas aqui para serem first-class em reads .lean().
