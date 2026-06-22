@@ -17,6 +17,7 @@ export type ModerationType =
   | 'CONTACT_DATA'
   | 'BRAND_PROTECTION'
   | 'CLASSIFICATION'
+  | 'PROHIBITED'
   | 'UNKNOWN';
 
 export interface CanonicalSuggestedCategory {

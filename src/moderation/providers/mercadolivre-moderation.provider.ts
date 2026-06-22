@@ -33,17 +33,25 @@ export interface MlLastModeration {
   wordings?: Array<{ type: 'REASON' | 'REMEDY'; value: string }>;
 }
 
+// Subgroups verified live against a real seller account (2527 infractions). The values the ML API
+// actually emits differ from the docs in a few cases — FOTOS (not PQT), CATALOG (not OPT_OBEY), and
+// PP (prohibited product) had no mapping and were silently UNKNOWN. Docs-era aliases are kept too.
 const SUBGROUP_TO_TYPE: Record<string, ModerationType> = {
-  DOMAIN: 'WRONG_CATEGORY',
+  // verified live
   COMPATS: 'MISSING_COMPATIBILITIES',
+  DOMAIN: 'WRONG_CATEGORY',
+  DP: 'CONTACT_DATA',
+  PP: 'PROHIBITED',
+  FOTOS: 'PHOTO_QUALITY',
+  DUPLIS: 'DUPLICATE',
+  CATALOG: 'CATALOG_REQUIRED',
   PQT: 'PHOTO_QUALITY',
+  // docs-era aliases (kept defensively)
   DESC: 'PRICE_CHANGE',
   OPT_OBEY: 'CATALOG_REQUIRED',
   CATALOG_ONLY_RESTRICTED: 'CATALOG_REQUIRED',
   OPT_OUT_REPRODUCTIZAR: 'CATALOG_REQUIRED',
-  DUPLIS: 'DUPLICATE',
   LINKS: 'CONTACT_DATA',
-  DP: 'CONTACT_DATA',
   BRAND_PROTECTION: 'BRAND_PROTECTION',
   CLASI: 'CLASSIFICATION',
 };

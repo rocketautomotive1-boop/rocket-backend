@@ -9,16 +9,21 @@ describe('MercadoLivreModerationProvider', () => {
 
   describe('classify()', () => {
     const cases: Array<[string, string]> = [
-      ['DOMAIN', 'WRONG_CATEGORY'],
+      // verified live against a real account
       ['COMPATS', 'MISSING_COMPATIBILITIES'],
+      ['DOMAIN', 'WRONG_CATEGORY'],
+      ['DP', 'CONTACT_DATA'],
+      ['PP', 'PROHIBITED'],
+      ['FOTOS', 'PHOTO_QUALITY'],
+      ['DUPLIS', 'DUPLICATE'],
+      ['CATALOG', 'CATALOG_REQUIRED'],
       ['PQT', 'PHOTO_QUALITY'],
+      // docs-era aliases
       ['DESC', 'PRICE_CHANGE'],
       ['OPT_OBEY', 'CATALOG_REQUIRED'],
       ['CATALOG_ONLY_RESTRICTED', 'CATALOG_REQUIRED'],
       ['OPT_OUT_REPRODUCTIZAR', 'CATALOG_REQUIRED'],
-      ['DUPLIS', 'DUPLICATE'],
       ['LINKS', 'CONTACT_DATA'],
-      ['DP', 'CONTACT_DATA'],
       ['BRAND_PROTECTION', 'BRAND_PROTECTION'],
       ['CLASI', 'CLASSIFICATION'],
       ['SOMETHING_NEW', 'UNKNOWN'],
