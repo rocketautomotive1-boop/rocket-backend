@@ -63,6 +63,18 @@ describe('ModerationIngestService', () => {
     expect(handler.handle).not.toHaveBeenCalled();
   });
 
+  it('casts a 24-char marketplaceId to ObjectId in the listing query (string filter matches nothing)', async () => {
+    const { Types } = require('mongoose');
+    const mid = '6955b688dfe7143a30376b16';
+    listingModel.findOne.mockResolvedValue({ _id: 'L1', productId: 'P1' });
+
+    await service.ingest(mid, null, canonical);
+
+    const filter = listingModel.findOne.mock.calls[0][0];
+    expect(filter.marketplaceId).toBeInstanceOf(Types.ObjectId);
+    expect(String(filter.marketplaceId)).toBe(mid);
+  });
+
   it('skips when no handler is registered for the type (no_handler)', async () => {
     listingModel.findOne.mockResolvedValue({ _id: 'L1', productId: 'P1' });
     handlers.get.mockReturnValue(undefined);

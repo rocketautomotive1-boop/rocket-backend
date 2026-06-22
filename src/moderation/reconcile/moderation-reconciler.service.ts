@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { ListingDocument, ListingModel } from '../../listing/schemas/listing.schema';
 import { MarketplaceRegistryService } from '../../marketplace/services/marketplace-registry.service';
 import { MarketplaceTokenBrokerService } from '../../marketplace/auth/services/marketplace-token-broker.service';
@@ -163,7 +163,11 @@ export class ModerationReconciler implements OnModuleInit {
   ): Promise<void> {
     await this.repo.markResolved(stateId);
 
-    const listing = await this.listingModel.findOne({ marketplaceId, externalId });
+    // marketplaceId stored as ObjectId — cast so the filter actually matches (same pitfall as ingest).
+    const listing = await this.listingModel.findOne({
+      marketplaceId: Types.ObjectId.isValid(marketplaceId) ? new Types.ObjectId(marketplaceId) : marketplaceId,
+      externalId,
+    });
     if (listing) {
       const md = { ...(listing.marketplaceData ?? {}) };
       delete md.syncIssue;

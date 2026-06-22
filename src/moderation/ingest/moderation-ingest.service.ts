@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { ListingDocument, ListingModel } from '../../listing/schemas/listing.schema';
 import { ProductDocument, ProductModel } from '../../product/schemas/product.schema';
 import { ModerationRepository } from '../moderation.repository';
@@ -43,8 +43,10 @@ export class ModerationIngestService {
   ): Promise<IngestResult> {
     const externalId = canonical.externalId;
 
+    // marketplaceId is stored as ObjectId on the listing; a string filter silently matches nothing
+    // (Mongoose doesn't cast it inside a raw findOne filter). Cast explicitly.
     const listing = await this.listingModel.findOne({
-      marketplaceId,
+      marketplaceId: Types.ObjectId.isValid(marketplaceId) ? new Types.ObjectId(marketplaceId) : marketplaceId,
       externalId,
       status: { $ne: 'removed' },
     });
