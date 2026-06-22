@@ -88,6 +88,20 @@ export class ProductRepository {
     }
 
     /**
+     * Minimal projection for badges/cards: only name + images, for a batch of ids.
+     * Returns plain objects; the main image is resolved by the caller.
+     */
+    async findSummariesByIds(ids: string[]): Promise<Array<{ _id: any; name: string; images?: any[] }>> {
+        const validIds = ids.filter((id) => Types.ObjectId.isValid(id));
+        if (validIds.length === 0) return [];
+        return this.productModel
+            .find({ _id: { $in: validIds } } as any)
+            .select('name images')
+            .lean()
+            .exec() as any;
+    }
+
+    /**
      * Lighter document for list / initial load: no images, no draft blob, shallow category (no ancestors chain).
      */
     async findByIdLean(id: string): Promise<ProductDocument | null> {

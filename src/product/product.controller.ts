@@ -431,6 +431,18 @@ export class ProductController {
     }
   }
 
+  @Post('summaries')
+  @ApiOperation({
+    summary: 'Resumos de produtos em lote (id + nome + imagem principal)',
+    description: 'Projeção mínima para badges/cards (ex.: notificações). Aceita { ids: string[] } e retorna [{ id, name, image }].'
+  })
+  @ApiResponse({ status: 200, description: 'Lista de resumos de produtos' })
+  async getProductSummaries(
+    @Body() body: { ids?: string[] }
+  ): Promise<Array<{ id: string; name: string; image: string | null }>> {
+    return this.productService.getSummariesByIds(body?.ids ?? []);
+  }
+
   @Get('by-attributes')
   @ApiOperation({
     summary: 'Buscar produtos por atributos específicos',

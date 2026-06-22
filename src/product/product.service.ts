@@ -98,6 +98,28 @@ export class ProductService {
   }
 
   /**
+   * Batch summaries (id + name + main image) for badges/cards (e.g. notifications).
+   * Deduplicates ids, single indexed `$in` query, minimal projection.
+   */
+  async getSummariesByIds(
+    ids: string[],
+  ): Promise<Array<{ id: string; name: string; image: string | null }>> {
+    const unique = Array.from(new Set((ids || []).filter(Boolean).map(String)));
+    if (unique.length === 0) return [];
+
+    const docs = await this.productRepository.findSummariesByIds(unique);
+    return docs.map((doc) => {
+      const images: any[] = Array.isArray(doc.images) ? doc.images : [];
+      const main = images.find((img) => img?.main) ?? images[0];
+      return {
+        id: String(doc._id),
+        name: doc.name ?? '',
+        image: main?.url ?? null,
+      };
+    });
+  }
+
+  /**
    * Read-only lookup by partNumber + brandId. Returns null if not found.
    * Does NOT create any record — safe to call on every keystroke.
    */
