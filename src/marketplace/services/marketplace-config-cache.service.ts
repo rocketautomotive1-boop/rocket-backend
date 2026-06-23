@@ -97,8 +97,8 @@ export class MarketplaceConfigCacheService {
 
   /**
    * Remove o token volátil de cada conta e congela o objeto. Mantém o restante
-   * de `accounts[]` (label/domains/credentials são config estável, lidos pelo
-   * broker para resolver a conta do domínio).
+   * de `accounts[]` (label/credentials) e `activeAccountId` — config estável,
+   * lida pelo broker para resolver a conta ativa de publicação.
    */
   private stripAndFreeze(raw: any): MarketplaceConfig {
     const accounts = Array.isArray(raw.accounts)

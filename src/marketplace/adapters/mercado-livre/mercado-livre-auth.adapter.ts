@@ -64,6 +64,25 @@ export class MercadoLivreAuthAdapter implements IMarketplaceAuthAdapter, OnModul
     return response.data;
   }
 
+  /**
+   * Perfil da conta para exibir o nome real na tela: GET /users/me com o token
+   * RECÉM-EMITIDO (não resolve via registry/broker — é chamado no authorize,
+   * antes do token estar persistido). Best-effort: erro → {} (não quebra o OAuth).
+   */
+  async fetchAccountProfile(token: any): Promise<{ nickname?: string; [key: string]: any }> {
+    const accessToken = token?.accessToken;
+    if (!accessToken) return {};
+    try {
+      const { data } = await axios.get(`${this.baseUrl}/users/me`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      return { nickname: data?.nickname, userId: data?.id };
+    } catch (error: any) {
+      this.logger.warn(`fetchAccountProfile (ML /users/me) falhou: ${error.message}`);
+      return {};
+    }
+  }
+
   /** clientId/secret das credenciais fornecidas → fallback ao env. */
   private resolveCreds(credentials?: AdapterAccountCredentials): { clientId: string; clientSecret: string } {
     const clientId = credentials?.clientId

@@ -71,87 +71,56 @@ export class MarketplaceTokenBrokerService {
   // ── Resolução de conta ─────────────────────────────────────────────────────
 
   /**
-   * Conta de SAÍDA (publicação) que atende o domínio, conforme o mapa EXPLÍCITO
-   * `marketplace.routing` configurado na tela. Três situações:
-   *  - routing[dom] = accountId → resolve essa conta (se existir).
-   *  - routing[dom] = null      → domínio DESLIGADO → retorna null (publish pula).
-   *  - routing[dom] AUSENTE     → fallback (isDefault → 1ª) — preserva o legado
-   *    enquanto a tela não roteia o domínio.
+   * Conta de SAÍDA (publicação) do marketplace: a CONTA ATIVA selecionada na
+   * tela (`marketplace.activeAccountId`), independente do domínio do produto.
+   *  - activeAccountId aponta uma conta existente → publica com ela.
+   *  - sem conta ativa (null/ausente) → fallback isDefault → 1ª conta (preserva
+   *    marketplaces ainda não migrados; uma vez setado, activeAccountId manda).
    *
-   * O fallback ainda consulta `accounts[].domains` (compat até a migração rodar);
-   * uma vez que `routing` está populado, ele é a fonte da verdade.
+   * `domain` é mantido na assinatura por compat com os chamadores, mas NÃO entra
+   * mais na seleção (o modelo deixou de rotear por domínio).
    */
   async accountFor(marketplaceId: string, domain?: string): Promise<AccountRef | null> {
-    const dom = canonicalDomain(domain);
+    void domain; // não roteia mais por domínio — conta ativa decide.
     const mp = await this.marketplaceModel.findById(marketplaceId).lean().exec();
     if (!mp) return null;
     const accounts: (MarketplaceAccountSnapshot & { _id?: any })[] = (mp as any).accounts ?? [];
     if (accounts.length === 0) return null;
 
-    const routing: Record<string, string | null> = (mp as any).routing ?? {};
-    if (Object.prototype.hasOwnProperty.call(routing, dom)) {
-      const routedId = routing[dom];
-      if (routedId === null) return null; // domínio explicitamente desligado
-      const routed = accounts.find((a) => String(a._id) === String(routedId));
-      if (routed) return this.toRef(marketplaceId, (mp as any).tag, routed);
-      // accountId roteado não existe mais (conta removida) → cai no fallback abaixo.
+    const activeId: string | null = (mp as any).activeAccountId ?? null;
+    if (activeId) {
+      const active = accounts.find((a) => String(a._id) === String(activeId));
+      if (active) return this.toRef(marketplaceId, (mp as any).tag, active);
+      // conta ativa foi removida → cai no fallback.
     }
 
-    const chosen =
-      accounts.find((a) => (a.domains ?? []).map(canonicalDomain).includes(dom)) ??
-      accounts.find((a) => a.isDefault) ??
-      accounts[0];
+    const chosen = accounts.find((a) => a.isDefault) ?? accounts[0];
     return chosen ? this.toRef(marketplaceId, (mp as any).tag, chosen) : null;
   }
 
   /**
-   * true se o domínio está EXPLICITAMENTE desligado neste marketplace
-   * (`routing[dom] === null`). Distingue "desligado" de "sem token/sem conta",
-   * para o caminho de saída PULAR (não é erro) em vez de falhar.
+   * Define a CONTA ATIVA de publicação do marketplace (radio na tela). `null`
+   * limpa (marketplace deixa de publicar). Valida que a conta existe e está
+   * autorizada (tem token) — não faz sentido ativar uma conta sem token.
    */
-  async isDomainDisabled(marketplaceId: string, domain?: string): Promise<boolean> {
-    const dom = canonicalDomain(domain);
-    const mp = await this.marketplaceModel.findById(marketplaceId).lean().exec();
-    if (!mp) return false;
-    const routing: Record<string, string | null> = (mp as any).routing ?? {};
-    return Object.prototype.hasOwnProperty.call(routing, dom) && routing[dom] === null;
-  }
-
-  /**
-   * Grava o mapa de roteamento do marketplace (merge raso sobre o existente).
-   * Valida que cada accountId apontado existe em accounts[]; `null` = desligar.
-   * Não invalida cache aqui — o chamador (controller) o faz, pois é quem conhece
-   * o ConfigCache (evita dependência circular broker↔cache de escrita).
-   */
-  async setRouting(
-    marketplaceId: string,
-    entries: Record<string, string | null>,
-  ): Promise<Record<string, string | null>> {
+  async setActiveAccount(marketplaceId: string, accountId: string | null): Promise<{ activeAccountId: string | null }> {
     const mp = await this.marketplaceModel.findById(marketplaceId).exec();
     if (!mp) throw new BadRequestException(`Marketplace ${marketplaceId} não encontrado.`);
-    const accountIds = new Set(((mp as any).accounts ?? []).map((a: any) => String(a._id)));
 
-    const next: Record<string, string | null> = { ...((mp as any).routing ?? {}) };
-    for (const [rawDom, accountId] of Object.entries(entries)) {
-      const dom = canonicalDomain(rawDom);
-      if (accountId === null) {
-        next[dom] = null;
-        continue;
+    if (accountId !== null) {
+      const account = ((mp as any).accounts ?? []).find((a: any) => String(a._id) === String(accountId));
+      if (!account) throw new BadRequestException(`Conta ${accountId} não existe no marketplace ${marketplaceId}.`);
+      if (!account?.token?.accessToken) {
+        throw new BadRequestException('Não é possível ativar uma conta ainda não autorizada. Autorize primeiro.');
       }
-      if (!accountIds.has(String(accountId))) {
-        throw new BadRequestException(
-          `Conta ${accountId} não existe no marketplace ${marketplaceId}.`,
-        );
-      }
-      next[dom] = String(accountId);
     }
 
-    (mp as any).routing = next;
-    mp.markModified('routing');
+    (mp as any).activeAccountId = accountId;
+    mp.markModified('activeAccountId');
     await mp.save();
-    // routing é config cacheada → invalidar.
+    // activeAccountId é config cacheada → invalidar.
     this.configCache.invalidate();
-    return next;
+    return { activeAccountId: accountId };
   }
 
   /**
@@ -163,35 +132,59 @@ export class MarketplaceTokenBrokerService {
     accounts: Array<{
       accountId: string;
       label: string;
-      isDefault: boolean;
+      displayName: string | null;
+      isActive: boolean;
       hasToken: boolean;
       tokenExpiresAt: Date | null;
       externalUserId: string | null;
     }>;
-    routing: Record<string, string | null>;
+    activeAccountId: string | null;
   }> {
     const mp = await this.marketplaceModel.findById(marketplaceId).lean().exec();
     if (!mp) throw new BadRequestException(`Marketplace ${marketplaceId} não encontrado.`);
     const accounts: any[] = (mp as any).accounts ?? [];
+    const activeAccountId: string | null = (mp as any).activeAccountId ?? null;
     return {
       accounts: accounts.map((a) => ({
         accountId: String(a._id),
         label: a.label,
-        isDefault: !!a.isDefault,
+        // Nome real da conta no marketplace (ex.: nickname do ML via /users/me),
+        // persistido em additionalData no authorize. Fallback null → UI usa label.
+        displayName: a?.token?.additionalData?.nickname
+          ? String(a.token.additionalData.nickname)
+          : null,
+        isActive: String(a._id) === String(activeAccountId),
         hasToken: !!a?.token?.accessToken,
         tokenExpiresAt: a?.token?.expiresAt ?? null,
         externalUserId: a?.token?.additionalData?.userId
           ? String(a.token.additionalData.userId)
           : null,
       })),
-      routing: (mp as any).routing ?? {},
+      activeAccountId,
     };
   }
 
   /**
-   * Remove uma conta de accounts[]. Limpa também qualquer entrada de `routing`
-   * que aponte para ela (evita roteamento órfão). Não deixa remover a única
-   * conta isDefault se houver outras (mantém um default coerente).
+   * true se o marketplace NÃO deve publicar: tem contas cadastradas, mas nenhuma
+   * conta ativa válida selecionada. Distingue "publicação desligada de propósito"
+   * de "falha de token", para o caminho de saída PULAR (não é erro).
+   * Sem contas → false (deixa o fluxo seguir e falhar como antes, não é o caso
+   * de "desligado pelo usuário").
+   */
+  async isPublishingDisabled(marketplaceId: string): Promise<boolean> {
+    const mp = await this.marketplaceModel.findById(marketplaceId).lean().exec();
+    if (!mp) return false;
+    const accounts: any[] = (mp as any).accounts ?? [];
+    if (accounts.length === 0) return false;
+    const activeId: string | null = (mp as any).activeAccountId ?? null;
+    if (!activeId) return true; // contas existem mas nenhuma ativa → desligado.
+    const active = accounts.find((a) => String(a._id) === String(activeId));
+    return !active?.token?.accessToken; // ativa removida/sem token → desligado.
+  }
+
+  /**
+   * Remove uma conta de accounts[]. Se a conta removida era a ATIVA, limpa
+   * `activeAccountId` (o marketplace deixa de publicar até você ativar outra).
    */
   async deleteAccount(marketplaceId: string, accountId: string): Promise<void> {
     const mp = await this.marketplaceModel.findById(marketplaceId).exec();
@@ -199,20 +192,13 @@ export class MarketplaceTokenBrokerService {
     const accounts: any[] = (mp as any).accounts ?? [];
     const target = accounts.find((a) => String(a._id) === String(accountId));
     if (!target) throw new BadRequestException(`Conta ${accountId} não encontrada.`);
-    if (target.isDefault && accounts.length > 1) {
-      throw new BadRequestException(
-        'Não é possível remover a conta padrão enquanto houver outras contas. Defina outra como padrão primeiro.',
-      );
-    }
 
     (mp as any).accounts = accounts.filter((a) => String(a._id) !== String(accountId));
-    const routing: Record<string, string | null> = { ...((mp as any).routing ?? {}) };
-    for (const [dom, id] of Object.entries(routing)) {
-      if (String(id) === String(accountId)) delete routing[dom];
+    if (String((mp as any).activeAccountId) === String(accountId)) {
+      (mp as any).activeAccountId = null;
+      mp.markModified('activeAccountId');
     }
-    (mp as any).routing = routing;
     mp.markModified('accounts');
-    mp.markModified('routing');
     await mp.save();
     this.configCache.invalidate();
   }
@@ -451,18 +437,17 @@ export class MarketplaceTokenBrokerService {
   // ── Registro de conta (admin) ──────────────────────────────────────────────
 
   /**
-   * Cria uma conta em accounts[] com credenciais cifradas. Enforça invariantes:
-   * label único por marketplace; no máx. 1 isDefault. Retorna o accountId criado.
+   * Cria uma conta em accounts[] com credenciais cifradas. Enforça label único
+   * por marketplace. `domains` é legado/opcional (o modelo publica pela conta
+   * ATIVA, não por domínio). Retorna o accountId criado.
    */
   async registerAccount(input: {
     marketplaceId: string;
     label: string;
-    domains: string[];
+    domains?: string[];
     credentials: Record<string, string>;
-    isDefault?: boolean;
-  }): Promise<{ accountId: string; label: string; domains: string[] }> {
+  }): Promise<{ accountId: string; label: string }> {
     if (!input.label?.trim()) throw new BadRequestException('label da conta é obrigatório.');
-    if (!input.domains?.length) throw new BadRequestException('domains da conta é obrigatório.');
 
     const mp = await this.marketplaceModel.findById(input.marketplaceId).exec();
     if (!mp) throw new BadRequestException(`Marketplace ${input.marketplaceId} não encontrado.`);
@@ -472,20 +457,19 @@ export class MarketplaceTokenBrokerService {
       throw new BadRequestException(`Já existe conta com label '${input.label}' neste marketplace.`);
     }
 
-    const isDefault = !!input.isDefault && !accounts.some((a) => a.isDefault);
     const account: any = {
       _id: new Types.ObjectId(),
       label: input.label,
-      isDefault,
-      domains: input.domains.map(canonicalDomain),
+      isDefault: false,
+      domains: (input.domains ?? []).map(canonicalDomain),
       credentials: this.encryptCredentials(input.credentials),
       token: undefined,
     };
     (mp as any).accounts = [...accounts, account];
     await mp.save();
-    // accounts[].label/domains/credentials são config cacheada → invalidar.
+    // accounts[] é config cacheada → invalidar.
     this.configCache.invalidate();
-    return { accountId: String(account._id), label: account.label, domains: account.domains };
+    return { accountId: String(account._id), label: account.label };
   }
 
   private encryptCredentials(raw: Record<string, string>): Record<string, string> {
@@ -517,7 +501,52 @@ export class MarketplaceTokenBrokerService {
     const { clientId, clientSecret } = await this.resolveCredentials(located);
     const adapter = this.registry.getAuthAdapter(located.tag);
     const tokenData = await adapter.authenticate(code, { redirectUri, credentials: { clientId, clientSecret } });
-    await this.saveAccountToken(located, tokenData);
+    await this.saveAccountToken(located, await this.enrichWithProfile(adapter, tokenData));
+  }
+
+  /**
+   * Enriquece o token com o PERFIL da conta (nome real) quando o adapter suporta
+   * `fetchAccountProfile`. Best-effort: falha não bloqueia a persistência do token.
+   */
+  private async enrichWithProfile(adapter: any, tokenData: any): Promise<any> {
+    if (typeof adapter?.fetchAccountProfile !== 'function') return tokenData;
+    try {
+      const profile = await adapter.fetchAccountProfile(tokenData);
+      if (profile?.nickname) {
+        return {
+          ...tokenData,
+          additionalData: { ...(tokenData.additionalData ?? {}), nickname: profile.nickname },
+        };
+      }
+    } catch {
+      /* best-effort — segue sem nickname */
+    }
+    return tokenData;
+  }
+
+  /**
+   * Backfill do nome real de uma conta JÁ autorizada: re-busca o perfil com o
+   * token salvo e persiste `nickname`. Usado pelo endpoint de refresh de perfil
+   * (contas autorizadas antes desta feature não têm nickname salvo).
+   */
+  async refreshAccountProfile(accountId: string): Promise<{ nickname: string | null }> {
+    const account = await this.locateAccount(accountId);
+    if (!account) throw new BadRequestException(`Conta ${accountId} não encontrada.`);
+    if (!account.token?.accessToken) {
+      throw new BadRequestException('Conta sem token ativo — autorize antes de atualizar o perfil.');
+    }
+    const adapter: any = this.registry.getAuthAdapter(account.tag);
+    if (typeof adapter?.fetchAccountProfile !== 'function') return { nickname: null };
+
+    const profile = await adapter.fetchAccountProfile(account.token);
+    if (!profile?.nickname) return { nickname: null };
+
+    const enriched = {
+      ...account.token,
+      additionalData: { ...(account.token.additionalData ?? {}), nickname: profile.nickname },
+    };
+    await this.saveAccountToken(account, enriched);
+    return { nickname: profile.nickname };
   }
 
   /** Localiza uma conta por accountId em qualquer marketplace. */

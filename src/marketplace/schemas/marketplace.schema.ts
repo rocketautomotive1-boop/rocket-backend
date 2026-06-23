@@ -119,19 +119,17 @@ export class MarketplaceModel {
     accounts: MarketplaceAccountSnapshot[];
 
     /**
-     * Mapa EXPLÍCITO de roteamento de SAÍDA (publicação) por domínio do produto:
-     * `{ autopecas: accountId, general: accountId }`. Configurado na tela de
-     * Configurações (substitui o vínculo implícito via `accounts[].domains`).
+     * Conta ATIVA de publicação deste marketplace (multi-client). É a única conta
+     * que publica — independente do domínio do produto. Configurada na tela de
+     * Configurações (radio "conta ativa"). `null`/ausente → este marketplace não
+     * publica (sem conta ativa selecionada).
      *
-     * Semântica das três situações que `accountFor` distingue:
-     *  - chave AUSENTE  → domínio nunca configurado → fallback (isDefault → 1ª conta).
-     *  - chave = accountId → publica com essa conta.
-     *  - chave = null     → domínio DESLIGADO neste marketplace → não publicar.
-     *
-     * Config estável (servida via cache); escrita só pela tela → invalida cache.
+     * Substituiu o roteamento por domínio (`routing`) e o vínculo implícito via
+     * `accounts[].domains`. Config estável (servida via cache); escrita só pela
+     * tela → invalida cache.
      */
-    @Prop({ type: Object, default: {} })
-    routing: Record<string, string | null>;
+    @Prop({ type: String, default: null })
+    activeAccountId: string | null;
 
     /**
      * Credenciais semi-estáticas do marketplace que NÃO variam por conta

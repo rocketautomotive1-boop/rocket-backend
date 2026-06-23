@@ -6,14 +6,13 @@ import { MarketplaceRegistryService } from '../../services/marketplace-registry.
 
 interface RegisterAccountBody {
   label: string;
-  domains: string[];
   clientId: string;
   clientSecret: string;
 }
 
-/** Mapa de roteamento por domínio. `null` = "Não publicar" (desligar o domínio). */
-interface SetRoutingBody {
-  routing: Record<string, string | null>;
+/** Conta ativa de publicação. `accountId: null` = desligar (não publicar). */
+interface SetActiveAccountBody {
+  accountId: string | null;
 }
 
 /**
@@ -36,16 +35,15 @@ export class MarketplaceAccountAuthController {
    * `authUrl` retornado para autorizar a conta via OAuth e popular o token.
    *
    * Usage: POST /marketplace-account/mercadolivre
-   *   body: { label, domains: ['general'], clientId, clientSecret }
+   *   body: { label, clientId, clientSecret }
    */
   @Post(':tag')
-  @ApiOperation({ summary: 'Cria uma conta de marketplace (multi-client) para um domínio' })
+  @ApiOperation({ summary: 'Cria uma conta de marketplace (multi-client)' })
   async createAccount(
     @Param('tag') tag: string,
     @Body() body: RegisterAccountBody,
-  ): Promise<{ accountId: string; label: string; domains: string[]; authUrl: string }> {
+  ): Promise<{ accountId: string; label: string; authUrl: string }> {
     if (!body?.label?.trim()) throw new BadRequestException('label é obrigatório.');
-    if (!body?.domains?.length) throw new BadRequestException('domains é obrigatório.');
     if (!body?.clientId?.trim() || !body?.clientSecret?.trim()) {
       throw new BadRequestException('clientId e clientSecret são obrigatórios.');
     }
@@ -56,22 +54,21 @@ export class MarketplaceAccountAuthController {
     const account = await this.broker.registerAccount({
       marketplaceId: marketplace._id.toString(),
       label: body.label,
-      domains: body.domains,
       credentials: { clientId: body.clientId, clientSecret: body.clientSecret },
     });
 
     const { authUrl } = await this.broker.buildAuthUrl(account.accountId, this.callbackUri());
-    return { accountId: account.accountId, label: account.label, domains: account.domains, authUrl };
+    return { accountId: account.accountId, label: account.label, authUrl };
   }
 
   /**
-   * Lista as contas multi-client de um marketplace + o mapa de roteamento atual.
-   * Não expõe secret nem accessToken — só o STATUS do token (hasToken/expira/seller).
+   * Lista as contas multi-client de um marketplace + a conta ATIVA atual.
+   * Não expõe secret nem accessToken — só nome real, status do token e qual é a ativa.
    *
    * Usage: GET /marketplace-account/mercadolivre
    */
   @Get(':tag')
-  @ApiOperation({ summary: 'Lista contas (multi-client) e o roteamento por domínio de um marketplace' })
+  @ApiOperation({ summary: 'Lista contas (multi-client) e a conta ativa de um marketplace' })
   async listAccounts(@Param('tag') tag: string) {
     const marketplace = await this.registry.findByTag(tag);
     if (!marketplace) throw new NotFoundException(`Marketplace not found: ${tag}`);
@@ -79,25 +76,24 @@ export class MarketplaceAccountAuthController {
   }
 
   /**
-   * Define o roteamento de SAÍDA por domínio. Body: { routing: { autopecas: id|null, general: id|null } }.
-   * `null` = "Não publicar" (desliga o domínio neste marketplace).
+   * Define a conta ATIVA de publicação. Body: { accountId: id | null }.
+   * `null` desliga a publicação (nenhuma conta ativa).
    *
-   * Usage: PUT /marketplace-account/mercadolivre/routing
+   * Usage: PUT /marketplace-account/mercadolivre/active-account
    */
-  @Put(':tag/routing')
-  @ApiOperation({ summary: 'Define o roteamento de publicação por domínio (seletor da tela)' })
-  async setRouting(@Param('tag') tag: string, @Body() body: SetRoutingBody) {
-    if (!body?.routing || typeof body.routing !== 'object') {
-      throw new BadRequestException('routing é obrigatório.');
+  @Put(':tag/active-account')
+  @ApiOperation({ summary: 'Define a conta ativa de publicação (radio da tela)' })
+  async setActiveAccount(@Param('tag') tag: string, @Body() body: SetActiveAccountBody) {
+    if (!body || !('accountId' in body)) {
+      throw new BadRequestException('accountId é obrigatório (use null para desligar).');
     }
     const marketplace = await this.registry.findByTag(tag);
     if (!marketplace) throw new NotFoundException(`Marketplace not found: ${tag}`);
-    const routing = await this.broker.setRouting(marketplace._id.toString(), body.routing);
-    return { routing };
+    return this.broker.setActiveAccount(marketplace._id.toString(), body.accountId);
   }
 
   /**
-   * Remove uma conta multi-client. Limpa as entradas de roteamento que a apontavam.
+   * Remove uma conta multi-client. Se era a conta ativa, limpa a ativação.
    *
    * Usage: DELETE /marketplace-account/mercadolivre/:accountId
    */
@@ -118,6 +114,18 @@ export class MarketplaceAccountAuthController {
   @ApiOperation({ summary: 'Gera a URL de autorização OAuth para a conta' })
   async authUrl(@Param('accountId') accountId: string): Promise<{ authUrl: string }> {
     return this.broker.buildAuthUrl(accountId, this.callbackUri());
+  }
+
+  /**
+   * Atualiza o nome real da conta (re-busca o perfil no marketplace). Backfill
+   * para contas autorizadas antes desta feature.
+   *
+   * Usage: POST /marketplace-account/:accountId/refresh-profile
+   */
+  @Post(':accountId/refresh-profile')
+  @ApiOperation({ summary: 'Re-busca o nome real da conta no marketplace' })
+  async refreshProfile(@Param('accountId') accountId: string): Promise<{ nickname: string | null }> {
+    return this.broker.refreshAccountProfile(accountId);
   }
 
   /**

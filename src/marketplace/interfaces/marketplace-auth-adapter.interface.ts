@@ -43,4 +43,12 @@ export interface IMarketplaceAuthAdapter {
      * Optional: Validates if the current configuration/credentials are correct.
      */
     testCredentials?(): Promise<boolean>;
+
+    /**
+     * Opcional: dado um token já emitido, busca o PERFIL da conta no marketplace
+     * (ex.: ML GET /users/me) para exibir o nome real na tela. Deve devolver, no
+     * mínimo, `{ nickname }` quando disponível. Providers que não suportam apenas
+     * não implementam — o broker degrada para o label da conta.
+     */
+    fetchAccountProfile?(token: any): Promise<{ nickname?: string; [key: string]: any }>;
 }

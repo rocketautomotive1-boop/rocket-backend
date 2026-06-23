@@ -29,8 +29,8 @@ export class InternalTokenController {
         const marketplace = await this.registry.findByTag(tag);
         if (!marketplace) throw new NotFoundException(`Marketplace not found: ${tag}`);
 
-        // Domínio desligado na tela ("Não publicar"): não é erro — sinaliza skip.
-        if (await this.authService.isDomainDisabled(marketplace._id.toString(), domain)) {
+        // Publicação desligada (sem conta ativa selecionada): não é erro — skip.
+        if (await this.authService.isPublishingDisabled(marketplace._id.toString())) {
             return { disabled: true };
         }
 
