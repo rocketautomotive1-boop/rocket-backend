@@ -15,6 +15,7 @@ const DEFAULTS: Record<NotificationCategory, CategoryDefaults> = {
   marketplace: { channels: ['persist', 'push', 'websocket'], audience: { kind: 'all-admins' } },
   moderation:  { channels: ['persist', 'push', 'websocket'], audience: { kind: 'all-admins' } },
   system:      { channels: ['persist', 'push', 'websocket'], audience: { kind: 'all-admins' } },
+  'price-tracker': { channels: ['persist', 'push', 'websocket'], audience: { kind: 'all-admins' } },
 };
 
 const FALLBACK: CategoryDefaults = DEFAULTS.system;

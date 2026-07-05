@@ -45,6 +45,12 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
                             type: 'topic',
                             options: { durable: true },
                         },
+                        {
+                            // Declarado pelo scraper Python como DIRECT durable — precisa casar.
+                            name: 'rocket.scraper',
+                            type: 'direct',
+                            options: { durable: true },
+                        },
                     ],
                     uri: uri,
                     connectionInitOptions: { wait: false },
