@@ -22,12 +22,11 @@ describe('computeAnalysis', () => {
     expect(a.movingAvg).toBe(15);
     expect(a.allTimeLow).toBe(10); // all-time considera TODO o histórico válido
     expect(a.validSnapshots).toBe(3); // 10, 20, 500
-    expect(a.distinctDays).toBe(3);
   });
 
   it('histórico vazio → tudo null/zero', () => {
     const a = computeAnalysis([], NOW);
-    expect(a).toEqual({ movingAvg: null, allTimeLow: null, validSnapshots: 0, distinctDays: 0 });
+    expect(a).toEqual({ movingAvg: null, allTimeLow: null, validSnapshots: 0 });
   });
 
   it('média móvel usa a MEDIANA, não o min — promoção relâmpago isolada não a desloca', () => {
@@ -52,10 +51,27 @@ describe('evaluateTriggers', () => {
     expect(r).toBe('below_target');
   });
 
-  it('sem histórico mínimo (5 snapshots / 3 dias), gatilhos 2 e 3 NÃO armam', () => {
+  it('sem histórico mínimo (5 snapshots), gatilhos 2 e 3 NÃO armam', () => {
     const analysis = computeAnalysis(flatHistory(4, 100), NOW); // só 4 snapshots
     const r = evaluateTriggers({ ...base, current: 1, targetPrice: null, analysis });
     expect(r).toBeNull();
+  });
+
+  it('5+ snapshots no MESMO dia (scans manuais) já armam o gatilho — não exige dias distintos', () => {
+    // Reproduz o caso real: item cadastrado hoje, 5 scans manuais no mesmo dia,
+    // preço cai de 3.29 pra 0.99 no ciclo seguinte. Antes desta correção, a guarda
+    // de "3 dias distintos" bloqueava o alerta indefinidamente.
+    const sameDay = new Date('2026-07-06T21:00:00Z');
+    const points: SnapshotPoint[] = [
+      { min: 3.29, median: 4.72, count: 450, scannedAt: new Date('2026-07-06T11:05:00Z') },
+      { min: 3.29, median: 4.72, count: 450, scannedAt: new Date('2026-07-06T11:08:00Z') },
+      { min: 3.29, median: 4.74, count: 447, scannedAt: new Date('2026-07-06T11:40:00Z') },
+      { min: 3.29, median: 4.70, count: 447, scannedAt: new Date('2026-07-06T13:47:00Z') },
+      { min: 3.29, median: 4.78, count: 446, scannedAt: new Date('2026-07-06T15:00:00Z') },
+    ];
+    const analysis = computeAnalysis(points, sameDay);
+    const r = evaluateTriggers({ current: 0.99, currentCount: 449, thresholdPct: 15, targetPrice: null, analysis });
+    expect(r).toBe('all_time_low');
   });
 
   it('all_time_low quando atual < menor histórico', () => {

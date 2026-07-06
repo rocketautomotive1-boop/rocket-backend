@@ -14,7 +14,6 @@
 
 export const MOVING_AVG_DAYS = 14;
 export const MIN_SNAPSHOTS = 5;
-export const MIN_DISTINCT_DAYS = 3;
 export const REALERT_DROP_FACTOR = 0.95;
 
 export interface SnapshotPoint {
@@ -32,7 +31,6 @@ export interface PriceAnalysis {
   /** Menor preço já visto (extremo, não mediana) — usado só no gatilho all_time_low. */
   allTimeLow: number | null;
   validSnapshots: number;
-  distinctDays: number;
 }
 
 export type AlertReason = 'below_target' | 'all_time_low' | 'below_moving_avg';
@@ -54,7 +52,7 @@ const validPoints = (points: SnapshotPoint[]): SnapshotPoint[] =>
 export function computeAnalysis(points: SnapshotPoint[], now: Date): PriceAnalysis {
   const valid = validPoints(points);
   if (!valid.length) {
-    return { movingAvg: null, allTimeLow: null, validSnapshots: 0, distinctDays: 0 };
+    return { movingAvg: null, allTimeLow: null, validSnapshots: 0 };
   }
 
   const cutoff = new Date(now.getTime() - MOVING_AVG_DAYS * 86_400_000);
@@ -69,9 +67,8 @@ export function computeAnalysis(points: SnapshotPoint[], now: Date): PriceAnalys
     : null;
 
   const allTimeLow = Math.min(...valid.map((p) => p.min as number));
-  const distinctDays = new Set(valid.map((p) => p.scannedAt.toISOString().slice(0, 10))).size;
 
-  return { movingAvg, allTimeLow, validSnapshots: valid.length, distinctDays };
+  return { movingAvg, allTimeLow, validSnapshots: valid.length };
 }
 
 /** Avalia os gatilhos NA ORDEM do spec; o primeiro que casa define o reason. */
@@ -81,10 +78,10 @@ export function evaluateTriggers(input: TriggerInput): AlertReason | null {
   // 1) Teto explícito do usuário — funciona desde o 1º ciclo, sem histórico.
   if (targetPrice != null && current <= targetPrice) return 'below_target';
 
-  // Guardas anti-"metade do dobro": sem base histórica não há promoção.
-  const armed =
-    analysis.validSnapshots >= MIN_SNAPSHOTS && analysis.distinctDays >= MIN_DISTINCT_DAYS;
-  if (!armed) return null;
+  // Guarda anti-"metade do dobro": sem base histórica mínima não há promoção.
+  // A mediana (não o min) já protege contra outlier de 1 vendedor — não é
+  // necessário também esperar dias civis distintos passarem.
+  if (analysis.validSnapshots < MIN_SNAPSHOTS) return null;
 
   // 2) Menor preço já visto.
   if (analysis.allTimeLow != null && current < analysis.allTimeLow) return 'all_time_low';

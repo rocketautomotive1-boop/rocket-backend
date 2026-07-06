@@ -5,7 +5,7 @@ import { Types } from 'mongoose';
 // allTimeLow abaixo dos preços testados (76/80) p/ exercitar below_moving_avg,
 // não all_time_low (que tem precedência na ordem dos gatilhos).
 const analysis: PriceAnalysis = {
-  movingAvg: 100, allTimeLow: 70, validSnapshots: 10, distinctDays: 5,
+  movingAvg: 100, allTimeLow: 70, validSnapshots: 10,
 };
 
 const makeItem = (overrides: Record<string, any> = {}) => ({
