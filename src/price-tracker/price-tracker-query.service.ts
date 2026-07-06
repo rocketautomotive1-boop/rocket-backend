@@ -62,6 +62,9 @@ export class PriceTrackerQueryService {
 
     const cutoff = new Date(Date.now() - MOVING_AVG_DAYS * 86_400_000);
     // 1 aggregation p/ todos os EANs: último snapshot válido + all-time low + média 14d.
+    // movingAvg usa a MEDIANA de cada ciclo (stats.median), não o mínimo — o mínimo é
+    // sensível a promoção relâmpago isolada de 1 vendedor (ver price-analysis.ts).
+    // allTimeLow continua no mínimo de propósito (gatilho de extremo, separado).
     const agg = await this.historyModel.aggregate([
       { $match: { ean: { $in: items.map((i) => i.ean) }, error: null, 'stats.min': { $ne: null } } },
       { $sort: { scannedAt: -1 } },
@@ -72,8 +75,16 @@ export class PriceTrackerQueryService {
           lastCount: { $first: '$stats.count' },
           lastScannedAt: { $first: '$scannedAt' },
           allTimeLow: { $min: '$stats.min' },
-          // $avg ignora null → média apenas da janela de 14d.
-          movingAvg: { $avg: { $cond: [{ $gte: ['$scannedAt', cutoff] }, '$stats.min', null] } },
+          // $avg ignora null → média apenas da janela de 14d, com dados que têm median.
+          movingAvg: {
+            $avg: {
+              $cond: [
+                { $and: [{ $gte: ['$scannedAt', cutoff] }, { $ne: ['$stats.median', null] }] },
+                '$stats.median',
+                null,
+              ],
+            },
+          },
         },
       },
     ]).exec();

@@ -76,6 +76,61 @@ describe('PriceTrackerQueryService.history', () => {
   });
 });
 
+describe('PriceTrackerQueryService.listItems', () => {
+  let itemModel: any;
+  let historyModel: any;
+  let service: PriceTrackerQueryService;
+
+  const item = { _id: ITEM_ID, ean: EAN, name: 'Água', active: true, categoryId: null };
+
+  beforeEach(() => {
+    itemModel = { find: jest.fn().mockReturnValue({ sort: () => ({ lean: () => ({ exec: async () => [item] }) }) }) };
+    historyModel = { aggregate: jest.fn() };
+    service = new PriceTrackerQueryService(itemModel, historyModel, {} as any, {} as any);
+  });
+
+  it('movingAvg vem da agregação (simula mediana no Mongo) — não confunde com stats.min', async () => {
+    // A aggregation real usa $stats.median; aqui simulamos o resultado que ela
+    // produziria: mediana estável em 100 mesmo com o snapshot mais recente
+    // (stats.min) tendo caído pra 10 numa promoção relâmpago isolada.
+    historyModel.aggregate.mockReturnValue({
+      exec: async () => [{
+        _id: EAN, lastPrice: 10, lastCount: 5, lastScannedAt: new Date(),
+        allTimeLow: 10, movingAvg: 100,
+      }],
+    });
+
+    const [view] = await service.listItems();
+
+    expect(view.lastPrice).toBe(10);   // preço atual reflete a promoção real
+    expect(view.movingAvg).toBe(100);  // "preço de mercado" NÃO foi puxado pro outlier
+    expect(view.allTimeLow).toBe(10);
+    expect(view.pctVsAvg).toBe(-90);   // (10-100)/100 = -90% — dispara alerta corretamente
+  });
+
+  it('sem histórico agregado (0 resultados) → movingAvg/allTimeLow null', async () => {
+    historyModel.aggregate.mockReturnValue({ exec: async () => [] });
+    const [view] = await service.listItems();
+    expect(view.movingAvg).toBeNull();
+    expect(view.allTimeLow).toBeNull();
+    expect(view.pctVsAvg).toBeNull();
+  });
+
+  it('a pipeline de agregação usa stats.median para movingAvg, não stats.min', async () => {
+    // Trava regressão: já existiu um bug em que essa 2ª implementação (aggregation
+    // Mongo) ficou dessincronizada da lógica de price-analysis.ts (que usa mediana)
+    // e continuou usando stats.min — mascarando o mesmo vício de outlier que a
+    // mediana existe pra resolver.
+    historyModel.aggregate.mockReturnValue({ exec: async () => [] });
+    await service.listItems();
+
+    const pipeline = historyModel.aggregate.mock.calls[0][0];
+    const pipelineJson = JSON.stringify(pipeline);
+    expect(pipelineJson).toContain('$stats.median');
+    expect(pipelineJson).not.toMatch(/movingAvg[^}]*\$stats\.min/);
+  });
+});
+
 describe('PriceTrackerQueryService.offers', () => {
   let itemModel: any;
   let currentOffersModel: any;
