@@ -120,11 +120,14 @@ export class PriceTrackerScanWorker {
     const best = priced.reduce((a, b) => ((a.price as number) <= (b.price as number) ? a : b));
     return {
       price: best.price ?? null,
+      listPrice: best.list_price ?? null,
+      savings: best.savings ?? null,
       sellerName: best.seller_name ?? null,
       address: best.address ?? null,
       bairro: best.bairro ?? null,
       distKm: best.dist_km ?? null,
       soldAt: best.sold_at ?? null,
+      soldAgo: best.sold_ago ?? null,
     };
   }
 }

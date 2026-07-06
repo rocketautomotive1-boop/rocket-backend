@@ -88,3 +88,20 @@ export function evaluateTriggers(input: TriggerInput): AlertReason | null {
 export function shouldRealert(lastAlertPrice: number, current: number): boolean {
   return current <= lastAlertPrice * REALERT_DROP_FACTOR;
 }
+
+export const WINDOW_LOW_DAYS = [7, 30, 90] as const;
+export type WindowLows = Record<'d7' | 'd30' | 'd90', number | null>;
+
+/**
+ * Menor preço em janelas 7/30/90 dias — bloco textual estilo CamelCamelCamel
+ * ("Lowest recorded price"), mais intuitivo pro usuário leigo que a média móvel.
+ */
+export function computeWindowLows(points: SnapshotPoint[], now: Date): WindowLows {
+  const valid = validPoints(points);
+  const lowFor = (days: number): number | null => {
+    const cutoff = new Date(now.getTime() - days * 86_400_000);
+    const window = valid.filter((p) => p.scannedAt >= cutoff).map((p) => p.min as number);
+    return window.length ? Math.min(...window) : null;
+  };
+  return { d7: lowFor(7), d30: lowFor(30), d90: lowFor(90) };
+}

@@ -22,7 +22,11 @@ export interface MenorPrecoOffer {
   uf?: string | null;
   price?: number | null;
   list_price?: number | null;
+  /** Economia já aplicada na venda (valor_desconto) — pronta, sem precisar recalcular. */
+  savings?: number | null;
   sold_at?: string | null;
+  /** Tempo relativo pronto da API (ex.: "há 2 horas") — evita formatar data no cliente. */
+  sold_ago?: string | null;
   dist_km?: number | null;
 }
 

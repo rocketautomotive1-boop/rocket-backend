@@ -12,11 +12,14 @@ export interface PriceHistoryStats {
 
 export interface PriceHistoryBestOffer {
   price: number | null;
+  listPrice: number | null;
+  savings: number | null;
   sellerName: string | null;
   address: string | null;
   bairro: string | null;
   distKm: number | null;
   soldAt: string | null;
+  soldAgo: string | null;
 }
 
 /**

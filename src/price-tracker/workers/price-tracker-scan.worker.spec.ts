@@ -18,7 +18,10 @@ const okResult = {
   desc: 'RAID MATA MOSCAS',
   stats: { min: 2.5, avg: 3, max: 5, count: 8 },
   offers: [
-    { seller_name: 'MERCADO A', bairro: 'TIMBI', price: 2.5, dist_km: 1.2, sold_at: '2026-07-05T10:00:00-03:00', address: 'RUA X, 1' },
+    {
+      seller_name: 'MERCADO A', bairro: 'TIMBI', price: 2.5, list_price: 3.5, savings: 1.0,
+      dist_km: 1.2, sold_at: '2026-07-05T10:00:00-03:00', sold_ago: 'há 2 horas', address: 'RUA X, 1',
+    },
     { seller_name: 'MERCADO B', bairro: 'CENTRO', price: 3.0, dist_km: 4.0, sold_at: null, address: null },
   ],
 };
@@ -52,12 +55,14 @@ describe('PriceTrackerScanWorker', () => {
     (worker as any).throttleMs = 0; // sem sleep nos testes
   });
 
-  it('scanEan grava snapshot com bestOffer (menor preço) e chama o alert service', async () => {
+  it('scanEan grava snapshot com bestOffer (menor preço, economia e tempo relativo) e chama o alert service', async () => {
     await worker.scanEan(item.ean);
     expect(historyModel.create).toHaveBeenCalledWith(expect.objectContaining({
       ean: item.ean,
       stats: okResult.stats,
-      bestOffer: expect.objectContaining({ price: 2.5, sellerName: 'MERCADO A' }),
+      bestOffer: expect.objectContaining({
+        price: 2.5, listPrice: 3.5, savings: 1.0, sellerName: 'MERCADO A', soldAgo: 'há 2 horas',
+      }),
       error: null,
     }));
     expect(alerts.processSnapshot).toHaveBeenCalledWith(

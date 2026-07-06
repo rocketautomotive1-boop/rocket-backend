@@ -4,7 +4,7 @@ import { Model } from 'mongoose';
 import { TrackedItemModel } from './schemas/tracked-item.schema';
 import { PriceHistoryModel } from './schemas/price-history.schema';
 import { PriceAlertModel } from './schemas/price-alert.schema';
-import { computeAnalysis, MOVING_AVG_DAYS, SnapshotPoint } from './analysis/price-analysis';
+import { computeAnalysis, computeWindowLows, MOVING_AVG_DAYS, SnapshotPoint, WindowLows } from './analysis/price-analysis';
 
 export interface TrackedItemView {
   id: string;
@@ -101,6 +101,20 @@ export class PriceTrackerQueryService {
       error: h.error,
     }));
     const analysis = computeAnalysis(points, new Date());
+    // Janelas usam o histórico TOTAL do EAN (não só o período do gráfico) — "menor
+    // preço em 90 dias" precisa existir mesmo que o usuário esteja vendo os últimos 7.
+    const fullHistory: SnapshotPoint[] = (await this.historyModel
+      .find({ ean: (item as any).ean })
+      .sort({ scannedAt: -1 })
+      .limit(400)
+      .lean()
+      .exec()).map((h: any) => ({
+        min: h.stats?.min ?? null,
+        count: h.stats?.count ?? 0,
+        scannedAt: new Date(h.scannedAt),
+        error: h.error,
+      }));
+    const windowLows: WindowLows = computeWindowLows(fullHistory, new Date());
     const lastWithOffer = [...docs].reverse().find((d: any) => d.bestOffer);
 
     const [view] = (await this.listItems()).filter((v) => v.id === id);
@@ -111,10 +125,13 @@ export class PriceTrackerQueryService {
         min: h.stats?.min ?? null,
         avg: h.stats?.avg ?? null,
         count: h.stats?.count ?? 0,
+        // Preço de tabela do melhor vendedor do ciclo — 2ª série do gráfico (pago vs tabela).
+        listPrice: h.bestOffer?.listPrice ?? null,
         error: h.error ?? null,
       })),
       movingAvg: analysis.movingAvg,
       allTimeLow: analysis.allTimeLow,
+      windowLows,
       lastBestOffer: (lastWithOffer as any)?.bestOffer ?? null,
     };
   }
