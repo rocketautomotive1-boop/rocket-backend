@@ -7,6 +7,7 @@ export interface PriceHistoryStats {
   min: number | null;
   avg: number | null;
   max: number | null;
+  median: number | null;
   count: number;
 }
 

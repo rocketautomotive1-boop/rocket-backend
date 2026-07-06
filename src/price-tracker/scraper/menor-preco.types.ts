@@ -34,6 +34,8 @@ export interface MenorPrecoStats {
   min?: number | null;
   avg?: number | null;
   max?: number | null;
+  /** Mediana das ofertas do ciclo — base do "preço de mercado" p/ alertas (robusta a outlier). */
+  median?: number | null;
   count: number;
 }
 

@@ -98,6 +98,7 @@ export class PriceTrackerQueryService {
 
     const points: SnapshotPoint[] = docs.map((h: any) => ({
       min: h.stats?.min ?? null,
+      median: h.stats?.median ?? null,
       count: h.stats?.count ?? 0,
       scannedAt: new Date(h.scannedAt),
       error: h.error,
@@ -112,6 +113,7 @@ export class PriceTrackerQueryService {
       .lean()
       .exec()).map((h: any) => ({
         min: h.stats?.min ?? null,
+        median: h.stats?.median ?? null,
         count: h.stats?.count ?? 0,
         scannedAt: new Date(h.scannedAt),
         error: h.error,

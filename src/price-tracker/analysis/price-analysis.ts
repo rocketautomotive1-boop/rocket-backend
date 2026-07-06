@@ -1,7 +1,15 @@
 /**
  * Inteligência do Caçador de Promoções — funções PURAS (sem Mongo/Nest).
- * Compara o "melhor preço de hoje" (stats.min do ciclo) com o "melhor preço típico"
- * (média móvel dos stats.min históricos). Guardas evitam "metade do dobro".
+ * Compara o "melhor preço de hoje" (stats.min do ciclo) com o "preço de mercado
+ * típico" (média móvel da MEDIANA histórica, não do mínimo). Guardas evitam
+ * "metade do dobro".
+ *
+ * Por que mediana e não mínimo: o mínimo de um ciclo é o menor preço entre
+ * ~450 ofertas — basta UM vendedor fazer uma promoção relâmpago (ou errar o
+ * preço) pra esse valor entrar na "média móvel" e ficar puxando-a pra baixo
+ * por 14 dias, mascarando o gatilho de desconto (ele nunca mais dispara porque
+ * a "média" já baixou artificialmente). A mediana ignora esse tipo de outlier
+ * pontual — reflete o preço que a maioria dos vendedores pratica.
  */
 
 export const MOVING_AVG_DAYS = 14;
@@ -11,13 +19,17 @@ export const REALERT_DROP_FACTOR = 0.95;
 
 export interface SnapshotPoint {
   min: number | null;
+  /** Mediana das ofertas do ciclo — usada como base do "preço de mercado" (movingAvg). */
+  median: number | null;
   count: number;
   scannedAt: Date;
   error?: string | null;
 }
 
 export interface PriceAnalysis {
+  /** Média móvel da MEDIANA histórica — o "preço de mercado típico" recente. */
   movingAvg: number | null;
+  /** Menor preço já visto (extremo, não mediana) — usado só no gatilho all_time_low. */
   allTimeLow: number | null;
   validSnapshots: number;
   distinctDays: number;
@@ -46,7 +58,12 @@ export function computeAnalysis(points: SnapshotPoint[], now: Date): PriceAnalys
   }
 
   const cutoff = new Date(now.getTime() - MOVING_AVG_DAYS * 86_400_000);
-  const window = valid.filter((p) => p.scannedAt >= cutoff).map((p) => p.min as number);
+  // Base da média móvel é a MEDIANA (não o min) — robusta a promoção relâmpago
+  // isolada de um único vendedor. Snapshot sem mediana (dado legado) é ignorado
+  // na janela em vez de quebrar o cálculo.
+  const window = valid
+    .filter((p) => p.scannedAt >= cutoff && p.median != null)
+    .map((p) => p.median as number);
   const movingAvg = window.length
     ? round2(window.reduce((a, b) => a + b, 0) / window.length)
     : null;

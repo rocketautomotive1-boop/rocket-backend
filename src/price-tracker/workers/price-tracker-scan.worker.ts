@@ -89,6 +89,7 @@ export class PriceTrackerScanWorker {
       .exec();
     const points: SnapshotPoint[] = history.map((h: any) => ({
       min: h.stats?.min ?? null,
+      median: h.stats?.median ?? null,
       count: h.stats?.count ?? 0,
       scannedAt: new Date(h.scannedAt),
       error: h.error,
