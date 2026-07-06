@@ -283,7 +283,7 @@ export class FiscalService {
                 order: internalOrderId,
                 issuer: issuer.toObject(),
                 status: 'DRAFT',
-                environment: 'PRODUCTION',
+                environment: orderData?.environment === 'HOMOLOGATION' ? 'HOMOLOGATION' : 'PRODUCTION',
                 number: newNfeNumber,
                 series: series,
                 createdAt: new Date()
@@ -347,6 +347,95 @@ export class FiscalService {
             nfe.rejectionReason = error.message;
             await nfe.save();
             await this.linkNFeToOrder(nfe, orderId);
+            throw error;
+        }
+    }
+
+    /**
+     * Emite uma NFe sem vínculo com Order/marketplace — usado para notas de teste
+     * (homologação) e emissões avulsas fora do fluxo normal de pedidos.
+     */
+    async emitNFeAvulsa(orderData: {
+        environment: 'HOMOLOGATION' | 'PRODUCTION';
+        buyer: any;
+        items: any[];
+        totals: any;
+    }) {
+        this.logger.log('Iniciando emissão de NFe avulsa (sem Order vinculado)');
+
+        if (!orderData?.buyer || !orderData.buyer.document || !orderData.buyer.address) {
+            throw new Error('Dados do destinatário incompletos para emissão.');
+        }
+        if (!orderData.items || orderData.items.length === 0) {
+            throw new Error('A nota não possui itens para emissão.');
+        }
+
+        let issuer = await this.fiscalIssuerModel.findOne({ isActive: true }).exec();
+        if (!issuer) {
+            throw new NotFoundException('Nenhum emitente fiscal configurado.');
+        }
+
+        const series = issuer.nfeSeries || 1;
+        const seriesKey = String(series);
+        const updatedIssuerRaw = await this.fiscalIssuerModel.findOneAndUpdate(
+            { _id: issuer._id },
+            { $inc: { [`seriesCounters.${seriesKey}`]: 1 } },
+            { new: true }
+        ).lean().exec() as any;
+        const newNfeNumber: number = updatedIssuerRaw?.seriesCounters?.[seriesKey] ?? 1;
+
+        issuer = await this.fiscalIssuerModel.findById(issuer._id).exec();
+
+        const nfe = new this.fiscalDocumentModel({
+            issuer: issuer.toObject(),
+            status: 'DRAFT',
+            environment: orderData.environment === 'HOMOLOGATION' ? 'HOMOLOGATION' : 'PRODUCTION',
+            number: newNfeNumber,
+            series: series,
+            createdAt: new Date(),
+        });
+        await nfe.save();
+
+        try {
+            const xml = await this.xmlBuilderService.buildNFeXml(nfe, orderData, issuer);
+
+            let signedXml = xml;
+            if (issuer.certificatePfx) {
+                signedXml = await this.signatureService.signXml(xml, issuer.certificatePfx, issuer.certificatePassword);
+            } else {
+                this.logger.warn('Skipping XML signature: No PFX certificate found.');
+            }
+
+            const result = await this.sefazService.authorize(signedXml, nfe.environment, issuer);
+
+            nfe.status = result.status === 'authorized' ? 'AUTHORIZED' : (result.status === 'processing' ? 'PROCESSING' : (result.status === 'denied' ? 'REJECTED' : 'ERROR'));
+            nfe.protocol = result.protocol;
+
+            if (result.status === 'authorized' && result.protNFeXml) {
+                const cleanSigned = signedXml.replace(/<\?xml[^?]*\?>/g, '').trim();
+                nfe.xml = `<?xml version="1.0" encoding="UTF-8"?><nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">${cleanSigned}${result.protNFeXml}</nfeProc>`;
+            } else {
+                nfe.xml = result.xml || signedXml;
+            }
+
+            if (result.message) {
+                nfe.rejectionReason = result.message;
+            }
+
+            await nfe.save();
+
+            return {
+                nfeId: nfe._id,
+                status: nfe.status,
+                accessKey: nfe.accessKey,
+                protocol: nfe.protocol,
+                rejectionReason: nfe.rejectionReason,
+            };
+        } catch (error) {
+            this.logger.error(`Failed to emit NFe avulsa: ${error.message}`);
+            nfe.status = 'ERROR';
+            nfe.rejectionReason = error.message;
+            await nfe.save();
             throw error;
         }
     }
