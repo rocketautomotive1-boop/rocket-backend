@@ -16,7 +16,7 @@ describe('PriceTrackerController', () => {
       findByIdAndDelete: jest.fn().mockReturnValue({ lean: () => ({ exec: async () => ({ _id: 'i1' }) }) }),
     };
     worker = { scanEan: jest.fn().mockResolvedValue(undefined) };
-    query = { listItems: jest.fn(), history: jest.fn(), deals: jest.fn() };
+    query = { listItems: jest.fn(), history: jest.fn(), deals: jest.fn(), offers: jest.fn() };
     controller = new PriceTrackerController(itemModel, worker as any, query);
   });
 
@@ -42,5 +42,16 @@ describe('PriceTrackerController', () => {
     await controller.scan('i1');
     expect(worker.scanEan).toHaveBeenCalledTimes(1);
     await expect(controller.scan('i1')).rejects.toThrow(HttpException); // 429 dentro da janela
+  });
+
+  it('GET /items/:id/offers aplica defaults e clampa pageSize a 50', async () => {
+    await controller.offers('i1', undefined, undefined);
+    expect(query.offers).toHaveBeenCalledWith('i1', 1, 20);
+
+    await controller.offers('i1', '2', '999');
+    expect(query.offers).toHaveBeenCalledWith('i1', 2, 50);
+
+    await controller.offers('i1', '0', '-5');
+    expect(query.offers).toHaveBeenCalledWith('i1', 1, 1);
   });
 });

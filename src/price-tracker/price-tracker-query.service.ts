@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { TrackedItemModel } from './schemas/tracked-item.schema';
 import { PriceHistoryModel } from './schemas/price-history.schema';
 import { PriceAlertModel } from './schemas/price-alert.schema';
+import { CurrentOffersModel } from './schemas/current-offers.schema';
 import { computeAnalysis, computeWindowLows, MOVING_AVG_DAYS, SnapshotPoint, WindowLows } from './analysis/price-analysis';
 
 export interface TrackedItemView {
@@ -31,6 +32,7 @@ export class PriceTrackerQueryService {
     @InjectModel(TrackedItemModel.name) private readonly itemModel: Model<TrackedItemModel>,
     @InjectModel(PriceHistoryModel.name) private readonly historyModel: Model<PriceHistoryModel>,
     @InjectModel(PriceAlertModel.name) private readonly alertModel: Model<PriceAlertModel>,
+    @InjectModel(CurrentOffersModel.name) private readonly currentOffersModel: Model<CurrentOffersModel>,
   ) {}
 
   async listItems(): Promise<TrackedItemView[]> {
@@ -133,6 +135,23 @@ export class PriceTrackerQueryService {
       allTimeLow: analysis.allTimeLow,
       windowLows,
       lastBestOffer: (lastWithOffer as any)?.bestOffer ?? null,
+    };
+  }
+
+  /** Todas as ofertas do último ciclo bem-sucedido, paginadas (já vêm ordenadas por preço). */
+  async offers(id: string, page: number, pageSize: number) {
+    const item = await this.itemModel.findById(id).lean().exec();
+    if (!item) throw new NotFoundException('Item monitorado não encontrado');
+
+    const doc = await this.currentOffersModel.findOne({ ean: (item as any).ean }).lean().exec();
+    const all = (doc as any)?.offers ?? [];
+    const start = (page - 1) * pageSize;
+    return {
+      offers: all.slice(start, start + pageSize),
+      total: all.length,
+      page,
+      pageSize,
+      scannedAt: (doc as any)?.scannedAt ?? null,
     };
   }
 

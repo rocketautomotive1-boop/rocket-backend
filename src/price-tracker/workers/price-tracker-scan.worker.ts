@@ -6,6 +6,7 @@ import { MenorPrecoClientService } from '../scraper/menor-preco-client.service';
 import { MenorPrecoOffer } from '../scraper/menor-preco.types';
 import { TrackedItemModel } from '../schemas/tracked-item.schema';
 import { PriceHistoryModel, PriceHistoryBestOffer } from '../schemas/price-history.schema';
+import { CurrentOffersModel } from '../schemas/current-offers.schema';
 import { PriceAlertService } from '../alerts/price-alert.service';
 import { computeAnalysis, SnapshotPoint } from '../analysis/price-analysis';
 
@@ -33,6 +34,7 @@ export class PriceTrackerScanWorker {
     private readonly client: MenorPrecoClientService,
     @InjectModel(TrackedItemModel.name) private readonly itemModel: Model<TrackedItemModel>,
     @InjectModel(PriceHistoryModel.name) private readonly historyModel: Model<PriceHistoryModel>,
+    @InjectModel(CurrentOffersModel.name) private readonly currentOffersModel: Model<CurrentOffersModel>,
     private readonly alerts: PriceAlertService,
   ) {}
 
@@ -93,10 +95,17 @@ export class PriceTrackerScanWorker {
     }));
     const analysis = computeAnalysis(points, now);
 
-    const bestOffer = this.pickBestOffer(result.offers);
+    const mappedOffers = this.mapAndSortOffers(result.offers);
+    const bestOffer = mappedOffers[0] ?? null;
     await this.historyModel.create({
       ean, scannedAt: now, stats: result.stats, bestOffer, error: null,
     });
+    // Ofertas completas do ciclo (não histórico — upsert, só o mais recente por EAN).
+    await this.currentOffersModel.updateOne(
+      { ean },
+      { $set: { ean, scannedAt: now, offers: mappedOffers } },
+      { upsert: true },
+    ).exec();
 
     const item = await this.itemModel.findOne({ ean }).lean().exec();
     if (!item) return; // item removido entre a coleta e a análise
@@ -114,20 +123,21 @@ export class PriceTrackerScanWorker {
     );
   }
 
-  private pickBestOffer(offers: MenorPrecoOffer[]): PriceHistoryBestOffer | null {
-    const priced = offers.filter((o) => o.price != null);
-    if (!priced.length) return null;
-    const best = priced.reduce((a, b) => ((a.price as number) <= (b.price as number) ? a : b));
-    return {
-      price: best.price ?? null,
-      listPrice: best.list_price ?? null,
-      savings: best.savings ?? null,
-      sellerName: best.seller_name ?? null,
-      address: best.address ?? null,
-      bairro: best.bairro ?? null,
-      distKm: best.dist_km ?? null,
-      soldAt: best.sold_at ?? null,
-      soldAgo: best.sold_ago ?? null,
-    };
+  /** Todas as ofertas com preço, mapeadas e ordenadas da mais barata pra mais cara. */
+  private mapAndSortOffers(offers: MenorPrecoOffer[]): PriceHistoryBestOffer[] {
+    return offers
+      .filter((o) => o.price != null)
+      .map((o) => ({
+        price: o.price ?? null,
+        listPrice: o.list_price ?? null,
+        savings: o.savings ?? null,
+        sellerName: o.seller_name ?? null,
+        address: o.address ?? null,
+        bairro: o.bairro ?? null,
+        distKm: o.dist_km ?? null,
+        soldAt: o.sold_at ?? null,
+        soldAgo: o.sold_ago ?? null,
+      }))
+      .sort((a, b) => (a.price as number) - (b.price as number));
   }
 }

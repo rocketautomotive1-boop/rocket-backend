@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { TrackedItemModel, TrackedItemSchema } from './schemas/tracked-item.schema';
 import { PriceHistoryModel, PriceHistorySchema } from './schemas/price-history.schema';
 import { PriceAlertModel, PriceAlertSchema } from './schemas/price-alert.schema';
+import { CurrentOffersModel, CurrentOffersSchema } from './schemas/current-offers.schema';
 import { MenorPrecoClientService } from './scraper/menor-preco-client.service';
 import { MenorPrecoTrackerResultConsumer } from './scraper/menor-preco-tracker-result.consumer';
 import { PriceAlertService } from './alerts/price-alert.service';
@@ -20,6 +21,7 @@ import { PriceTrackerController } from './price-tracker.controller';
       { name: TrackedItemModel.name, schema: TrackedItemSchema },
       { name: PriceHistoryModel.name, schema: PriceHistorySchema },
       { name: PriceAlertModel.name, schema: PriceAlertSchema },
+      { name: CurrentOffersModel.name, schema: CurrentOffersSchema },
     ]),
   ],
   controllers: [PriceTrackerController],

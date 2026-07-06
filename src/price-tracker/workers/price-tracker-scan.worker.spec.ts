@@ -34,6 +34,7 @@ describe('PriceTrackerScanWorker', () => {
   let client: { fetch: jest.Mock };
   let itemModel: { find: jest.Mock; findOne: jest.Mock; updateOne: jest.Mock };
   let historyModel: { create: jest.Mock; find: jest.Mock };
+  let currentOffersModel: { updateOne: jest.Mock };
   let alerts: { processSnapshot: jest.Mock };
   let worker: PriceTrackerScanWorker;
 
@@ -48,9 +49,12 @@ describe('PriceTrackerScanWorker', () => {
       create: jest.fn().mockResolvedValue({}),
       find: jest.fn().mockReturnValue(leanExec([])),
     };
+    currentOffersModel = {
+      updateOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({}) }),
+    };
     alerts = { processSnapshot: jest.fn().mockResolvedValue(null) };
     worker = new PriceTrackerScanWorker(
-      client as any, itemModel as any, historyModel as any, alerts as any,
+      client as any, itemModel as any, historyModel as any, currentOffersModel as any, alerts as any,
     );
     (worker as any).throttleMs = 0; // sem sleep nos testes
   });
@@ -71,6 +75,30 @@ describe('PriceTrackerScanWorker', () => {
       expect.objectContaining({ validSnapshots: 0 }),
       expect.objectContaining({ price: 2.5 }),
     );
+  });
+
+  it('scanEan grava TODAS as ofertas do ciclo (upsert por EAN), ordenadas da mais barata pra mais cara', async () => {
+    await worker.scanEan(item.ean);
+    expect(currentOffersModel.updateOne).toHaveBeenCalledWith(
+      { ean: item.ean },
+      {
+        $set: {
+          ean: item.ean,
+          scannedAt: expect.any(Date),
+          offers: [
+            expect.objectContaining({ sellerName: 'MERCADO A', price: 2.5 }),
+            expect.objectContaining({ sellerName: 'MERCADO B', price: 3.0 }),
+          ],
+        },
+      },
+      { upsert: true },
+    );
+  });
+
+  it('erro do scraper → NÃO grava current_offers', async () => {
+    client.fetch.mockResolvedValueOnce({ correlation_id: 'c', ean: item.ean, offers: [], error: 'timeout' });
+    await worker.scanEan(item.ean);
+    expect(currentOffersModel.updateOne).not.toHaveBeenCalled();
   });
 
   it('nome vazio → preenche com o desc da API (title case); nome do usuário é preservado', async () => {

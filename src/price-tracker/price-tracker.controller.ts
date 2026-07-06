@@ -91,6 +91,18 @@ export class PriceTrackerController {
     return this.query.history(id, window);
   }
 
+  @Get('items/:id/offers')
+  @ApiOperation({ summary: 'Todas as ofertas do último ciclo, paginadas (mais barata primeiro)' })
+  async offers(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    const parsedPage = Math.max(1, Number(page ?? 1) || 1);
+    const parsedSize = Math.min(50, Math.max(1, Number(pageSize ?? 20) || 20));
+    return this.query.offers(id, parsedPage, parsedSize);
+  }
+
   @Get('deals')
   @ApiOperation({ summary: 'Itens atualmente em oferta + alertas recentes' })
   async deals() {

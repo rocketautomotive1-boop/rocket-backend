@@ -20,6 +20,7 @@ describe('PriceTrackerQueryService.history', () => {
   let itemModel: any;
   let historyModel: any;
   let alertModel: any;
+  let currentOffersModel: any;
   let service: PriceTrackerQueryService;
 
   const setupHistory = (docs: any[]) => {
@@ -40,7 +41,8 @@ describe('PriceTrackerQueryService.history', () => {
     };
     historyModel = {};
     alertModel = { find: jest.fn() };
-    service = new PriceTrackerQueryService(itemModel, historyModel, alertModel);
+    currentOffersModel = { findOne: jest.fn() };
+    service = new PriceTrackerQueryService(itemModel, historyModel, alertModel, currentOffersModel);
   });
 
   it('windowLows reflete o mínimo dentro de cada janela, ignorando pontos fora dela', async () => {
@@ -71,5 +73,41 @@ describe('PriceTrackerQueryService.history', () => {
     setupHistory([]);
     const result = await service.history(String(ITEM_ID), 30);
     expect(result.windowLows).toEqual({ d7: null, d30: null, d90: null });
+  });
+});
+
+describe('PriceTrackerQueryService.offers', () => {
+  let itemModel: any;
+  let currentOffersModel: any;
+  let service: PriceTrackerQueryService;
+
+  const makeOffer = (price: number) => ({ price, sellerName: `Loja ${price}` });
+
+  beforeEach(() => {
+    itemModel = {
+      findById: jest.fn().mockReturnValue({ lean: () => ({ exec: async () => ({ _id: ITEM_ID, ean: EAN }) }) }),
+    };
+    currentOffersModel = { findOne: jest.fn() };
+    service = new PriceTrackerQueryService(itemModel, {} as any, {} as any, currentOffersModel);
+  });
+
+  it('pagina o array já ordenado, sem reordenar', async () => {
+    const offers = [1, 2, 3, 4, 5].map(makeOffer);
+    currentOffersModel.findOne.mockReturnValue({
+      lean: () => ({ exec: async () => ({ ean: EAN, scannedAt: new Date(), offers }) }),
+    });
+
+    const page1 = await service.offers(String(ITEM_ID), 1, 2);
+    expect(page1.offers).toEqual([makeOffer(1), makeOffer(2)]);
+    expect(page1.total).toBe(5);
+
+    const page3 = await service.offers(String(ITEM_ID), 3, 2);
+    expect(page3.offers).toEqual([makeOffer(5)]);
+  });
+
+  it('sem current_offers ainda coletado → lista vazia, total 0', async () => {
+    currentOffersModel.findOne.mockReturnValue({ lean: () => ({ exec: async () => null }) });
+    const result = await service.offers(String(ITEM_ID), 1, 20);
+    expect(result).toEqual({ offers: [], total: 0, page: 1, pageSize: 20, scannedAt: null });
   });
 });
