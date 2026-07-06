@@ -15,6 +15,7 @@ const item = {
 const okResult = {
   correlation_id: 'c',
   ean: item.ean,
+  desc: 'RAID MATA MOSCAS',
   stats: { min: 2.5, avg: 3, max: 5, count: 8 },
   offers: [
     { seller_name: 'MERCADO A', bairro: 'TIMBI', price: 2.5, dist_km: 1.2, sold_at: '2026-07-05T10:00:00-03:00', address: 'RUA X, 1' },
@@ -28,7 +29,7 @@ function leanExec(value: any) {
 
 describe('PriceTrackerScanWorker', () => {
   let client: { fetch: jest.Mock };
-  let itemModel: { find: jest.Mock; findOne: jest.Mock };
+  let itemModel: { find: jest.Mock; findOne: jest.Mock; updateOne: jest.Mock };
   let historyModel: { create: jest.Mock; find: jest.Mock };
   let alerts: { processSnapshot: jest.Mock };
   let worker: PriceTrackerScanWorker;
@@ -38,6 +39,7 @@ describe('PriceTrackerScanWorker', () => {
     itemModel = {
       find: jest.fn().mockReturnValue(leanExec([item])),
       findOne: jest.fn().mockReturnValue(leanExec(item)),
+      updateOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({}) }),
     };
     historyModel = {
       create: jest.fn().mockResolvedValue({}),
@@ -64,6 +66,25 @@ describe('PriceTrackerScanWorker', () => {
       expect.objectContaining({ validSnapshots: 0 }),
       expect.objectContaining({ price: 2.5 }),
     );
+  });
+
+  it('nome vazio → preenche com o desc da API (title case); nome do usuário é preservado', async () => {
+    // Sem nome → autofill
+    itemModel.findOne.mockReturnValueOnce(leanExec({ ...item, name: '' }));
+    await worker.scanEan(item.ean);
+    expect(itemModel.updateOne).toHaveBeenCalledWith(
+      { _id: item._id },
+      { $set: { name: 'Raid Mata Moscas' } },
+    );
+    expect(alerts.processSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Raid Mata Moscas' }),
+      expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+    );
+
+    // Com nome definido → não sobrescreve
+    itemModel.updateOne.mockClear();
+    await worker.scanEan(item.ean);
+    expect(itemModel.updateOne).not.toHaveBeenCalled();
   });
 
   it('erro do scraper → snapshot com error gravado e SEM análise/alerta', async () => {

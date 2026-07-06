@@ -14,6 +14,10 @@ const ANALYSIS_LOOKBACK = 200;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/** "RAID MATA MOSCAS" → "Raid Mata Moscas" (a API devolve tudo em caixa alta). */
+const titleCase = (s: string) =>
+  s.toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase());
+
 /**
  * Ciclo de scan: consulta cada EAN ativo no serviço Menor Preço (sequencial, com
  * throttle — acesso educado a API pública de governo), grava o snapshot e delega a
@@ -96,6 +100,14 @@ export class PriceTrackerScanWorker {
 
     const item = await this.itemModel.findOne({ ean }).lean().exec();
     if (!item) return; // item removido entre a coleta e a análise
+
+    // Nome automático: o cadastro é só por EAN; o `desc` da API preenche o nome
+    // (só quando vazio — renomeações do usuário são preservadas).
+    if (!(item as any).name && result.desc) {
+      const name = titleCase(result.desc);
+      await this.itemModel.updateOne({ _id: item._id }, { $set: { name } }).exec();
+      (item as any).name = name;
+    }
 
     await this.alerts.processSnapshot(
       item as any, result.stats.min, result.stats.count, analysis, bestOffer,

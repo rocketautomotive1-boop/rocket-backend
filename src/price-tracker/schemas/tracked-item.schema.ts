@@ -14,8 +14,11 @@ export class TrackedItemModel {
   @Prop({ type: String, required: true, unique: true })
   ean: string;
 
-  /** Apelido dado pelo usuário ("Coca-Cola lata 350ml"). */
-  @Prop({ type: String, required: true })
+  /**
+   * Nome do produto. Preenchido automaticamente pelo scan (campo `desc` da API do
+   * Menor Preço) quando vazio; o usuário pode renomear via PATCH.
+   */
+  @Prop({ type: String, default: '' })
   name: string;
 
   @Prop({ type: Boolean, default: true, index: true })

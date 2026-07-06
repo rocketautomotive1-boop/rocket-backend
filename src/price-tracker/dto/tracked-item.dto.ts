@@ -6,7 +6,8 @@ const eanSchema = z
 
 export const createTrackedItemSchema = z.object({
   ean: eanSchema,
-  name: z.string().min(1, 'Nome é obrigatório'),
+  // Opcional: o scan preenche o nome com o `desc` da API do Menor Preço.
+  name: z.string().min(1, 'Nome não pode ser vazio').optional(),
   targetPrice: z.number().positive('Preço-alvo deve ser positivo').optional(),
   discountThresholdPct: z
     .number().int().min(1, 'Mínimo 1%').max(90, 'Máximo 90%')

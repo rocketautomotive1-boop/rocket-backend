@@ -36,6 +36,8 @@ export interface MenorPrecoStats {
 export interface MenorPrecoResult {
   correlation_id: string;
   ean: string;
+  /** Descrição do produto vinda da API ("COCA COLA LATA") — preenche o nome do item. */
+  desc?: string | null;
   stats?: MenorPrecoStats | null;
   offers: MenorPrecoOffer[];
   error?: string | null;

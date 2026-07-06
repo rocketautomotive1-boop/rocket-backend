@@ -66,7 +66,8 @@ export class PriceTrackerQueryService {
       return {
         id: String(item._id),
         ean: item.ean,
-        name: item.name,
+        // Nome ainda não preenchido pelo scan → mostra o EAN como fallback.
+        name: item.name || `EAN ${item.ean}`,
         active: item.active,
         targetPrice: item.targetPrice ?? null,
         discountThresholdPct: item.discountThresholdPct,

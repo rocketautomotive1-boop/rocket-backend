@@ -13,10 +13,14 @@ describe('createTrackedItemSchema', () => {
     expect(createTrackedItemSchema.safeParse({ ean: '78960000015AB', name: 'X' }).success).toBe(false);
   });
 
-  it('rejeita nome vazio e targetPrice negativo; aplica default do threshold', () => {
+  it('nome é opcional (scan preenche do desc da API), mas vazio explícito é rejeitado', () => {
+    expect(createTrackedItemSchema.parse({ ean: '7896000001504' }).name).toBeUndefined();
     expect(createTrackedItemSchema.safeParse({ ean: '7896000001504', name: '' }).success).toBe(false);
+  });
+
+  it('rejeita targetPrice negativo; aplica default do threshold', () => {
     expect(createTrackedItemSchema.safeParse({ ean: '7896000001504', name: 'X', targetPrice: -1 }).success).toBe(false);
-    const ok = createTrackedItemSchema.parse({ ean: '7896000001504', name: 'X' });
+    const ok = createTrackedItemSchema.parse({ ean: '7896000001504' });
     expect(ok.discountThresholdPct).toBe(15);
   });
 });
