@@ -1,4 +1,9 @@
-import { createTrackedItemSchema, updateTrackedItemSchema } from './tracked-item.dto';
+import {
+  createTrackedItemSchema, updateTrackedItemSchema,
+  createTrackedCategorySchema, updateTrackedCategorySchema,
+} from './tracked-item.dto';
+
+const VALID_OBJECT_ID = '507f1f77bcf86cd799439011';
 
 describe('createTrackedItemSchema', () => {
   it('aceita EAN-13 e EAN-8 com nome', () => {
@@ -34,5 +39,23 @@ describe('updateTrackedItemSchema', () => {
 
   it('targetPrice aceita null (remover teto)', () => {
     expect(updateTrackedItemSchema.parse({ targetPrice: null })).toEqual({ targetPrice: null });
+  });
+
+  it('categoryId aceita ObjectId válido ou null (remover categoria); rejeita string arbitrária', () => {
+    expect(updateTrackedItemSchema.parse({ categoryId: VALID_OBJECT_ID }).categoryId).toBe(VALID_OBJECT_ID);
+    expect(updateTrackedItemSchema.parse({ categoryId: null }).categoryId).toBeNull();
+    expect(updateTrackedItemSchema.safeParse({ categoryId: 'not-an-id' }).success).toBe(false);
+  });
+});
+
+describe('createTrackedCategorySchema / updateTrackedCategorySchema', () => {
+  it('aceita nome não vazio até 40 caracteres', () => {
+    expect(createTrackedCategorySchema.parse({ name: 'Limpeza' }).name).toBe('Limpeza');
+    expect(updateTrackedCategorySchema.parse({ name: 'Bebidas' }).name).toBe('Bebidas');
+  });
+
+  it('rejeita nome vazio ou maior que 40 caracteres', () => {
+    expect(createTrackedCategorySchema.safeParse({ name: '' }).success).toBe(false);
+    expect(createTrackedCategorySchema.safeParse({ name: 'x'.repeat(41) }).success).toBe(false);
   });
 });

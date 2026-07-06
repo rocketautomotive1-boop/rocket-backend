@@ -9,7 +9,11 @@ import { ZodError } from 'zod';
 import { TrackedItemModel } from './schemas/tracked-item.schema';
 import { PriceTrackerScanWorker } from './workers/price-tracker-scan.worker';
 import { PriceTrackerQueryService } from './price-tracker-query.service';
-import { createTrackedItemSchema, updateTrackedItemSchema } from './dto/tracked-item.dto';
+import { PriceTrackerCategoriesService } from './price-tracker-categories.service';
+import {
+  createTrackedItemSchema, updateTrackedItemSchema,
+  createTrackedCategorySchema, updateTrackedCategorySchema,
+} from './dto/tracked-item.dto';
 
 const MANUAL_SCAN_COOLDOWN_MS = 5 * 60_000;
 
@@ -25,6 +29,7 @@ export class PriceTrackerController {
     @InjectModel(TrackedItemModel.name) private readonly itemModel: Model<TrackedItemModel>,
     private readonly worker: PriceTrackerScanWorker,
     private readonly query: PriceTrackerQueryService,
+    private readonly categories: PriceTrackerCategoriesService,
   ) {}
 
   @Post('items')
@@ -53,8 +58,12 @@ export class PriceTrackerController {
 
   @Get('items')
   @ApiOperation({ summary: 'Lista itens monitorados com estado atual (preço, média, isDeal)' })
-  async list() {
-    return this.query.listItems();
+  async list(@Query('search') search?: string, @Query('categoryId') categoryId?: string) {
+    return this.query.listItems({
+      search,
+      // 'none' é o sentinel do frontend p/ filtrar "sem categoria" (query string não tem null).
+      categoryId: categoryId === 'none' ? null : categoryId,
+    });
   }
 
   @Patch('items/:id')
@@ -107,6 +116,45 @@ export class PriceTrackerController {
   @ApiOperation({ summary: 'Itens atualmente em oferta + alertas recentes' })
   async deals() {
     return this.query.deals();
+  }
+
+  @Get('categories')
+  @ApiOperation({ summary: 'Lista categorias criadas pelo usuário' })
+  async listCategories() {
+    return this.categories.list();
+  }
+
+  @Post('categories')
+  @ApiOperation({ summary: 'Cria uma categoria nova' })
+  async createCategory(@Body() body: unknown) {
+    let dto;
+    try {
+      dto = createTrackedCategorySchema.parse(body);
+    } catch (e) {
+      if (e instanceof ZodError) throw new BadRequestException(zodMessage(e));
+      throw e;
+    }
+    return this.categories.create(dto.name);
+  }
+
+  @Patch('categories/:id')
+  @ApiOperation({ summary: 'Renomeia uma categoria' })
+  async updateCategory(@Param('id') id: string, @Body() body: unknown) {
+    let dto;
+    try {
+      dto = updateTrackedCategorySchema.parse(body);
+    } catch (e) {
+      if (e instanceof ZodError) throw new BadRequestException(zodMessage(e));
+      throw e;
+    }
+    return this.categories.update(id, dto.name);
+  }
+
+  @Delete('categories/:id')
+  @ApiOperation({ summary: 'Remove uma categoria (itens ficam sem categoria, não são excluídos)' })
+  async removeCategory(@Param('id') id: string) {
+    await this.categories.remove(id);
+    return { removed: true };
   }
 
   @Post('items/:id/scan')

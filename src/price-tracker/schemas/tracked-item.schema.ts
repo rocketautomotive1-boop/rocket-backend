@@ -43,6 +43,10 @@ export class TrackedItemModel {
   @Prop({ type: Number, default: null })
   lastAlertPrice?: number | null;
 
+  /** Categoria livre (tracked_categories); null = sem categoria ("Todas"). */
+  @Prop({ type: Types.ObjectId, ref: 'TrackedCategoryModel', default: null, index: true })
+  categoryId?: Types.ObjectId | null;
+
   createdAt: Date;
   updatedAt: Date;
 }

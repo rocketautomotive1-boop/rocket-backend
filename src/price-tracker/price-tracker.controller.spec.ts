@@ -6,6 +6,7 @@ describe('PriceTrackerController', () => {
   let itemModel: any;
   let worker: { scanEan: jest.Mock };
   let query: any;
+  let categories: any;
   let controller: PriceTrackerController;
 
   beforeEach(() => {
@@ -17,7 +18,8 @@ describe('PriceTrackerController', () => {
     };
     worker = { scanEan: jest.fn().mockResolvedValue(undefined) };
     query = { listItems: jest.fn(), history: jest.fn(), deals: jest.fn(), offers: jest.fn() };
-    controller = new PriceTrackerController(itemModel, worker as any, query);
+    categories = { list: jest.fn(), create: jest.fn(), update: jest.fn(), remove: jest.fn() };
+    controller = new PriceTrackerController(itemModel, worker as any, query, categories);
   });
 
   it('POST /items valida com Zod e dispara scan imediato (fire-and-forget)', async () => {
@@ -53,5 +55,28 @@ describe('PriceTrackerController', () => {
 
     await controller.offers('i1', '0', '-5');
     expect(query.offers).toHaveBeenCalledWith('i1', 1, 1);
+  });
+
+  it('GET /items repassa search e categoryId; sentinel "none" vira null', async () => {
+    await controller.list('coca', undefined);
+    expect(query.listItems).toHaveBeenCalledWith({ search: 'coca', categoryId: undefined });
+
+    await controller.list(undefined, 'cat1');
+    expect(query.listItems).toHaveBeenCalledWith({ search: undefined, categoryId: 'cat1' });
+
+    await controller.list(undefined, 'none');
+    expect(query.listItems).toHaveBeenCalledWith({ search: undefined, categoryId: null });
+  });
+
+  it('POST /categories valida nome e delega ao service', async () => {
+    await controller.createCategory({ name: 'Limpeza' });
+    expect(categories.create).toHaveBeenCalledWith('Limpeza');
+    await expect(controller.createCategory({ name: '' })).rejects.toThrow(BadRequestException);
+  });
+
+  it('DELETE /categories/:id remove e retorna confirmação', async () => {
+    const result = await controller.removeCategory('cat1');
+    expect(categories.remove).toHaveBeenCalledWith('cat1');
+    expect(result).toEqual({ removed: true });
   });
 });

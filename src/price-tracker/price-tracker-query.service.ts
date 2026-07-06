@@ -21,6 +21,12 @@ export interface TrackedItemView {
   movingAvg: number | null;
   allTimeLow: number | null;
   pctVsAvg: number | null;
+  categoryId: string | null;
+}
+
+export interface ListItemsFilter {
+  search?: string;
+  categoryId?: string | null;
 }
 
 const round1 = (x: number) => Math.round(x * 10) / 10;
@@ -35,8 +41,23 @@ export class PriceTrackerQueryService {
     @InjectModel(CurrentOffersModel.name) private readonly currentOffersModel: Model<CurrentOffersModel>,
   ) {}
 
-  async listItems(): Promise<TrackedItemView[]> {
-    const items = await this.itemModel.find().sort({ createdAt: -1 }).lean().exec();
+  async listItems(filter: ListItemsFilter = {}): Promise<TrackedItemView[]> {
+    const mongoFilter: Record<string, any> = {};
+    if (filter.search?.trim()) {
+      const term = filter.search.trim();
+      // Nome (case-insensitive) OU EAN (contém) — um único campo de busca no frontend.
+      mongoFilter.$or = [
+        { name: { $regex: term, $options: 'i' } },
+        { ean: { $regex: term } },
+      ];
+    }
+    if (filter.categoryId === null) {
+      mongoFilter.categoryId = null; // "sem categoria"
+    } else if (filter.categoryId) {
+      mongoFilter.categoryId = filter.categoryId;
+    }
+
+    const items = await this.itemModel.find(mongoFilter).sort({ createdAt: -1 }).lean().exec();
     if (!items.length) return [];
 
     const cutoff = new Date(Date.now() - MOVING_AVG_DAYS * 86_400_000);
@@ -81,6 +102,7 @@ export class PriceTrackerQueryService {
         movingAvg,
         allTimeLow: s?.allTimeLow ?? null,
         pctVsAvg,
+        categoryId: item.categoryId ? String(item.categoryId) : null,
       };
     });
   }
