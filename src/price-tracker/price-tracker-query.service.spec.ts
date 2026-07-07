@@ -131,6 +131,62 @@ describe('PriceTrackerQueryService.listItems', () => {
   });
 });
 
+describe('PriceTrackerQueryService.listItemsPaged', () => {
+  let itemModel: any;
+  let historyModel: any;
+  let service: PriceTrackerQueryService;
+
+  const makeItems = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      _id: new Types.ObjectId(), ean: `EAN${i}`, name: `Item ${i}`, active: true, categoryId: null,
+    }));
+
+  beforeEach(() => {
+    historyModel = { aggregate: jest.fn().mockReturnValue({ exec: async () => [] }) };
+  });
+
+  const setupItemModel = (allItems: any[], pageItems: any[]) => {
+    itemModel = {
+      countDocuments: jest.fn().mockReturnValue({ exec: async () => allItems.length }),
+      find: jest.fn().mockReturnValue({
+        sort: () => ({
+          skip: () => ({
+            limit: () => ({ lean: () => ({ exec: async () => pageItems }) }),
+          }),
+        }),
+      }),
+    };
+    service = new PriceTrackerQueryService(itemModel, historyModel, {} as any, {} as any);
+  };
+
+  it('pagina no Mongo (skip/limit), não em memória — retorna só a página pedida + total real', async () => {
+    const all = makeItems(45);
+    setupItemModel(all, all.slice(20, 40)); // página 2, pageSize 20
+    const result = await service.listItemsPaged({ page: 2, pageSize: 20 });
+
+    expect(result.total).toBe(45);
+    expect(result.page).toBe(2);
+    expect(result.pageSize).toBe(20);
+    expect(result.items).toHaveLength(20);
+  });
+
+  it('aplica defaults (page 1, pageSize 20) quando omitidos', async () => {
+    const all = makeItems(5);
+    setupItemModel(all, all);
+    const result = await service.listItemsPaged({});
+    expect(result.page).toBe(1);
+    expect(result.pageSize).toBe(20);
+  });
+
+  it('lista vazia → items vazio, total 0, sem chamar aggregation', async () => {
+    setupItemModel([], []);
+    const result = await service.listItemsPaged({ page: 1, pageSize: 20 });
+    expect(result.items).toEqual([]);
+    expect(result.total).toBe(0);
+    expect(historyModel.aggregate).not.toHaveBeenCalled();
+  });
+});
+
 describe('PriceTrackerQueryService.offers', () => {
   let itemModel: any;
   let currentOffersModel: any;

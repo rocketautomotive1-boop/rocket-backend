@@ -57,12 +57,19 @@ export class PriceTrackerController {
   }
 
   @Get('items')
-  @ApiOperation({ summary: 'Lista itens monitorados com estado atual (preço, média, isDeal)' })
-  async list(@Query('search') search?: string, @Query('categoryId') categoryId?: string) {
-    return this.query.listItems({
+  @ApiOperation({ summary: 'Lista paginada de itens monitorados com estado atual (preço, média, isDeal)' })
+  async list(
+    @Query('search') search?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.query.listItemsPaged({
       search,
       // 'none' é o sentinel do frontend p/ filtrar "sem categoria" (query string não tem null).
       categoryId: categoryId === 'none' ? null : categoryId,
+      page: Math.max(1, Number(page ?? 1) || 1),
+      pageSize: Math.min(100, Math.max(1, Number(pageSize ?? 20) || 20)),
     });
   }
 

@@ -27,6 +27,16 @@ export interface TrackedItemView {
 export interface ListItemsFilter {
   search?: string;
   categoryId?: string | null;
+  /** Paginação opcional — omitida, listItems() retorna tudo (usado por deals()/history()). */
+  page?: number;
+  pageSize?: number;
+}
+
+export interface PagedTrackedItems {
+  items: TrackedItemView[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 const round1 = (x: number) => Math.round(x * 10) / 10;
@@ -42,22 +52,50 @@ export class PriceTrackerQueryService {
   ) {}
 
   async listItems(filter: ListItemsFilter = {}): Promise<TrackedItemView[]> {
+    const mongoFilter = this.buildMongoFilter(filter);
+    const items = await this.itemModel.find(mongoFilter).sort({ createdAt: -1 }).lean().exec();
+    return this.attachLiveState(items);
+  }
+
+  /** Igual a listItems, mas pagina os itens (aggregation roda só na página pedida). */
+  async listItemsPaged(filter: ListItemsFilter): Promise<PagedTrackedItems> {
+    const mongoFilter = this.buildMongoFilter(filter);
+    const page = Math.max(1, filter.page ?? 1);
+    const pageSize = Math.min(100, Math.max(1, filter.pageSize ?? 20));
+
+    const [total, pageDocs] = await Promise.all([
+      this.itemModel.countDocuments(mongoFilter).exec(),
+      this.itemModel
+        .find(mongoFilter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * pageSize)
+        .limit(pageSize)
+        .lean()
+        .exec(),
+    ]);
+
+    return { items: await this.attachLiveState(pageDocs), total, page, pageSize };
+  }
+
+  private buildMongoFilter(filter: ListItemsFilter): Record<string, any> {
     const mongoFilter: Record<string, any> = {};
     if (filter.search?.trim()) {
       const term = filter.search.trim();
-      // Nome (case-insensitive) OU EAN (contém) — um único campo de busca no frontend.
       mongoFilter.$or = [
         { name: { $regex: term, $options: 'i' } },
         { ean: { $regex: term } },
       ];
     }
     if (filter.categoryId === null) {
-      mongoFilter.categoryId = null; // "sem categoria"
+      mongoFilter.categoryId = null;
     } else if (filter.categoryId) {
       mongoFilter.categoryId = filter.categoryId;
     }
+    return mongoFilter;
+  }
 
-    const items = await this.itemModel.find(mongoFilter).sort({ createdAt: -1 }).lean().exec();
+  /** Aggregation de estado ao vivo (preço, média, isDeal) para um lote de itens já buscados. */
+  private async attachLiveState(items: any[]): Promise<TrackedItemView[]> {
     if (!items.length) return [];
 
     const cutoff = new Date(Date.now() - MOVING_AVG_DAYS * 86_400_000);

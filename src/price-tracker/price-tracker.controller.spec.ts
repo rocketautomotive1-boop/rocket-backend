@@ -17,7 +17,7 @@ describe('PriceTrackerController', () => {
       findByIdAndDelete: jest.fn().mockReturnValue({ lean: () => ({ exec: async () => ({ _id: 'i1' }) }) }),
     };
     worker = { scanEan: jest.fn().mockResolvedValue(undefined) };
-    query = { listItems: jest.fn(), history: jest.fn(), deals: jest.fn(), offers: jest.fn() };
+    query = { listItemsPaged: jest.fn(), history: jest.fn(), deals: jest.fn(), offers: jest.fn() };
     categories = { list: jest.fn(), create: jest.fn(), update: jest.fn(), remove: jest.fn() };
     controller = new PriceTrackerController(itemModel, worker as any, query, categories);
   });
@@ -57,15 +57,33 @@ describe('PriceTrackerController', () => {
     expect(query.offers).toHaveBeenCalledWith('i1', 1, 1);
   });
 
-  it('GET /items repassa search e categoryId; sentinel "none" vira null', async () => {
-    await controller.list('coca', undefined);
-    expect(query.listItems).toHaveBeenCalledWith({ search: 'coca', categoryId: undefined });
+  it('GET /items repassa search e categoryId; sentinel "none" vira null; aplica defaults de página', async () => {
+    await controller.list('coca', undefined, undefined, undefined);
+    expect(query.listItemsPaged).toHaveBeenCalledWith({
+      search: 'coca', categoryId: undefined, page: 1, pageSize: 20,
+    });
 
-    await controller.list(undefined, 'cat1');
-    expect(query.listItems).toHaveBeenCalledWith({ search: undefined, categoryId: 'cat1' });
+    await controller.list(undefined, 'cat1', undefined, undefined);
+    expect(query.listItemsPaged).toHaveBeenCalledWith({
+      search: undefined, categoryId: 'cat1', page: 1, pageSize: 20,
+    });
 
-    await controller.list(undefined, 'none');
-    expect(query.listItems).toHaveBeenCalledWith({ search: undefined, categoryId: null });
+    await controller.list(undefined, 'none', undefined, undefined);
+    expect(query.listItemsPaged).toHaveBeenCalledWith({
+      search: undefined, categoryId: null, page: 1, pageSize: 20,
+    });
+  });
+
+  it('GET /items clampa page/pageSize', async () => {
+    await controller.list(undefined, undefined, '3', '50');
+    expect(query.listItemsPaged).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 3, pageSize: 50 }),
+    );
+
+    await controller.list(undefined, undefined, '0', '999');
+    expect(query.listItemsPaged).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 1, pageSize: 100 }),
+    );
   });
 
   it('POST /categories valida nome e delega ao service', async () => {
