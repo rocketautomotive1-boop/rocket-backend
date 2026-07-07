@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { MenorPrecoClientService } from '../scraper/menor-preco-client.service';
@@ -10,8 +10,14 @@ import { CurrentOffersModel } from '../schemas/current-offers.schema';
 import { PriceAlertService } from '../alerts/price-alert.service';
 import { computeAnalysis, SnapshotPoint } from '../analysis/price-analysis';
 
-/** Máximo de snapshots carregados para análise (>> janela de 14d a 4 scans/dia). */
+/** Máximo de snapshots carregados para análise (>> janela de 14d a 6 scans/dia). */
 const ANALYSIS_LOOKBACK = 200;
+
+/**
+ * 07h, 10h, 13h, 16h, 19h, 22h — de 3 em 3h, pausado 22h–07h (sem movimento de
+ * NFC-e relevante de madrugada, sem motivo pra gastar ciclo de scan nesse horário).
+ */
+const DEFAULT_SCAN_CRON = '0 7,10,13,16,19,22 * * *';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -38,7 +44,7 @@ export class PriceTrackerScanWorker {
     private readonly alerts: PriceAlertService,
   ) {}
 
-  @Cron(process.env.PRICE_TRACKER_SCAN_CRON ?? CronExpression.EVERY_6_HOURS)
+  @Cron(process.env.PRICE_TRACKER_SCAN_CRON ?? DEFAULT_SCAN_CRON)
   async runCycle(): Promise<void> {
     if (this.running) {
       this.logger.warn('Ciclo anterior ainda em execução — pulando este disparo.');
