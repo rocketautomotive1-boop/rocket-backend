@@ -104,7 +104,11 @@ export class XmlBuilderService {
           },
           dest: {
             ...(orderData.buyer.cnpj ? { CNPJ: orderData.buyer.cnpj.replace(/\D/g, '') } : { CPF: (orderData.buyer.cpf || orderData.buyer.document || '00000000000').replace(/\D/g, '') }),
-            xNome: (orderData.buyer.name || (orderData.buyer.first_name || '') + ' ' + (orderData.buyer.last_name || '')).substring(0, 60),
+            // SEFAZ exige esse texto literal no xNome do destinatário quando tpAmb=2 (homologação);
+            // sem ele, o lote é rejeitado com cStat 598 mesmo com todos os outros dados corretos.
+            xNome: isProduction
+              ? (orderData.buyer.name || (orderData.buyer.first_name || '') + ' ' + (orderData.buyer.last_name || '')).substring(0, 60)
+              : 'NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL',
             // Fix 275: Use Capital Code if city_ibge is missing but State is known
             enderDest: {
               xLgr: orderData.buyer.address?.street || 'Rua Desconhecida',
