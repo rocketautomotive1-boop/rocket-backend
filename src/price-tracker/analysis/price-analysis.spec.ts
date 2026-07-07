@@ -51,23 +51,33 @@ describe('evaluateTriggers', () => {
     expect(r).toBe('below_target');
   });
 
-  it('sem histórico mínimo (5 snapshots), gatilhos 2 e 3 NÃO armam', () => {
-    const analysis = computeAnalysis(flatHistory(4, 100), NOW); // só 4 snapshots
+  it('guarda conta o ciclo ATUAL também (+1) — com 4 anteriores (5 no total) já arma', () => {
+    // Off-by-one histórico: analysis.validSnapshots só contava o histórico
+    // ANTERIOR ao scan em andamento (o snapshot atual ainda não foi persistido
+    // quando os gatilhos são avaliados). "Mínimo de 5 amostras" precisa contar
+    // o próprio scan de agora como a 5ª amostra — senão exige 6 scans na prática.
+    const analysis = computeAnalysis(flatHistory(4, 100), NOW); // 4 anteriores + atual = 5
+    const r = evaluateTriggers({ ...base, current: 1, targetPrice: null, analysis });
+    expect(r).toBe('all_time_low');
+  });
+
+  it('com só 3 anteriores (4 no total, ainda < 5), gatilhos 2 e 3 NÃO armam', () => {
+    const analysis = computeAnalysis(flatHistory(3, 100), NOW);
     const r = evaluateTriggers({ ...base, current: 1, targetPrice: null, analysis });
     expect(r).toBeNull();
   });
 
-  it('5+ snapshots no MESMO dia (scans manuais) já armam o gatilho — não exige dias distintos', () => {
-    // Reproduz o caso real: item cadastrado hoje, 5 scans manuais no mesmo dia,
-    // preço cai de 3.29 pra 0.99 no ciclo seguinte. Antes desta correção, a guarda
-    // de "3 dias distintos" bloqueava o alerta indefinidamente.
+  it('5º scan no MESMO dia (scans manuais) já arma o gatilho — não exige dias distintos', () => {
+    // Reproduz o caso real: item cadastrado hoje, 4 scans manuais anteriores no
+    // mesmo dia + o 5º scan atual, preço cai de 3.29 pra 0.99. Antes da correção
+    // de "dias distintos", isso já teria sido bloqueado por outro motivo; antes
+    // da correção do off-by-one, exigiria um 6º scan.
     const sameDay = new Date('2026-07-06T21:00:00Z');
     const points: SnapshotPoint[] = [
       { min: 3.29, median: 4.72, count: 450, scannedAt: new Date('2026-07-06T11:05:00Z') },
       { min: 3.29, median: 4.72, count: 450, scannedAt: new Date('2026-07-06T11:08:00Z') },
       { min: 3.29, median: 4.74, count: 447, scannedAt: new Date('2026-07-06T11:40:00Z') },
       { min: 3.29, median: 4.70, count: 447, scannedAt: new Date('2026-07-06T13:47:00Z') },
-      { min: 3.29, median: 4.78, count: 446, scannedAt: new Date('2026-07-06T15:00:00Z') },
     ];
     const analysis = computeAnalysis(points, sameDay);
     const r = evaluateTriggers({ current: 0.99, currentCount: 449, thresholdPct: 15, targetPrice: null, analysis });

@@ -43,6 +43,14 @@ export interface TriggerInput {
   thresholdPct: number;
 }
 
+/**
+ * analysis.validSnapshots conta só o histórico ANTERIOR ao ciclo atual (o
+ * snapshot de agora ainda não foi persistido quando os gatilhos são avaliados).
+ * A guarda MIN_SNAPSHOTS precisa contar o ciclo atual também — sem isso, "mínimo
+ * de 5 amostras" na prática exige 6 scans (o 5º nunca conta a si mesmo).
+ */
+const effectiveSnapshots = (analysis: PriceAnalysis): number => analysis.validSnapshots + 1;
+
 const round2 = (x: number) => Math.round(x * 100) / 100;
 
 /** Snapshots utilizáveis: sem erro e com min numérico. */
@@ -80,8 +88,9 @@ export function evaluateTriggers(input: TriggerInput): AlertReason | null {
 
   // Guarda anti-"metade do dobro": sem base histórica mínima não há promoção.
   // A mediana (não o min) já protege contra outlier de 1 vendedor — não é
-  // necessário também esperar dias civis distintos passarem.
-  if (analysis.validSnapshots < MIN_SNAPSHOTS) return null;
+  // necessário também esperar dias civis distintos passarem. Conta o ciclo
+  // atual (+1) — ver effectiveSnapshots.
+  if (effectiveSnapshots(analysis) < MIN_SNAPSHOTS) return null;
 
   // 2) Menor preço já visto.
   if (analysis.allTimeLow != null && current < analysis.allTimeLow) return 'all_time_low';
