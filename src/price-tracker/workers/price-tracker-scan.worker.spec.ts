@@ -95,6 +95,33 @@ describe('PriceTrackerScanWorker', () => {
     );
   });
 
+  it('current usa bestOffer.price (rastreável, com loja), NÃO stats.min — evita preço "fantasma"', async () => {
+    // stats.min vem do campo agregado `precos.min` da API (todas as ofertas do
+    // GTIN, sem filtro de UF/página); pode ser menor que qualquer oferta que de
+    // fato apareceu em `offers` (ex.: oferta mais barata fora de PE ou além das
+    // páginas buscadas). O preço usado pra alertar/analisar precisa ser
+    // rastreável a uma oferta real e visível na lista do app.
+    client.fetch.mockResolvedValueOnce({
+      ...okResult,
+      stats: { min: 0.50, avg: 3, max: 5, count: 8 }, // "fantasma": menor que qualquer offer
+    });
+    await worker.scanEan(item.ean);
+    expect(alerts.processSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ ean: item.ean }),
+      2.5, // bestOffer.price (MERCADO A), não 0.50 (stats.min)
+      8,
+      expect.anything(),
+      expect.objectContaining({ price: 2.5 }),
+    );
+  });
+
+  it('sem ofertas com preço (bestOffer null) → snapshot com error, SEM análise/alerta', async () => {
+    client.fetch.mockResolvedValueOnce({ ...okResult, offers: [] });
+    await worker.scanEan(item.ean);
+    expect(historyModel.create).toHaveBeenCalledWith(expect.objectContaining({ error: 'no_offers' }));
+    expect(alerts.processSnapshot).not.toHaveBeenCalled();
+  });
+
   it('erro do scraper → NÃO grava current_offers', async () => {
     client.fetch.mockResolvedValueOnce({ correlation_id: 'c', ean: item.ean, offers: [], error: 'timeout' });
     await worker.scanEan(item.ean);

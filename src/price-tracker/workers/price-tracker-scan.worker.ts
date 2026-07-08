@@ -86,6 +86,23 @@ export class PriceTrackerScanWorker {
       return;
     }
 
+    const mappedOffers = this.mapAndSortOffers(result.offers);
+    const bestOffer = mappedOffers[0] ?? null;
+
+    // current = preço da MELHOR OFERTA DETALHADA (loja/endereço rastreáveis), não
+    // result.stats.min. stats.min vem do campo agregado `precos.min` da API —
+    // reflete TODAS as ofertas do GTIN, sem o filtro de UF/paginação que já foi
+    // aplicado a `offers`. Se a oferta mais barata da API estiver fora de PE ou
+    // além das páginas buscadas, stats.min mostra um preço "fantasma" que não
+    // corresponde a nenhuma oferta visível na lista do app.
+    if (!bestOffer) {
+      await this.historyModel.create({
+        ean, scannedAt: now, stats: result.stats, bestOffer: null, error: 'no_offers',
+      });
+      return;
+    }
+    const current = bestOffer.price as number;
+
     // Análise usa o histórico ANTERIOR ao snapshot atual ("all-time low anterior").
     const history = await this.historyModel
       .find({ ean })
@@ -102,8 +119,6 @@ export class PriceTrackerScanWorker {
     }));
     const analysis = computeAnalysis(points, now);
 
-    const mappedOffers = this.mapAndSortOffers(result.offers);
-    const bestOffer = mappedOffers[0] ?? null;
     await this.historyModel.create({
       ean, scannedAt: now, stats: result.stats, bestOffer, error: null,
     });
@@ -126,7 +141,7 @@ export class PriceTrackerScanWorker {
     }
 
     await this.alerts.processSnapshot(
-      item as any, result.stats.min, result.stats.count, analysis, bestOffer,
+      item as any, current, result.stats.count, analysis, bestOffer,
     );
   }
 
