@@ -9,6 +9,7 @@ import { PriceHistoryModel, PriceHistoryBestOffer } from '../schemas/price-histo
 import { CurrentOffersModel } from '../schemas/current-offers.schema';
 import { PriceAlertService } from '../alerts/price-alert.service';
 import { computeAnalysis, SnapshotPoint } from '../analysis/price-analysis';
+import { filterOutliers, recomputeStats } from '../analysis/outlier-filter';
 
 /** Máximo de snapshots carregados para análise (>> janela de 14d a 6 scans/dia). */
 const ANALYSIS_LOOKBACK = 200;
@@ -86,24 +87,8 @@ export class PriceTrackerScanWorker {
       return;
     }
 
-    const mappedOffers = this.mapAndSortOffers(result.offers);
-    const bestOffer = mappedOffers[0] ?? null;
-
-    // current = preço da MELHOR OFERTA DETALHADA (loja/endereço rastreáveis), não
-    // result.stats.min. stats.min vem do campo agregado `precos.min` da API —
-    // reflete TODAS as ofertas do GTIN, sem o filtro de UF/paginação que já foi
-    // aplicado a `offers`. Se a oferta mais barata da API estiver fora de PE ou
-    // além das páginas buscadas, stats.min mostra um preço "fantasma" que não
-    // corresponde a nenhuma oferta visível na lista do app.
-    if (!bestOffer) {
-      await this.historyModel.create({
-        ean, scannedAt: now, stats: result.stats, bestOffer: null, error: 'no_offers',
-      });
-      return;
-    }
-    const current = bestOffer.price as number;
-
-    // Análise usa o histórico ANTERIOR ao snapshot atual ("all-time low anterior").
+    // Análise usa o histórico ANTERIOR ao snapshot atual ("all-time low anterior",
+    // movingAvg pra base do filtro de outlier abaixo).
     const history = await this.historyModel
       .find({ ean })
       .sort({ scannedAt: -1 })
@@ -119,8 +104,35 @@ export class PriceTrackerScanWorker {
     }));
     const analysis = computeAnalysis(points, now);
 
+    // Ofertas com desvio extremo vs. movingAvg (venda fracionada de fardo/caixa,
+    // erro de digitação de NFC-e) são marcadas suspicious — nunca viram bestOffer
+    // nem entram no recálculo de stats abaixo, mas continuam na lista completa
+    // do ciclo (auditoria). Sem movingAvg ainda (item novo), filtro fica inativo.
+    const mappedOffers = filterOutliers(this.mapAndSortOffers(result.offers), analysis.movingAvg);
+    const bestOffer = mappedOffers.find((o) => !o.suspicious) ?? null;
+
+    // current = preço da MELHOR OFERTA DETALHADA (loja/endereço rastreáveis), não
+    // result.stats.min. stats.min vem do campo agregado `precos.min` da API —
+    // reflete TODAS as ofertas do GTIN, sem o filtro de UF/paginação que já foi
+    // aplicado a `offers`. Se a oferta mais barata da API estiver fora de PE ou
+    // além das páginas buscadas, stats.min mostra um preço "fantasma" que não
+    // corresponde a nenhuma oferta visível na lista do app.
+    if (!bestOffer) {
+      await this.historyModel.create({
+        ean, scannedAt: now, stats: result.stats, bestOffer: null, error: 'no_offers',
+      });
+      return;
+    }
+    const current = bestOffer.price as number;
+
+    // stats.median/avg/count recalculados só com ofertas NÃO-suspeitas — sobrescreve
+    // o que veio da API/scraper (que soma TODAS as ofertas, incluindo outliers).
+    // stats.min/max continuam vindo da API (extremo agregado, base do all_time_low).
+    const recomputed = recomputeStats(mappedOffers);
+    const stats = { ...result.stats, median: recomputed.median, avg: recomputed.avg, count: recomputed.count };
+
     await this.historyModel.create({
-      ean, scannedAt: now, stats: result.stats, bestOffer, error: null,
+      ean, scannedAt: now, stats, bestOffer, error: null,
     });
     // Ofertas completas do ciclo (não histórico — upsert, só o mais recente por EAN).
     await this.currentOffersModel.updateOne(
@@ -141,7 +153,7 @@ export class PriceTrackerScanWorker {
     }
 
     await this.alerts.processSnapshot(
-      item as any, current, result.stats.count, analysis, bestOffer,
+      item as any, current, stats.count, analysis, bestOffer,
     );
   }
 

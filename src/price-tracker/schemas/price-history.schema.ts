@@ -21,6 +21,14 @@ export interface PriceHistoryBestOffer {
   distKm: number | null;
   soldAt: string | null;
   soldAgo: string | null;
+  /**
+   * Desvio extremo vs. movingAvg do item (ver outlier-filter.ts) — ex.: venda
+   * fracionada de fardo/caixa, ou erro de digitação de NFC-e. Suspeitas nunca
+   * viram bestOffer nem entram no recálculo de stats.median/avg/count, mas
+   * continuam na lista completa de ofertas do ciclo (auditoria/exibição).
+   * Ausente/false = não suspeita (ou filtro inativo, sem histórico ainda).
+   */
+  suspicious?: boolean;
 }
 
 /**

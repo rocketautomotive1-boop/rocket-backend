@@ -63,7 +63,9 @@ describe('PriceTrackerScanWorker', () => {
     await worker.scanEan(item.ean);
     expect(historyModel.create).toHaveBeenCalledWith(expect.objectContaining({
       ean: item.ean,
-      stats: okResult.stats,
+      // stats.median/avg/count recalculados a partir das 2 ofertas (nenhuma
+      // suspeita — item novo, sem movingAvg ainda); min/max preservados da API.
+      stats: { min: 2.5, max: 5, avg: 2.75, median: 2.75, count: 2 },
       bestOffer: expect.objectContaining({
         price: 2.5, listPrice: 3.5, savings: 1.0, sellerName: 'MERCADO A', soldAgo: 'há 2 horas',
       }),
@@ -71,7 +73,7 @@ describe('PriceTrackerScanWorker', () => {
     }));
     expect(alerts.processSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({ ean: item.ean }),
-      2.5, 8,
+      2.5, 2,
       expect.objectContaining({ validSnapshots: 0 }),
       expect.objectContaining({ price: 2.5 }),
     );
@@ -109,9 +111,52 @@ describe('PriceTrackerScanWorker', () => {
     expect(alerts.processSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({ ean: item.ean }),
       2.5, // bestOffer.price (MERCADO A), não 0.50 (stats.min)
-      8,
+      2, // count recalculado das 2 ofertas não-suspeitas, não o 8 original da API
       expect.anything(),
       expect.objectContaining({ price: 2.5 }),
+    );
+  });
+
+  it('oferta de venda fracionada (fardo/caixa) é excluída de bestOffer e do recálculo de stats', async () => {
+    // Item com histórico estável (movingAvg ≈ 36 — preço do fardo fechado). Uma
+    // oferta isolada de R$3 (1 unidade avulsa de um fardo de 12) não pode virar
+    // bestOffer nem entrar na média — senão dispara "oferta" que na prática é só
+    // uma unidade de medida diferente (caso real: Eletrodo Aço).
+    const stableHistory = Array.from({ length: 5 }, (_, i) => ({
+      stats: { min: 35, median: 36, count: 50 },
+      scannedAt: new Date(Date.now() - (i + 1) * 86_400_000),
+      error: null,
+    }));
+    historyModel.find = jest.fn().mockReturnValue(leanExec(stableHistory));
+
+    client.fetch.mockResolvedValueOnce({
+      ...okResult,
+      offers: [
+        { seller_name: 'FRACIONADO', price: 3, dist_km: 1, sold_at: null, address: null }, // outlier
+        { seller_name: 'FARDO FECHADO', price: 34, dist_km: 2, sold_at: null, address: null },
+        { seller_name: 'FARDO B', price: 38, dist_km: 3, sold_at: null, address: null },
+      ],
+    });
+    await worker.scanEan(item.ean);
+
+    expect(alerts.processSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ ean: item.ean }),
+      34, // bestOffer = FARDO FECHADO, não os R$3 do fracionado
+      2,  // count recalculado só com as 2 ofertas de fardo fechado
+      expect.anything(),
+      expect.objectContaining({ price: 34, sellerName: 'FARDO FECHADO' }),
+    );
+    expect(currentOffersModel.updateOne).toHaveBeenCalledWith(
+      { ean: item.ean },
+      expect.objectContaining({
+        $set: expect.objectContaining({
+          offers: expect.arrayContaining([
+            expect.objectContaining({ sellerName: 'FRACIONADO', suspicious: true }),
+            expect.objectContaining({ sellerName: 'FARDO FECHADO', suspicious: false }),
+          ]),
+        }),
+      }),
+      { upsert: true },
     );
   });
 
