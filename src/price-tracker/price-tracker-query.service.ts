@@ -233,10 +233,13 @@ export class PriceTrackerQueryService {
     const deals = views.filter((v) => v.isDeal);
 
     const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+    // 200, não 50: a lista agora é agrupada por categoria no frontend — um corte
+    // baixo podia truncar categorias inteiras de forma arbitrária (a última
+    // categoria em ordem alfabética perdendo itens antes das demais).
     const alerts = await this.alertModel
       .find({ triggeredAt: { $gte: sevenDaysAgo } })
       .sort({ triggeredAt: -1 })
-      .limit(50)
+      .limit(200)
       .lean()
       .exec();
 
