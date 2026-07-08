@@ -241,6 +241,7 @@ export class PriceTrackerQueryService {
       .exec();
 
     const nameById = new Map(views.map((v) => [v.id, v.name]));
+    const categoryIdById = new Map(views.map((v) => [v.id, v.categoryId]));
     return {
       deals,
       alerts: alerts.map((a: any) => ({
@@ -248,6 +249,7 @@ export class PriceTrackerQueryService {
         itemId: String(a.itemId),
         ean: a.ean,
         name: nameById.get(String(a.itemId)) ?? a.ean,
+        categoryId: categoryIdById.get(String(a.itemId)) ?? null,
         triggeredAt: a.triggeredAt,
         reason: a.reason,
         currentPrice: a.currentPrice,

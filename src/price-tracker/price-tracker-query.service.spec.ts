@@ -131,6 +131,56 @@ describe('PriceTrackerQueryService.listItems', () => {
   });
 });
 
+describe('PriceTrackerQueryService.deals', () => {
+  let itemModel: any;
+  let historyModel: any;
+  let alertModel: any;
+  let service: PriceTrackerQueryService;
+
+  const CAT_ID = new Types.ObjectId();
+  const item = { _id: ITEM_ID, ean: EAN, name: 'Água', active: true, categoryId: CAT_ID };
+
+  beforeEach(() => {
+    itemModel = { find: jest.fn().mockReturnValue({ sort: () => ({ lean: () => ({ exec: async () => [item] }) }) }) };
+    historyModel = {
+      aggregate: jest.fn().mockReturnValue({
+        exec: async () => [{
+          _id: EAN, lastPrice: 10, lastCount: 5, lastScannedAt: new Date(),
+          allTimeLow: 10, movingAvg: 100,
+        }],
+      }),
+    };
+    alertModel = {
+      find: jest.fn().mockReturnValue({
+        sort: () => ({
+          limit: () => ({
+            lean: () => ({
+              exec: async () => [{
+                _id: new Types.ObjectId(), itemId: ITEM_ID, ean: EAN,
+                triggeredAt: new Date(), reason: 'below_moving_avg', currentPrice: 10, movingAvg: 100,
+              }],
+            }),
+          }),
+        }),
+      }),
+    };
+    service = new PriceTrackerQueryService(itemModel, historyModel, alertModel, {} as any);
+  });
+
+  it('cada alerta carrega o categoryId do item correspondente (agrupamento por categoria no frontend)', async () => {
+    const result = await service.deals();
+    expect(result.alerts[0].categoryId).toBe(String(CAT_ID));
+  });
+
+  it('item sem categoria → categoryId null no alerta', async () => {
+    itemModel.find.mockReturnValue({
+      sort: () => ({ lean: () => ({ exec: async () => [{ ...item, categoryId: null }] }) }),
+    });
+    const result = await service.deals();
+    expect(result.alerts[0].categoryId).toBeNull();
+  });
+});
+
 describe('PriceTrackerQueryService.listItemsPaged', () => {
   let itemModel: any;
   let historyModel: any;
