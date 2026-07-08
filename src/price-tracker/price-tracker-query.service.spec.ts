@@ -129,6 +129,20 @@ describe('PriceTrackerQueryService.listItems', () => {
     expect(pipelineJson).toContain('$stats.median');
     expect(pipelineJson).not.toMatch(/movingAvg[^}]*\$stats\.min/);
   });
+
+  it('a pipeline de agregação usa bestOffer.price para lastPrice, não stats.min', async () => {
+    // Mesma causa raiz do preço "fantasma" corrigida em price-tracker-scan.worker.ts:
+    // stats.min é o campo agregado da API (sem filtro de UF/paginação), pode citar um
+    // preço que não aparece em nenhuma oferta visível na lista do item. O preço
+    // mostrado pro usuário (lastPrice) precisa vir de bestOffer.price (rastreável).
+    historyModel.aggregate.mockReturnValue({ exec: async () => [] });
+    await service.listItems();
+
+    const pipeline = historyModel.aggregate.mock.calls[0][0];
+    const pipelineJson = JSON.stringify(pipeline);
+    expect(pipelineJson).toContain('$bestOffer.price');
+    expect(pipelineJson).not.toMatch(/lastPrice[^}]*\$stats\.min/);
+  });
 });
 
 describe('PriceTrackerQueryService.deals', () => {

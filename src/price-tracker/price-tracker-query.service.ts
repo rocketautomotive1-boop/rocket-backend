@@ -102,14 +102,19 @@ export class PriceTrackerQueryService {
     // 1 aggregation p/ todos os EANs: último snapshot válido + all-time low + média 14d.
     // movingAvg usa a MEDIANA de cada ciclo (stats.median), não o mínimo — o mínimo é
     // sensível a promoção relâmpago isolada de 1 vendedor (ver price-analysis.ts).
-    // allTimeLow continua no mínimo de propósito (gatilho de extremo, separado).
+    // allTimeLow continua no mínimo de propósito (gatilho de extremo, separado) — é
+    // "o menor preço já visto no mercado", não precisa ser rastreável a uma oferta viva.
+    // lastPrice (preço mostrado AGORA pro usuário) usa bestOffer.price, não stats.min:
+    // stats.min é o campo agregado `precos.min` da API, sem o filtro de UF/paginação
+    // já aplicado a `offers` — pode citar um preço que não aparece em nenhuma oferta
+    // visível na lista do item (mesma causa raiz do fix em price-tracker-scan.worker.ts).
     const agg = await this.historyModel.aggregate([
       { $match: { ean: { $in: items.map((i) => i.ean) }, error: null, 'stats.min': { $ne: null } } },
       { $sort: { scannedAt: -1 } },
       {
         $group: {
           _id: '$ean',
-          lastPrice: { $first: '$stats.min' },
+          lastPrice: { $first: '$bestOffer.price' },
           lastCount: { $first: '$stats.count' },
           lastScannedAt: { $first: '$scannedAt' },
           allTimeLow: { $min: '$stats.min' },
