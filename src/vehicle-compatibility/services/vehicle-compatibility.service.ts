@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model } from 'mongoose';
 import { VehicleCompatibilityDocument, VehicleCompatibilityModel } from '../schemas/vehicle-compatibility.schema';
 import { CreateVehicleCompatibilityDto } from '../dto/create-vehicle-compatibility.dto';
 import { UpdateVehicleCompatibilityDto } from '../dto/update-vehicle-compatibility.dto';
@@ -13,15 +13,16 @@ import {
   deriveAliases,
   generateCanonicalKey,
   generateEngineSignature,
+  normalizeDisplacementCc,
   normalizeEngineTokens,
+  normalizeFuelTags,
   normalizeMake,
   normalizeModel,
   normalizeVersionDisplay,
-  normalizeConfidence,
 } from '../../vehicle-shared/utils/vehicle-normalizer.util';
-import { VehicleMarket, VehicleReviewStatus } from '../../vehicle-shared/types/vehicle.types';
+import { parseVehicleQuery, ParsedVehicleQuery } from '../../vehicle-shared/utils/vehicle-query-parser.util';
+import { VehicleMarket, VehicleOrigin } from '../../vehicle-shared/types/vehicle.types';
 import { VEHICLE_CONSTANTS } from '../../vehicle-shared/constants/vehicle.constants';
-import { VehicleMetricsService } from '../../vehicle-shared/metrics/vehicle-metrics.service';
 
 @Injectable()
 export class VehicleCompatibilityService {
@@ -30,85 +31,53 @@ export class VehicleCompatibilityService {
   constructor(
     @InjectModel(VehicleCompatibilityModel.name)
     private readonly model: Model<VehicleCompatibilityDocument>,
-    private readonly metrics: VehicleMetricsService,
   ) {}
 
   async create(dto: CreateVehicleCompatibilityDto): Promise<VehicleCompatibilityDocument> {
-    const enriched = this.buildEnrichedFields(dto);
+    const enriched = this.buildEnrichedFields({ ...dto, origin: dto.origin ?? VehicleOrigin.MANUAL });
     const doc = new this.model(enriched);
     return doc.save();
   }
 
-  async upsertByCanonicalKey(
-    dto: UpsertVehicleCompatibilityDto,
-    sourceDiscoveryId?: string,
-  ): Promise<VehicleCompatibilityDocument> {
-    const incoming = this.buildEnrichedFields(dto as any);
-    if (sourceDiscoveryId && Types.ObjectId.isValid(sourceDiscoveryId)) {
-      (incoming as any).sourceDiscoveryId = new Types.ObjectId(sourceDiscoveryId);
+  /**
+   * Upsert usado pelo importador do ML e pela curadoria manual. Registros já curados
+   * manualmente (origin: manual) nunca são sobrescritos por uma reimportação do ML.
+   */
+  async upsertByCanonicalKey(dto: UpsertVehicleCompatibilityDto): Promise<VehicleCompatibilityDocument> {
+    const incoming = this.buildEnrichedFields(dto);
+
+    const existing = await this.model.findOne({ canonicalKey: incoming.canonicalKey }).lean().exec();
+
+    if (!existing) {
+      const created = await this.model.findOneAndUpdate(
+        { canonicalKey: incoming.canonicalKey },
+        { $setOnInsert: incoming },
+        { upsert: true, new: true },
+      ).exec();
+      return created as VehicleCompatibilityDocument;
     }
 
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const inserted = await this.model
-        .findOneAndUpdate(
-          { canonicalKey: incoming.canonicalKey },
-          { $setOnInsert: incoming },
-          { upsert: true, new: true },
-        )
-        .exec();
-
-      if (!inserted) continue;
-
-      const existing = await this.model
-        .findOne({ canonicalKey: incoming.canonicalKey })
-        .lean()
-        .exec();
-
-      if (!existing) continue;
-
-      const isIncomingBetter = incoming.dataQualityScore > (existing.dataQualityScore ?? 0);
-      const mergedAliases = [...new Set([...(existing.aliases ?? []), ...(incoming.aliases ?? [])])].slice(0, 20);
-      const mergedTags = [...new Set([...(existing.tags ?? []), ...(incoming.tags ?? [])])];
-
-      const update: Record<string, any> = {
-        searchText: incoming.searchText,
-        dataQualityScore: Math.max(existing.dataQualityScore ?? 0, incoming.dataQualityScore),
-        aliases: mergedAliases,
-        tags: mergedTags,
-        canonicalVersion: incoming.canonicalVersion,
-        normalizerVersion: incoming.normalizerVersion,
-      };
-
-      if ((incoming as any).sourceDiscoveryId) {
-        update.sourceDiscoveryId = (incoming as any).sourceDiscoveryId;
-      }
-
-      if (isIncomingBetter) {
-        const fieldsToPromote = [
-          'engine', 'transmission', 'productionYears', 'years', 'fuel', 'platform',
-          'generation', 'facelift', 'bodyType', 'segment', 'fipe', 'chassis',
-          'normalized', 'versionDisplay', 'confidence', 'reviewStatus', 'approvalTier',
-        ];
-        for (const field of fieldsToPromote) {
-          if ((incoming as any)[field] !== undefined && (incoming as any)[field] !== null) {
-            update[field] = (incoming as any)[field];
-          }
-        }
-      }
-
-      const result = await this.model
-        .findOneAndUpdate(
-          { canonicalKey: incoming.canonicalKey },
-          { $set: update },
-          { new: true },
-        )
-        .exec();
-
-      this.logger.debug(`Upserted compatibility ${incoming.canonicalKey}`);
-      return result as any;
+    if (existing.origin === VehicleOrigin.MANUAL && incoming.origin === VehicleOrigin.ML_IMPORT) {
+      this.logger.debug(`Skipping ML reimport over manually curated record: ${incoming.canonicalKey}`);
+      return existing as VehicleCompatibilityDocument;
     }
 
-    throw new Error(`Failed to upsert canonicalKey=${incoming.canonicalKey}`);
+    const mergedAliases = [...new Set([...(existing.aliases ?? []), ...(incoming.aliases ?? [])])].slice(0, 20);
+    const mergedTags = [...new Set([...(existing.tags ?? []), ...(incoming.tags ?? [])])];
+
+    const update: Record<string, any> = {
+      ...incoming,
+      aliases: mergedAliases,
+      tags: mergedTags,
+      dataQualityScore: Math.max(existing.dataQualityScore ?? 0, incoming.dataQualityScore),
+    };
+
+    const result = await this.model
+      .findOneAndUpdate({ canonicalKey: incoming.canonicalKey }, { $set: update }, { new: true })
+      .exec();
+
+    this.logger.debug(`Upserted compatibility ${incoming.canonicalKey}`);
+    return result as VehicleCompatibilityDocument;
   }
 
   async findById(id: string): Promise<VehicleCompatibilityDocument> {
@@ -118,7 +87,8 @@ export class VehicleCompatibilityService {
   }
 
   async update(id: string, dto: UpdateVehicleCompatibilityDto): Promise<VehicleCompatibilityDocument> {
-    const doc = await this.model.findByIdAndUpdate(id, { $set: dto }, { new: true }).exec();
+    const update: Record<string, any> = { ...dto, origin: VehicleOrigin.MANUAL, lastEditedAt: new Date() };
+    const doc = await this.model.findByIdAndUpdate(id, { $set: update }, { new: true }).exec();
     if (!doc) throw new VehicleCompatibilityNotFoundException(id);
     return doc;
   }
@@ -145,7 +115,10 @@ export class VehicleCompatibilityService {
     if (dto.model) filter['normalized.model'] = normalizeModel(dto.model);
     if (dto.version) filter['normalized.version'] = normalizeVersionDisplay(dto.version);
 
-    if (dto.q) return this.atlasSearch(dto);
+    if (dto.q) {
+      const parsed = parseVehicleQuery(dto.q);
+      return this.atlasSearch(dto, parsed);
+    }
 
     const skip = ((dto.page ?? 1) - 1) * (dto.limit ?? 20);
     const [data, total] = await Promise.all([
@@ -164,21 +137,23 @@ export class VehicleCompatibilityService {
 
   async atlasSearch(
     dto: SearchVehicleCompatibilitiesDto,
+    parsed?: ParsedVehicleQuery,
   ): Promise<{ data: VehicleCompatibilityDocument[]; total: number }> {
     const skip = ((dto.page ?? 1) - 1) * (dto.limit ?? 20);
     const limit = dto.limit ?? 20;
+    const freeText = parsed?.freeText || dto.q;
 
     const searchStage: any = {
       $search: {
         index: 'vehicle_compatibility_search',
         compound: {
           should: [
-            { text: { query: dto.q, path: 'normalized.make', score: { boost: { value: 5 } } } },
-            { text: { query: dto.q, path: 'normalized.model', score: { boost: { value: 5 } } } },
-            { text: { query: dto.q, path: 'normalized.version', score: { boost: { value: 3 } } } },
-            { text: { query: dto.q, path: 'aliases', score: { boost: { value: 2 } } } },
-            { text: { query: dto.q, path: 'tags', score: { boost: { value: 1 } } } },
-            { text: { query: dto.q, path: 'searchText', fuzzy: { maxEdits: 1 }, score: { boost: { value: 1 } } } },
+            { text: { query: freeText, path: 'normalized.make', score: { boost: { value: 5 } } } },
+            { text: { query: freeText, path: 'normalized.model', score: { boost: { value: 5 } } } },
+            { text: { query: freeText, path: 'normalized.version', score: { boost: { value: 3 } } } },
+            { text: { query: freeText, path: 'aliases', score: { boost: { value: 2 } } } },
+            { text: { query: freeText, path: 'tags', score: { boost: { value: 1 } } } },
+            { text: { query: freeText, path: 'searchText', fuzzy: { maxEdits: 1 }, score: { boost: { value: 1 } } } },
           ],
           minimumShouldMatch: 1,
           filter: [],
@@ -194,6 +169,21 @@ export class VehicleCompatibilityService {
     }
     if (dto.market) {
       searchStage.$search.compound.filter.push({ text: { path: 'market', query: dto.market } });
+    }
+    if (parsed?.yearRange) {
+      searchStage.$search.compound.filter.push({
+        range: { path: 'years', gte: parsed.yearRange.from, lte: parsed.yearRange.to },
+      });
+    }
+    if (parsed?.fuelTags?.length) {
+      searchStage.$search.compound.filter.push({
+        in: { path: 'normalized.fuelTags', value: parsed.fuelTags },
+      });
+    }
+    if (parsed?.displacementCc !== undefined) {
+      searchStage.$search.compound.filter.push({
+        equals: { path: 'normalized.displacementCc', value: parsed.displacementCc },
+      });
     }
 
     try {
@@ -212,10 +202,19 @@ export class VehicleCompatibilityService {
       return { data, total };
     } catch (err) {
       this.logger.warn(`Atlas Search unavailable, falling back to text search: ${err?.message}`);
-      const filter: any = { $text: { $search: dto.q } };
+      const filter: any = { $text: { $search: freeText } };
       if (dto.active !== undefined) filter.active = dto.active;
       if (dto.market) filter.market = dto.market;
       if (dto.year) filter.years = dto.year;
+      if (parsed?.yearRange) {
+        filter.years = { $gte: parsed.yearRange.from, $lte: parsed.yearRange.to };
+      }
+      if (parsed?.fuelTags?.length) {
+        filter['normalized.fuelTags'] = { $in: parsed.fuelTags };
+      }
+      if (parsed?.displacementCc !== undefined) {
+        filter['normalized.displacementCc'] = parsed.displacementCc;
+      }
 
       const [data, total] = await Promise.all([
         this.model
@@ -232,13 +231,8 @@ export class VehicleCompatibilityService {
   }
 
   private buildEnrichedFields(
-    dto: CreateVehicleCompatibilityDto & {
-      reviewStatus?: VehicleReviewStatus;
-      approvalTier?: string;
-      canonicalVersion?: string;
-      normalizerVersion?: string;
-    },
-  ): Partial<VehicleCompatibilityModel> & { canonicalKey: string } {
+    dto: CreateVehicleCompatibilityDto & { origin?: VehicleOrigin; mlVehicleId?: string },
+  ): Partial<VehicleCompatibilityModel> & { canonicalKey: string; origin: VehicleOrigin } {
     const market = dto.market ?? VehicleMarket.BR;
     const allAliases = [
       ...(dto.aliases ?? []),
@@ -260,6 +254,7 @@ export class VehicleCompatibilityService {
       dto.version,
       generateEngineSignature(dto.engine as any),
       market,
+      dto.years,
     )}`;
 
     const dataQualityScore = computeDataQualityScore({
@@ -293,6 +288,8 @@ export class VehicleCompatibilityService {
       segment: dto.segment,
       fipe: dto.fipe as any,
       chassis: dto.chassis as any,
+      dimensions: (dto as any).dimensions,
+      features: (dto as any).features,
       aliases: [...new Set(allAliases)].slice(0, 20),
       tags,
       searchText: buildSearchText(dto.make, dto.model, dto.version, allAliases, tags),
@@ -302,16 +299,14 @@ export class VehicleCompatibilityService {
         version: normalizeVersionDisplay(dto.version),
         versionDisplay: normalizeVersionDisplay(dto.version),
         engineTokens,
+        displacementCc: normalizeDisplacementCc((dto.engine as any)?.displacement),
+        fuelTags: normalizeFuelTags((dto.engine as any)?.fuelType),
       },
       canonicalKey,
-      canonicalVersion: dto.canonicalVersion ?? VEHICLE_CONSTANTS.CANONICAL_VERSION,
-      normalizerVersion: dto.normalizerVersion ?? VEHICLE_CONSTANTS.NORMALIZER_VERSION,
       dataQualityScore,
       active: dto.active ?? true,
-      sourceType: dto.sourceType,
-      reviewStatus: dto.reviewStatus ?? VehicleReviewStatus.AUTO_APPROVED,
-      confidence: normalizeConfidence(dto.confidence),
-      approvalTier: dto.approvalTier,
+      origin: dto.origin ?? VehicleOrigin.MANUAL,
+      mlVehicleId: dto.mlVehicleId,
     };
   }
 }

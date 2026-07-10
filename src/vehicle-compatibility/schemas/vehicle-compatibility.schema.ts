@@ -1,12 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
-import {
-  VehicleBodyType,
-  VehicleMarket,
-  VehicleReviewStatus,
-  VehicleSourceType,
-} from '../../vehicle-shared/types/vehicle.types';
-import { VehicleApprovalTier } from '../../vehicle-shared/constants/vehicle.constants';
+import { Document } from 'mongoose';
+import { VehicleBodyType, VehicleMarket, VehicleOrigin } from '../../vehicle-shared/types/vehicle.types';
 
 export type VehicleCompatibilityDocument = VehicleCompatibilityModel & Document;
 
@@ -23,6 +17,8 @@ class CompatibilityNormalizedSchema {
   @Prop({ required: true }) version: string;
   @Prop() versionDisplay?: string;
   @Prop({ type: [String] }) engineTokens?: string[];
+  @Prop({ type: Number, index: true }) displacementCc?: number;
+  @Prop({ type: [String], index: true }) fuelTags?: string[];
 }
 
 @Schema({ collection: 'vehicle_compatibilities', timestamps: true })
@@ -49,6 +45,10 @@ export class VehicleCompatibilityModel {
 
   @Prop({ type: Object }) fipe?: Record<string, any>;
   @Prop({ type: Object }) chassis?: Record<string, any>;
+  /** Dimensões físicas: length/height/width/wheelbase/fuelCapacity/doors/passengerCapacity (mm/L/un). */
+  @Prop({ type: Object }) dimensions?: Record<string, any>;
+  /** Opcionais/equipamentos presentes (ex: "abs", "airbag_passageiro", "android_auto"). */
+  @Prop({ type: [String], index: true }) features?: string[];
 
   @Prop({ type: CompatibilityNormalizedSchema, required: true })
   normalized: CompatibilityNormalizedSchema;
@@ -58,15 +58,17 @@ export class VehicleCompatibilityModel {
   @Prop({ index: true }) searchText?: string;
 
   @Prop({ default: true, index: true }) active: boolean;
-  @Prop({ enum: Object.values(VehicleSourceType) }) sourceType?: VehicleSourceType;
-  @Prop({ type: Types.ObjectId, ref: 'VehicleDiscoveryModel', index: true }) sourceDiscoveryId?: Types.ObjectId;
-  @Prop({ type: Number }) confidence?: number;
-  @Prop({ enum: Object.values(VehicleReviewStatus) }) reviewStatus?: VehicleReviewStatus;
+
+  @Prop({ enum: Object.values(VehicleOrigin), required: true, index: true })
+  origin: VehicleOrigin;
+
+  /** Id numérico da taxonomia do catálogo ML — necessário para sync de compatibilidade de volta ao ML. */
+  @Prop({ index: true }) mlVehicleId?: string;
+
+  @Prop() lastEditedBy?: string;
+  @Prop() lastEditedAt?: Date;
 
   @Prop({ unique: true, required: true, index: true }) canonicalKey: string;
-  @Prop({ default: 'v1', index: true }) canonicalVersion: string;
-  @Prop({ default: 'v1', index: true }) normalizerVersion: string;
-  @Prop({ enum: Object.values(VehicleApprovalTier) }) approvalTier?: string;
   @Prop({ type: Number, default: 0, index: true }) dataQualityScore: number;
 }
 
@@ -78,3 +80,4 @@ VehicleCompatibilitySchema.index({ 'engine.code': 1 });
 VehicleCompatibilitySchema.index({ 'engine.family': 1 });
 VehicleCompatibilitySchema.index({ active: 1, market: 1 });
 VehicleCompatibilitySchema.index({ searchText: 'text' });
+VehicleCompatibilitySchema.index({ 'productionYears.from': 1, 'productionYears.to': 1 });

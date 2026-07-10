@@ -1,6 +1,4 @@
-import { createHash } from 'crypto';
 import { VEHICLE_CONSTANTS } from '../constants/vehicle.constants';
-import { VehicleAiOutput } from '../types/vehicle.types';
 import {
   collapseSpaces,
   removeAccents,
@@ -48,6 +46,48 @@ export function normalizeVersionDisplay(version: string): string {
 
 export function normalizeEngineTokens(engineStr: string): string[] {
   return tokenize(engineStr ?? '');
+}
+
+/** Extrai cilindrada em cc de formato bruto ("1000 cc", "1.0", "1,4", "2000cc") → undefined se irreconhecível. */
+export function normalizeDisplacementCc(raw?: string): number | undefined {
+  if (!raw) return undefined;
+  const str = raw.toLowerCase().trim();
+
+  const ccMatch = str.match(/(\d+(?:[.,]\d+)?)\s*cc/);
+  if (ccMatch) {
+    const cc = parseFloat(ccMatch[1].replace(',', '.'));
+    return Number.isFinite(cc) ? Math.round(cc) : undefined;
+  }
+
+  const litersMatch = str.match(/\b(\d)[.,](\d)\b/);
+  if (litersMatch) {
+    const liters = parseFloat(`${litersMatch[1]}.${litersMatch[2]}`);
+    return Number.isFinite(liters) ? Math.round(liters * 1000) : undefined;
+  }
+
+  return undefined;
+}
+
+const FUEL_TAG_DICTIONARY: Array<{ tag: string; substrings: string[] }> = [
+  { tag: 'diesel', substrings: ['diesel'] },
+  { tag: 'gasoline', substrings: ['gasolina', 'gasol'] },
+  { tag: 'ethanol', substrings: ['alcool', 'etanol'] },
+  { tag: 'flex', substrings: ['flex'] },
+  { tag: 'hybrid', substrings: ['hibrid'] },
+  { tag: 'electric', substrings: ['eletric'] },
+  { tag: 'cng', substrings: ['gnv', 'gas natural', 'cng'] },
+];
+
+/** Mapeia texto livre de combustível (PT-BR, incl. compostos "X e Y", "X/Y") pra tags do VehicleFuelType. */
+export function normalizeFuelTags(raw?: string): string[] {
+  if (!raw) return [];
+  const str = removeAccents(raw).toLowerCase();
+
+  const tags = FUEL_TAG_DICTIONARY.filter(({ substrings }) =>
+    substrings.some((s) => str.includes(s)),
+  ).map(({ tag }) => tag);
+
+  return [...new Set(tags)];
 }
 
 export function normalizeVersionForKey(version: string): string {
@@ -102,6 +142,7 @@ export function generateCanonicalKey(
   version: string,
   engineSignature: string,
   market: string,
+  years: number[] = [],
 ): string {
   return [
     normalizeMake(make),
@@ -109,73 +150,8 @@ export function generateCanonicalKey(
     normalizeVersionForKey(version),
     (engineSignature ?? '').toLowerCase().trim(),
     (market ?? '').toLowerCase().trim(),
+    [...years].sort((a, b) => a - b).join('_'),
   ].join(':');
-}
-
-export function generateLockKey(
-  make: string,
-  model: string,
-  version: string,
-  sourceItemId?: string,
-  source?: string,
-  title?: string,
-  engineRaw?: string,
-): string {
-  const hasStructural = make?.trim() && model?.trim() && version?.trim();
-
-  if (hasStructural) {
-    return [
-      normalizeMake(make),
-      normalizeModel(model),
-      normalizeVersionDisplay(version),
-      (source ?? '').toLowerCase(),
-      (sourceItemId ?? '').toLowerCase(),
-    ]
-      .filter(Boolean)
-      .map((p) => p.replace(/\s+/g, '_'))
-      .join(':');
-  }
-
-  const hashInput = [
-    normalizeMake(make),
-    normalizeModel(model),
-    title ?? '',
-    engineRaw ?? '',
-    source ?? '',
-    sourceItemId ?? '',
-  ]
-    .map((s) => s.toLowerCase().trim())
-    .filter(Boolean)
-    .join('|');
-
-  const hash = createHash('sha256').update(hashInput).digest('hex').slice(0, 20);
-  return `fallback:${hash}`;
-}
-
-export function generateAiCacheKey(input: {
-  make?: string;
-  model?: string;
-  version?: string;
-  title?: string;
-  engine?: string;
-}): string {
-  const make = normalizeMake(input.make ?? '');
-  const model = normalizeModel(input.model ?? '');
-  const version = normalizeVersionForKey(input.version ?? '');
-  if (make && model && version) {
-    return `v1:${make}:${model}:${version}`;
-  }
-  const hashInput = [
-    make,
-    model,
-    input.title ?? '',
-    input.engine ?? '',
-  ]
-    .map((v) => toLowerClean(v))
-    .filter(Boolean)
-    .join('|');
-  const hash = createHash('sha256').update(hashInput).digest('hex').slice(0, 20);
-  return `v1:fallback:${hash}`;
 }
 
 export function deriveAliases(
@@ -265,37 +241,3 @@ export function computeDataQualityScore(input: {
   return Math.max(0, Math.min(100, score));
 }
 
-export function normalizeConfidence(value: unknown): number | undefined {
-  if (value === null || value === undefined) return undefined;
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : undefined;
-  }
-
-  const raw = String(value).trim().toLowerCase();
-  if (!raw) return undefined;
-
-  if (raw === 'high') return 0.9;
-  if (raw === 'medium' || raw === 'med' || raw === 'mid') return 0.6;
-  if (raw === 'low') return 0.3;
-
-  const parsed = Number(raw.replace(',', '.'));
-  if (!Number.isFinite(parsed)) return undefined;
-
-  // Accept percentages and normalize to 0..1
-  if (parsed > 1 && parsed <= 100) return Math.max(0, Math.min(1, parsed / 100));
-  return Math.max(0, Math.min(1, parsed));
-}
-
-export function aiOutputToCanonicalInput(ai: VehicleAiOutput): {
-  make?: string;
-  model?: string;
-  version?: string;
-  years?: number[];
-} {
-  return {
-    make: ai.make,
-    model: ai.model,
-    version: ai.version,
-    years: ai.productionYears,
-  };
-}
