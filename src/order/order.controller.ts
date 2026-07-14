@@ -149,6 +149,20 @@ export class OrderController {
         return result.getValue();
     }
 
+    /**
+     * Avanço manual de status (loja virtual B2C) — não há rastreamento de transportadora
+     * integrado ainda, então o time interno marca Enviado/Entregue manualmente no admin.
+     */
+    @Post(':id/shipping-status')
+    async updateShippingStatus(
+        @Param('id') id: string,
+        @Body() body: { status: 'SHIPPED' | 'DELIVERED'; userId?: string },
+    ) {
+        const result = await this.orderLifecycle.updateShippingStatus(id, body.status, body.userId);
+        if (result.isFailure) throw new BadRequestException(result.error);
+        return result.getValue();
+    }
+
     @Get(':id/separation')
     async getSeparationList(@Param('id') id: string) {
         const result = await this.orderQuery.getOrder(id);

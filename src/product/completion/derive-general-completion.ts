@@ -5,6 +5,8 @@
  *
  * Seções: dados (nome + marca), imagens, precoEstoque (effectivePrice > 0), fiscal (ncm).
  */
+import { hasUsableImage } from './has-usable-image';
+
 export interface GeneralCompletion {
   dados: boolean;
   imagens: boolean;
@@ -23,7 +25,8 @@ export function deriveGeneralCompletion(product: any, opts: GeneralCompletionOpt
   const brandName = p.brand?.name ?? p.brand?.shortName;
   const dados = !!(p.name && String(p.name).trim()) && !!(brandName && String(brandName).trim());
 
-  const imagens = Array.isArray(p.images) && p.images.length > 0;
+  // Slots still processing rembg or whose background removal failed are not usable.
+  const imagens = hasUsableImage(p.images);
 
   const priceNum = opts.effectivePrice != null ? Number(opts.effectivePrice) : NaN;
   const precoEstoque = Number.isFinite(priceNum) && priceNum > 0;

@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ProductModel, ProductDocument } from '../product/schemas/product.schema';
+import { buildUniqueProductSlug } from '../product/utils/product-slug.util';
 
 /** Domínio dos itens gerais no ProductModel unificado. */
 const GENERAL_DOMAIN = 'general';
@@ -82,6 +83,21 @@ export class GeneralProductRepository {
   ): Promise<GeneralProductDto | null> {
     // Defesa extra: jamais deixar draftData/barcode/domain entrar no $set.
     const { draftData, barcode: _b, domain: _d, ...safe } = (patch ?? {}) as Record<string, any>;
+
+    // Itens gerais nascem sem nome real (ensureByBarcode só sabe o barcode), então
+    // slug só ganha sentido quando displayName/name chega pela primeira vez aqui —
+    // regenerar sempre que um dos dois mudar mantém a URL alinhada ao nome atual.
+    if (safe.displayName !== undefined || safe.name !== undefined) {
+      const existing = await this.model.findOne({ barcode, domain: GENERAL_DOMAIN }).lean().exec();
+      const nextDisplayName = safe.displayName !== undefined ? safe.displayName : existing?.displayName;
+      const nextName = safe.name !== undefined ? safe.name : existing?.name;
+      if (nextDisplayName || nextName) {
+        safe.slug = await buildUniqueProductSlug(
+          { displayName: nextDisplayName, name: nextName, barcode },
+          async (candidate) => !!(await this.model.findOne({ slug: candidate, barcode: { $ne: barcode } })),
+        );
+      }
+    }
 
     const doc = await this.model
       .findOneAndUpdate(

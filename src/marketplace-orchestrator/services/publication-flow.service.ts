@@ -17,7 +17,6 @@ export class PublicationFlowService {
         await this.orchestratorPublisher.requestSync({
             productId,
             reason: 'user_publish',
-            force: true,
             requesterId,
             resolutionSignal: 'user_publish',
         });

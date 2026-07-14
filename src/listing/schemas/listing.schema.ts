@@ -13,6 +13,15 @@ export class ListingModel {
     @Prop({ type: Types.ObjectId, ref: 'MarketplaceModel', required: true, index: true })
     marketplaceId: Types.ObjectId;
 
+    // Conta (multi-client) DONA deste anúncio: a credencial sob a qual ele foi
+    // criado no marketplace. Identidade do listing — não é derivada de domínio nem
+    // reinferida a cada sync. UPDATE/DELETE/operacional roteiam o token por ela;
+    // só o CREATE usa a conta ativa da tela (que então é carimbada aqui).
+    // Opcional durante a migração: listings pré-backfill ficam sem accountId até
+    // o backfill resolver o dono via /items/{externalId}.
+    @Prop({ type: Types.ObjectId, ref: 'MarketplaceModel', index: true })
+    accountId?: Types.ObjectId;
+
     @Prop({ type: String, sparse: true })
     externalId?: string; // ID do anúncio no marketplace
 
@@ -63,11 +72,22 @@ export const ListingSchema = SchemaFactory.createForClass(ListingModel);
 // Índice composto para buscar anúncios de um produto rapidamente
 ListingSchema.index({ productId: 1, marketplaceId: 1 });
 
-// Índice único parcial: Garante unicidade do externalId APENAS se ele existir e for string (exclui null/pendentes)
+// Índice único parcial: garante unicidade do externalId APENAS se ele existir e for
+// string (exclui null/pendentes). Mantido inalterado — um externalId do ML pertence a
+// exatamente UMA conta, então (marketplaceId, externalId) continua sendo chave única
+// global (não há colisão entre contas). O accountId é IDENTIDADE do listing (dono),
+// não parte da chave de unicidade.
 ListingSchema.index(
     { marketplaceId: 1, externalId: 1 },
     {
         unique: true,
         partialFilterExpression: { externalId: { $type: 'string' } }
     }
+);
+
+// Roteamento de saída por conta dona: UPDATE/DELETE/operacional resolvem o token
+// pela conta deste índice (não pela conta ativa da tela).
+ListingSchema.index(
+    { marketplaceId: 1, accountId: 1 },
+    { partialFilterExpression: { accountId: { $exists: true } } },
 );

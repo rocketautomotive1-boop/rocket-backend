@@ -8,6 +8,7 @@ import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.
 import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 import { ProductTitleService } from './product-title.service';
 import { normalizeCompletedAt } from './product-readiness.normalize';
+import { hasUsableImage } from '../completion/has-usable-image';
 import {
   PRODUCT_SECTION_EVENTS,
   ProductDimensionsSavedEvent,
@@ -90,7 +91,10 @@ export class ProductReadinessService {
     const hasBrand = !!brandObj?.name || !!brandObj?.shortName;
     const data = !!((product as any).partNumber && hasBrand);
 
-    const images = Array.isArray((product as any).images) && (product as any).images.length > 0;
+    // Count only slots that resolved to a usable image. A reserved rembg slot that is
+    // still 'processing' — or one whose background removal terminally 'failed' — must
+    // NOT mark the Images section done (see completion/has-usable-image).
+    const images = hasUsableImage((product as any).images);
 
     const titles = await this.productTitleService.findByProductId(productId);
     const titlesOk = Array.isArray(titles) && titles.length > 0;
@@ -115,12 +119,17 @@ export class ProductReadinessService {
   }
 
   /**
-   * Recompute + persist `readyToPublish`/`completedAt` only (audit trail),
-   * and emit `BECAME_READY` on the false→true transition.
+   * Recompute readiness and emit `BECAME_READY` on the false→true edge.
    *
-   * Other completion fields are NOT persisted — they are derived on read
-   * via `compute()`. Persisting them led to drift when product fields were
-   * updated through paths that didn't emit a section-saved event.
+   * IMPORTANT — the persisted `readyToPublish`/`completion.readyToPublish` is NOT a
+   * source of truth. `compute()` is the single source; it is computed on every read
+   * (frontend `/completion`, internal `/products/:id` publish gate). The persisted
+   * value is ONLY a transition marker owned by this method: we compare the freshly
+   * computed value against the previously-persisted one to fire `BECAME_READY` exactly
+   * once. No other code may read it to decide readiness — doing so reintroduces the
+   * drift bug (it goes stale whenever state changes via a path that emits no section
+   * event, e.g. rembg finishing async, imports, scripts). Callers converge the marker
+   * by ensuring every such async change emits a section-saved event that reaches here.
    */
   async refreshAndMaybeEmit(productId: string): Promise<void> {
     try {

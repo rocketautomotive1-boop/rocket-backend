@@ -4,9 +4,12 @@ import { InternalTokenController } from './internal-token.controller';
 import { InternalSignController } from './internal-sign.controller';
 import { InternalProductController } from './internal-product.controller';
 import { InternalListingController } from './internal-listing.controller';
+import { InternalRembgController } from './internal-rembg.controller';
+import { GatewaysModule } from '../gateways/gateways.module';
 import { MarketplaceAuthModule } from '../marketplace/auth/marketplace-auth.module';
 import { MarketplaceRegistryModule } from '../marketplace/marketplace-registry.module';
 import { MarketplaceModule } from '../marketplace/marketplace.module';
+import { ProductModule } from '../product/product.module';
 import { StockModule } from '../stock/stock.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
@@ -18,14 +21,16 @@ import { MarketplaceModel, MarketplaceSchema } from '../marketplace/schemas/mark
         MarketplaceAuthModule,
         MarketplaceRegistryModule,
         forwardRef(() => MarketplaceModule),
+        forwardRef(() => ProductModule),
         StockModule,
         PricingModule,
+        GatewaysModule,
         MongooseModule.forFeature([
             { name: ProductModel.name, schema: ProductSchema },
             { name: ListingModel.name, schema: ListingSchema },
             { name: MarketplaceModel.name, schema: MarketplaceSchema },
         ]),
     ],
-    controllers: [InternalTokenController, InternalSignController, InternalProductController, InternalListingController],
+    controllers: [InternalTokenController, InternalSignController, InternalProductController, InternalListingController, InternalRembgController],
 })
 export class InternalModule {}

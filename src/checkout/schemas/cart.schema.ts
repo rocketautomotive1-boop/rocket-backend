@@ -24,8 +24,8 @@ export const CartItemSchema = SchemaFactory.createForClass(CartItemSnapshot);
 
 @Schema({ timestamps: true })
 export class CartModel {
-    @Prop()
-    customerId?: number; // Keeping primitive number for legacy ID compatibility
+    @Prop({ index: true })
+    customerId?: string; // CustomerModel._id (Mongo ObjectId as string)
 
     @Prop()
     sessionId?: string;

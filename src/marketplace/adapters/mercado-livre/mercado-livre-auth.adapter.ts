@@ -76,7 +76,13 @@ export class MercadoLivreAuthAdapter implements IMarketplaceAuthAdapter, OnModul
       const { data } = await axios.get(`${this.baseUrl}/users/me`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
-      return { nickname: data?.nickname, userId: data?.id };
+      // Conta migrada ao modelo User Products carrega a tag `user_product_seller`
+      // no array `tags` do /users/me. É o sinal de verdade da CONTA: nesse modelo
+      // o POST /items exige `family_name` e rejeita `title`. Persistimos a flag no
+      // additionalData para o worker rotear o payload sem adivinhar.
+      const isUserProductSeller = Array.isArray(data?.tags)
+        && data.tags.includes('user_product_seller');
+      return { nickname: data?.nickname, userId: data?.id, isUserProductSeller };
     } catch (error: any) {
       this.logger.warn(`fetchAccountProfile (ML /users/me) falhou: ${error.message}`);
       return {};

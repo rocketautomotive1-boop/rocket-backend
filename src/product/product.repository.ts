@@ -35,6 +35,14 @@ export class ProductRepository {
         return result.modifiedCount;
     }
 
+    /** Mark a reserved image slot as failed (atomic positional update by slotId). */
+    async markImageSlotFailed(productId: string, slotId: string): Promise<void> {
+        await this.productModel.updateOne(
+            { _id: productId, 'images.slotId': slotId },
+            { $set: { 'images.$.status': 'failed' } },
+        ).exec();
+    }
+
     private toDto(doc: any): ProductModel {
         if (!doc) return null;
         const obj = doc.toObject ? doc.toObject() : doc;

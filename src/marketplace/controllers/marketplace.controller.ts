@@ -346,7 +346,7 @@ export class MarketplaceController {
     const user = (req as any).user;
     const userId = user?.sub || user?.userId || user?.id;
     // Forward to Orchestrator with User Context
-    this.orchestratorPublisherService.requestSync({ productId: String(productId), reason: 'user_publish', force: true, requesterId: userId });
+    this.orchestratorPublisherService.requestSync({ productId: String(productId), reason: 'user_publish', requesterId: userId });
     return { success: true, message: 'Publicação iniciada via Orchestrator (Async)' };
   }
 

@@ -265,9 +265,9 @@ export class MarketplaceTokenBrokerService {
     if (this.isExpiringSoon(account.token, 30) && account.token.refreshToken) {
       await this.refreshToken(marketplaceId, accountId);
       const refreshed = await this.accountById(marketplaceId, accountId);
-      if (refreshed?.token?.accessToken) return this.shape(refreshed.token);
+      if (refreshed?.token?.accessToken) return this.shape(refreshed.token, refreshed.accountId);
     }
-    return this.shape(account.token);
+    return this.shape(account.token, account.accountId);
   }
 
   private toRef(
@@ -303,19 +303,24 @@ export class MarketplaceTokenBrokerService {
     if (this.isExpiringSoon(account.token, 30) && account.token.refreshToken) {
       await this.refreshToken(marketplaceId, account.accountId, domain);
       const refreshed = await this.accountFor(marketplaceId, domain);
-      if (refreshed?.token?.accessToken) return this.shape(refreshed.token);
+      if (refreshed?.token?.accessToken) return this.shape(refreshed.token, refreshed.accountId);
     }
 
-    return this.shape(account.token);
+    return this.shape(account.token, account.accountId);
   }
 
-  private shape(token: any): ResolvedAccountToken {
+  /**
+   * Injeta o `accountId` (Mongo _id da conta) em additionalData para o chamador
+   * saber QUAL conta resolveu — usado no carimbo do listing no CREATE (a conta
+   * ativa da tela) e para re-afirmar o dono no UPDATE.
+   */
+  private shape(token: any, accountId?: string): ResolvedAccountToken {
     return {
       accessToken: token.accessToken,
       refreshToken: token.refreshToken,
       expiresAt: token.expiresAt,
       tokenType: token.tokenType,
-      additionalData: token.additionalData ?? {},
+      additionalData: { ...(token.additionalData ?? {}), ...(accountId ? { accountId } : {}) },
     };
   }
 
@@ -512,24 +517,31 @@ export class MarketplaceTokenBrokerService {
     if (typeof adapter?.fetchAccountProfile !== 'function') return tokenData;
     try {
       const profile = await adapter.fetchAccountProfile(tokenData);
-      if (profile?.nickname) {
+      const extra: Record<string, any> = {};
+      if (profile?.nickname) extra.nickname = profile.nickname;
+      // ML: tag user_product_seller indica que o CREATE exige family_name (não title).
+      if (typeof profile?.isUserProductSeller === 'boolean') {
+        extra.isUserProductSeller = profile.isUserProductSeller;
+      }
+      if (Object.keys(extra).length > 0) {
         return {
           ...tokenData,
-          additionalData: { ...(tokenData.additionalData ?? {}), nickname: profile.nickname },
+          additionalData: { ...(tokenData.additionalData ?? {}), ...extra },
         };
       }
     } catch {
-      /* best-effort — segue sem nickname */
+      /* best-effort — segue sem perfil */
     }
     return tokenData;
   }
 
   /**
-   * Backfill do nome real de uma conta JÁ autorizada: re-busca o perfil com o
-   * token salvo e persiste `nickname`. Usado pelo endpoint de refresh de perfil
-   * (contas autorizadas antes desta feature não têm nickname salvo).
+   * Backfill do perfil de uma conta JÁ autorizada: re-busca o perfil com o token
+   * salvo e persiste `nickname` e (ML) `isUserProductSeller`. Usado pelo endpoint
+   * de refresh de perfil — contas autorizadas antes destas features não têm os
+   * campos salvos; permite corrigir sem re-autenticar.
    */
-  async refreshAccountProfile(accountId: string): Promise<{ nickname: string | null }> {
+  async refreshAccountProfile(accountId: string): Promise<{ nickname: string | null; isUserProductSeller?: boolean }> {
     const account = await this.locateAccount(accountId);
     if (!account) throw new BadRequestException(`Conta ${accountId} não encontrada.`);
     if (!account.token?.accessToken) {
@@ -539,14 +551,19 @@ export class MarketplaceTokenBrokerService {
     if (typeof adapter?.fetchAccountProfile !== 'function') return { nickname: null };
 
     const profile = await adapter.fetchAccountProfile(account.token);
-    if (!profile?.nickname) return { nickname: null };
+    const extra: Record<string, any> = {};
+    if (profile?.nickname) extra.nickname = profile.nickname;
+    if (typeof profile?.isUserProductSeller === 'boolean') {
+      extra.isUserProductSeller = profile.isUserProductSeller;
+    }
+    if (Object.keys(extra).length === 0) return { nickname: null };
 
     const enriched = {
       ...account.token,
-      additionalData: { ...(account.token.additionalData ?? {}), nickname: profile.nickname },
+      additionalData: { ...(account.token.additionalData ?? {}), ...extra },
     };
     await this.saveAccountToken(account, enriched);
-    return { nickname: profile.nickname };
+    return { nickname: profile?.nickname ?? null, isUserProductSeller: extra.isUserProductSeller };
   }
 
   /** Localiza uma conta por accountId em qualquer marketplace. */

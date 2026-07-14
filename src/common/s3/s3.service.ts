@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { S3Client, PutObjectCommand, DeleteObjectCommand, GetBucketLocationCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetBucketLocationCommand, ListObjectsV2Command, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as crypto from 'crypto';
 
@@ -91,6 +91,32 @@ export class S3Service {
     } catch (error) {
       this.logger.error(`Erro ao gerar URL assinada: ${error.message}`, error.stack);
       throw error;
+    }
+  }
+
+  /**
+   * Verifica se um objeto existe no bucket (HEAD). Retorna false em 404/403.
+   */
+  async fileExists(key: string): Promise<boolean> {
+    try {
+      await this.s3Client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
+      return true;
+    } catch (error: any) {
+      const status = error?.$metadata?.httpStatusCode;
+      if (status === 404 || status === 403 || error?.name === 'NotFound') return false;
+      if (error?.name === 'PermanentRedirect' || status === 301) {
+        await this.ensureCorrectRegion();
+        try {
+          await this.s3Client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      // Unknown error — be conservative and treat as "unknown/false" so we never
+      // re-dispatch against a key we can't confirm.
+      this.logger.warn(`fileExists check failed for ${key}: ${error?.message}`);
+      return false;
     }
   }
 

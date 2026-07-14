@@ -30,6 +30,7 @@ import { QueueModule } from '../queue/queue.module';
 import { S3Module } from '../common/s3/s3.module';
 import { MarketplaceRegistryModule } from '../marketplace/marketplace-registry.module';
 import { MarketplaceModule } from '../marketplace/marketplace.module';
+import { GatewaysModule } from '../gateways/gateways.module';
 
 import { ProductBrandController } from './controllers/product-brand.controller';
 import { ProductCategoryController } from './controllers/product-category.controller';
@@ -57,6 +58,12 @@ import { ProductAllocationService } from './services/product-allocation.service'
 import { ProductCompatibilityController } from './controllers/product-compatibility.controller';
 import { ProductCompatibilityService } from './services/product-compatibility.service';
 import { ProductCompatibilityManagementController } from './controllers/product-compatibility-management.controller';
+import { ProductVehicleSearchService } from './services/product-vehicle-search.service';
+import { SearchResultCacheService } from './services/search-result-cache.service';
+import { CategoryLookupService } from './services/category-lookup.service';
+import { ProductRailsService } from './services/product-rails.service';
+import { RelevanceScoreJob } from './jobs/relevance-score.job';
+import { VehicleCompatibilityModule } from '../vehicle-compatibility/vehicle-compatibility.module';
 // import { PublishModule } from '../publish/publish.module';
 import { ListingModule } from '../listing/listing.module'; // Added ListingModule
 import { UserProductivityModule } from '../monitoring/user-productivity.module';
@@ -89,11 +96,16 @@ import { CatalogMigrationService } from './services/catalog-migration.service';
 import { ProductDiscoveryService } from './services/product-discovery.service';
 import { CategoryResolutionService } from './services/category-resolution.service';
 
-import { ReviewModel, ReviewSchema } from './schemas/review.schema';
-import { ReviewsService } from './services/reviews.service';
-import { ReviewsController } from './controllers/reviews.controller';
-
 import { ProductAliasModel, ProductAliasSchema } from './schemas/product-alias.schema';
+import { CategoryHintModel, CategoryHintSchema } from './schemas/category-hint.schema';
+import { CategoryHintService } from './services/category-hint.service';
+import {
+  DisplayNameSynonymCandidateModel,
+  DisplayNameSynonymCandidateSchema,
+} from './schemas/display-name-synonym-candidate.schema';
+import { DisplayNameSynonymModel, DisplayNameSynonymSchema } from './schemas/display-name-synonym.schema';
+import { DisplayNameSynonymCandidateService } from './services/display-name-synonym-candidate.service';
+import { DisplayNameSynonymCandidateController } from './controllers/display-name-synonym-candidate.controller';
 import { ProductMatcherService } from './services/product-matcher.service';
 import { StockSyncConsumer } from './consumers/stock-sync.consumer';
 import { DiscoveryMsResponseConsumer } from './consumers/discovery-ms-response.consumer';
@@ -101,6 +113,7 @@ import { SourceRefreshService } from './services/source-refresh.service';
 import { SourceRefreshResponseConsumer } from './consumers/source-refresh-response.consumer';
 import { ProductReadinessService } from './services/product-readiness.service';
 import { PublicationTriggerListener } from './listeners/publication-trigger.listener';
+import { ContentResyncListener } from './listeners/content-resync.listener';
 import { ReadinessRecoveryJob } from './jobs/readiness-recovery.job';
 import { CategorySnapshotService } from './services/category-snapshot.service';
 
@@ -118,7 +131,6 @@ import { PricingModule } from '../pricing/pricing.module';
 
     MongooseModule.forFeature([
       { name: ProductModel.name, schema: ProductSchema },
-      { name: ReviewModel.name, schema: ReviewSchema },
       { name: ProductCompatibilityModel.name, schema: ProductCompatibilitySchema },
       { name: ProductUnitModel.name, schema: ProductUnitSchema },
       { name: ProductNCMModel.name, schema: ProductNCMSchema },
@@ -129,6 +141,9 @@ import { PricingModule } from '../pricing/pricing.module';
       { name: CategoryModel.name, schema: CategorySchema },
       { name: CrossReferenceGroupModel.name, schema: CrossReferenceGroupSchema },
       { name: ProductAliasModel.name, schema: ProductAliasSchema },
+      { name: CategoryHintModel.name, schema: CategoryHintSchema },
+      { name: DisplayNameSynonymCandidateModel.name, schema: DisplayNameSynonymCandidateSchema },
+      { name: DisplayNameSynonymModel.name, schema: DisplayNameSynonymSchema },
       { name: QueueRecordModel.name, schema: QueueRecordSchema },
       { name: ProductDraftModel.name, schema: ProductDraftSchema },
       { name: ProductDiscoveryModel.name, schema: ProductDiscoverySchema },
@@ -153,6 +168,8 @@ import { PricingModule } from '../pricing/pricing.module';
     PricingModule,
     UserProductivityModule,
     forwardRef(() => MarketplaceOrchestratorModule),
+    GatewaysModule,
+    VehicleCompatibilityModule,
   ],
   controllers: [
     ProductController,
@@ -163,7 +180,6 @@ import { PricingModule } from '../pricing/pricing.module';
     ProductNCMController,
     ProductUnitController,
     ProductWarrantyController,
-    ReviewsController,
 
     ProductAllocationController,
     ProductTitleController,
@@ -176,14 +192,16 @@ import { PricingModule } from '../pricing/pricing.module';
     BoxItemController,
     ProductPublicationLogController,
     MigrationController,
-    CrossReferenceController
+    CrossReferenceController,
+    DisplayNameSynonymCandidateController
   ],
   providers: [
     ProductService,
     ProductRepository,
-    ReviewsService,
     ProductBrandService,
     ProductCategoryService,
+    CategoryHintService,
+    DisplayNameSynonymCandidateService,
     ProductNCMService,
     ProductUnitService,
     ProductWarrantyService,
@@ -192,6 +210,11 @@ import { PricingModule } from '../pricing/pricing.module';
     ProductTitleService,
     ProductFilterService,
     ProductCompatibilityService,
+    ProductVehicleSearchService,
+    SearchResultCacheService,
+    CategoryLookupService,
+    ProductRailsService,
+    RelevanceScoreJob,
     ProductConditionService,
     WarehouseService,
     BoxService,
@@ -211,6 +234,7 @@ import { PricingModule } from '../pricing/pricing.module';
     SourceRefreshResponseConsumer,
     ProductReadinessService,
     PublicationTriggerListener,
+    ContentResyncListener,
     ReadinessRecoveryJob,
     CategorySnapshotService,
     // Hexagonal port implementations consumed by OrderModule
@@ -224,7 +248,6 @@ import { PricingModule } from '../pricing/pricing.module';
 
     ProductService,
     ProductRepository,
-    ReviewsService,
     ProductAllocationService,
     ProductImageService,
     ProductTitleService,
@@ -240,6 +263,8 @@ import { PricingModule } from '../pricing/pricing.module';
     CatalogMigrationService,
     ProductMatcherService,
     ProductDiscoveryService,
+    CategorySnapshotService,
+    ProductVehicleSearchService,
     // Re-export Stock/Pricing so consumers of ProductModule can inject their ports
     // without each importing those modules directly.
     StockModule,

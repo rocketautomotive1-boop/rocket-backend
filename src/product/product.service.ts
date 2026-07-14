@@ -20,10 +20,12 @@ import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 import { MarketplaceDocument } from '../marketplace/schemas/marketplace.schema';
 import { ValidateMongoId } from '../common/decorators/validate-mongo-id.decorator';
+import { buildUniqueProductSlug, shouldRegenerateSlugForDisplayName } from './utils/product-slug.util';
 import { PublicationLogService } from '../marketplace/services/publication-log.service';
 import { CategoryMappingService } from '../marketplace/services/category/category-mapping.service';
 import { ProductTitleService } from './services/product-title.service';
 import { ProductCategoryService } from './services/product-category.service';
+import { CategoryHintService } from './services/category-hint.service';
 import { UserProductivityService } from '../monitoring/user-productivity.service';
 import { ProductivityType } from '../monitoring/schemas/user-productivity.schema';
 import { MercadoLivreCompatibilityAdapter } from '../marketplace/adapters/mercado-livre/mercado-livre-compatibility.adapter';
@@ -77,6 +79,7 @@ export class ProductService {
     private readonly productTitleService: ProductTitleService,
     private readonly userProductivityService: UserProductivityService,
     private readonly productCategoryService: ProductCategoryService,
+    private readonly categoryHintService: CategoryHintService,
     private readonly mercadoLivreCompatibilityAdapter: MercadoLivreCompatibilityAdapter,
     @InjectModel(BrandModel.name) private readonly brandModel: Model<BrandDocument>,
     @InjectModel(ProductDiscoveryModel.name) private readonly productDiscoveryModel: Model<ProductDiscoveryDocument>,
@@ -91,6 +94,18 @@ export class ProductService {
       return this.productRepository.findByIdLeanClean(id);
     }
     return this.productRepository.findByIdClean(id);
+  }
+
+  /**
+   * Para rotas públicas (storefront): aceita slug OU _id, já que URLs antigas
+   * indexadas por _id continuam válidas durante a transição para slug.
+   */
+  async findOneBySlugOrId(idOrSlug: string): Promise<ProductModel | null> {
+    if (Types.ObjectId.isValid(idOrSlug)) {
+      return this.productRepository.findByIdClean(idOrSlug);
+    }
+    const doc = await this.productRepository.findOneRaw({ slug: idOrSlug });
+    return doc ? this.productRepository.findByIdClean(doc.id) : null;
   }
 
   async findRecent(page: number = 1, limit: number = 10): Promise<ProductModel[]> {
@@ -493,7 +508,15 @@ export class ProductService {
       }
 
       // Create New
-      const slugBase = `${data.partNumber}-${data.brand?.name || 'generic'}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+      const slugBase = await buildUniqueProductSlug(
+        {
+          displayName: data.displayName,
+          name: data.name,
+          brandShortName: data.brand?.shortName,
+          partNumber: data.partNumber,
+        },
+        async (candidate) => !!(await this.productRepository.findOneRaw({ slug: candidate })),
+      );
 
       const newProductData = {
         name: data.name || data.partNumber,
@@ -565,12 +588,19 @@ export class ProductService {
       if (data.price !== undefined && data.price !== null) {
         await this.pricing.setBasePrice(String((savedProduct as any).id ?? (savedProduct as any)._id), Number(data.price));
       }
-      if (data.listPrice !== undefined || data.pricing) {
-        await this.pricing.setPricingMeta(String((savedProduct as any).id ?? (savedProduct as any)._id), {
-          listPrice: data.listPrice !== undefined ? Number(data.listPrice) : undefined,
+      const createdProductId = String((savedProduct as any).id ?? (savedProduct as any)._id);
+      if (data.pricing) {
+        await this.pricing.setPricingMeta(createdProductId, {
           markup: data.pricing?.markup,
           profitMargin: data.pricing?.profitMargin,
           strategy: data.pricing?.strategy,
+        });
+      }
+      if (data.listPrice !== undefined && data.listPrice !== null) {
+        await this.pricing.setPromotion(createdProductId, {
+          listPrice: Number(data.listPrice),
+          startsAt: new Date(),
+          endsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         });
       }
 
@@ -653,6 +683,7 @@ export class ProductService {
       }
 
       if (data.name) product.name = data.name;
+      if (data.displayName !== undefined) product.displayName = data.displayName;
       if (data.partNumber) product.partNumber = data.partNumber;
       if (data.description) product.description = data.description;
       if (data.details) product.details = data.details;
@@ -664,13 +695,23 @@ export class ProductService {
 
       // Sale price is owned by PricingModule — route to the port (not the product doc).
       if (data.price !== undefined) await this.pricing.setBasePrice(String(product._id), Number(data.price));
-      if (data.listPrice !== undefined || data.pricing) {
+      if (data.pricing) {
         await this.pricing.setPricingMeta(String(product._id), {
-          listPrice: data.listPrice !== undefined ? Number(data.listPrice) : undefined,
           markup: data.pricing?.markup,
           profitMargin: data.pricing?.profitMargin,
           strategy: data.pricing?.strategy,
         });
+      }
+      if (data.listPrice !== undefined) {
+        if (data.listPrice === null) {
+          await this.pricing.clearPromotion(String(product._id));
+        } else {
+          await this.pricing.setPromotion(String(product._id), {
+            listPrice: Number(data.listPrice),
+            startsAt: new Date(),
+            endsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          });
+        }
       }
       // cost is owned by the stock lot (enters via inbound) — not persisted on the product
       if (data.weight !== undefined) product.weight = Types.Decimal128.fromString(data.weight.toString());
@@ -700,6 +741,29 @@ export class ProductService {
         };
       }
 
+      if (
+        data.displayName &&
+        shouldRegenerateSlugForDisplayName({
+          currentSlug: product.slug,
+          name: product.name,
+          brandShortName: product.brand?.shortName,
+          partNumber: product.partNumber,
+          barcode: product.barcode,
+          newDisplayName: data.displayName,
+        })
+      ) {
+        product.slug = await buildUniqueProductSlug(
+          {
+            displayName: data.displayName,
+            name: product.name,
+            brandShortName: product.brand?.shortName,
+            partNumber: product.partNumber,
+            barcode: product.barcode,
+          },
+          async (candidate) => !!(await this.productRepository.findOneRaw({ slug: candidate, _id: { $ne: product._id } })),
+        );
+      }
+
       const updatedProduct = await this.productRepository.save(product);
 
       // REMOVED: Manual Publication Trigger (Handled by ProductWatcherService)
@@ -707,6 +771,14 @@ export class ProductService {
       // Update Category Counts if relevant fields changed
       if (data.category || data.active !== undefined) {
         this.productCategoryService.updateProductCounts().catch(e => this.logger.error(`Failed to update product counts on update: ${e.message}`));
+      }
+
+      // Alimenta a base de aprendizado displayName -> categoria (ver
+      // docs/superpowers/specs/2026-07-13-product-display-name-category-hint-design.md)
+      if (data.displayName && data.category) {
+        const categoryId = data.category.id || data.category;
+        this.categoryHintService.recordHint(data.displayName, String(categoryId))
+          .catch(e => this.logger.error(`Failed to record category hint: ${e.message}`));
       }
 
       const clean = await this.productRepository.findByIdClean(updatedProduct.id);
@@ -743,12 +815,23 @@ export class ProductService {
     }
   }
 
+  /** Mark a reserved image slot as failed (atomic positional update by slotId). */
+  async markImageSlotFailed(productId: string, slotId: string): Promise<void> {
+    await this.productRepository.markImageSlotFailed(productId, slotId);
+  }
+
   @ValidateMongoId()
   async updateImages(id: string, imageDataList: {
+    slotId?: string;
     url: string;
     key: string;
     filename?: string;
     mimeType?: string;
+    /** Position in the list = source of truth for order. Falls back to array index. */
+    order?: number;
+    main?: boolean;
+    /** 'active' | 'processing' | 'failed'. Defaults to 'active'. */
+    status?: string;
   }[]): Promise<ProductModel> {
     try {
       const product = await this.findDocument(id);
@@ -756,14 +839,16 @@ export class ProductService {
         throw new NotFoundException(`Produto com ID ${id} não encontrado`);
       }
 
+      // Persist order/main EXACTLY as the caller arranged them — never re-derive.
       product.images = imageDataList.map((img, index) => ({
+        slotId: img.slotId,
         url: img.url,
         key: img.key,
         originalName: img.filename || `image-${index}`,
         mimeType: img.mimeType,
-        main: index === 0,
-        order: index,
-        status: 'active'
+        main: img.main ?? index === 0,
+        order: img.order ?? index,
+        status: img.status ?? 'active'
       }));
 
       const updatedProduct = await this.productRepository.save(product);
@@ -963,32 +1048,121 @@ export class ProductService {
     vehicleIds: string[],
     vehicleDetails?: Array<{
       id: string;
+      mlVehicleId?: string;
       name?: string;
-      brand?: string;
-      model?: string;
-      year?: string;
-      version?: string;
-      engine?: string;
-      fuelType?: string;
-      transmission?: string;
     }>
-  ): Promise<any[]> {
+  ): Promise<{ compatibilities: any[]; mlSync: any }> {
     try {
       const product = await this.findOne(productId);
       if (!product) throw new NotFoundException(`Produto com ID ${productId} não encontrado`);
 
-      const result = await this.productCompatibilityService.createMultipleCompatibilitiesBatch({
+      const compatibilities = await this.productCompatibilityService.createMultipleCompatibilitiesBatch({
         productId: String(product._id),
         vehicleIds,
         vehicleDetails
       });
 
+      const mlSync = await this.autoSyncCompatibilitiesWithMercadoLivre(product, vehicleIds, compatibilities);
 
-      return result;
+      return { compatibilities, mlSync };
     } catch (error) {
       this.logger.error('Erro ao adicionar compatibilidades ao produto:', error);
       throw error;
     }
+  }
+
+  /**
+   * Best-effort: tenta enviar as compatibilidades recém-salvas ao Mercado Livre.
+   * NUNCA lança — o salvamento local já é o dado de verdade; falha de rede/API do ML
+   * aqui não pode reverter nem bloquear a resposta do endpoint de salvar.
+   * Pula silenciosamente se o produto ainda não tem título publicado no ML (nada para enviar).
+   */
+  private async autoSyncCompatibilitiesWithMercadoLivre(
+    product: any,
+    requestedVehicleIds: string[],
+    savedCompatibilities: any[],
+  ): Promise<{ attempted: boolean; reason?: string; successCount?: number; errorCount?: number }> {
+    try {
+      const marketplace = await this.marketplaceRegistry.findByName('Mercado Livre');
+      if (!marketplace) return { attempted: false, reason: 'marketplace_not_configured' };
+
+      const resolvedMarketplaceId = String(marketplace._id);
+      const allTitles = await this.productTitleService.findByProductId(product._id);
+      const productTitles = allTitles.filter((title: any) => String(title.marketplaceId) === resolvedMarketplaceId);
+
+      if (productTitles.length === 0) {
+        return { attempted: false, reason: 'no_ml_title' };
+      }
+
+      const relevant = savedCompatibilities.filter((c: any) => requestedVehicleIds.includes(c.vehicleId));
+      const mlVehicleIds = [...new Set(relevant.map((c: any) => c.mlVehicleId).filter(Boolean))] as string[];
+
+      if (mlVehicleIds.length === 0) {
+        return { attempted: false, reason: 'no_ml_vehicle_ids' };
+      }
+
+      const syncResult = await this.pushCompatibilitiesToMercadoLivre(productTitles, mlVehicleIds);
+
+      if (syncResult.successCount > 0) {
+        const syncedInternalIds = relevant
+          .filter((c: any) => mlVehicleIds.includes(c.mlVehicleId))
+          .map((c: any) => String(c._id ?? c.id))
+          .filter(Boolean);
+        await this.productCompatibilityService.markAsSynced(syncedInternalIds);
+      }
+
+      return { attempted: true, ...syncResult };
+    } catch (error: any) {
+      this.logger.warn(`Auto-sync de compatibilidades com Mercado Livre falhou (não bloqueante): ${error?.message}`);
+      return { attempted: true, reason: 'error', successCount: 0, errorCount: requestedVehicleIds.length };
+    }
+  }
+
+  /** Núcleo de envio ao ML compartilhado entre o auto-sync e a sincronização direta manual. */
+  private async pushCompatibilitiesToMercadoLivre(
+    productTitles: any[],
+    vehicleIds: string[],
+  ): Promise<{ successCount: number; errorCount: number; results: any[] }> {
+    const results: any[] = [];
+    let successCount = 0;
+    let errorCount = 0;
+
+    const chunkSize = 50;
+    const chunks: string[][] = [];
+    for (let i = 0; i < vehicleIds.length; i += chunkSize) {
+      chunks.push(vehicleIds.slice(i, i + chunkSize));
+    }
+
+    for (const title of productTitles) {
+      if (!title.externalId) {
+        results.push({ title: title.title, status: 'skipped', reason: 'missing_externalId' });
+        continue;
+      }
+      for (const chunk of chunks) {
+        const payloadML = {
+          products: chunk.map((id) => ({ id })),
+          site_id: 'MLB',
+          domain_id: 'MLB-CARS_AND_VANS',
+        };
+        try {
+          const resp = await this.mercadoLivreCompatibilityAdapter.syncCompatibility(title.externalId, payloadML);
+          results.push({ title: title.title, itemId: title.externalId, status: 'success', count: chunk.length, response: resp });
+          successCount += chunk.length;
+        } catch (err: any) {
+          this.logger.warn(`syncCompatibility falhou item=${title.externalId} chunk=${chunk.length}: ${err?.message}`);
+          results.push({
+            title: title.title,
+            itemId: title.externalId,
+            status: 'error',
+            message: err?.response?.message || err?.message,
+            cause: err?.response?.cause || err?.response,
+          });
+          errorCount += chunk.length;
+        }
+      }
+    }
+
+    return { successCount, errorCount, results };
   }
 
   @ValidateMongoId(0) // Validate productId
@@ -1011,6 +1185,32 @@ export class ProductService {
       this.logger.log(`Compatibilidade ${compatibilityId} removida do produto ${productId}`);
     } catch (error) {
       this.logger.error('Erro ao remover compatibilidade:', error);
+      throw error;
+    }
+  }
+
+  /** Remove várias compatibilidades de uma vez (uma exclusão em lote + um único enfileiramento de sync). */
+  @ValidateMongoId(0)
+  async removeProductCompatibilities(productId: string, compatibilityIds: string[]): Promise<void> {
+    if (!compatibilityIds?.length) return;
+    try {
+      const product = await this.findOne(productId);
+      if (!product) throw new NotFoundException(`Produto com ID ${productId} não encontrado`);
+
+      await this.productCompatibilityService.deleteMultipleCompatibilities(compatibilityIds);
+
+      await this.queueService.addToQueue({
+        type: 'product.sync_compatibilities',
+        productId: product._id,
+        metadata: {
+          action: 'remove_compatibilities',
+          compatibilityIds,
+        }
+      });
+
+      this.logger.log(`${compatibilityIds.length} compatibilidade(s) removida(s) do produto ${productId}`);
+    } catch (error) {
+      this.logger.error('Erro ao remover compatibilidades em lote:', error);
       throw error;
     }
   }
@@ -1045,10 +1245,10 @@ export class ProductService {
         throw new BadRequestException('Produto não possui compatibilidades cadastradas');
       }
 
-      // Preparar dados para sincronização
+      // Preparar dados para sincronização (usa o id da taxonomia ML, não o _id da base própria)
       const syncData = {
         itemIds: productTitles.filter(t => t.externalId).map(t => t.externalId),
-        compatibilityIds: compatibilities.map(c => c.vehicleId)
+        compatibilityIds: compatibilities.map(c => (c as any).mlVehicleId ?? c.vehicleId)
       };
 
       // Adicionar à fila para sincronização
@@ -1107,55 +1307,7 @@ export class ProductService {
         throw new BadRequestException(`Sincronização direta ainda não implementada para ${marketplace.name}`);
       }
 
-      const results: any[] = [];
-      let successCount = 0;
-      let errorCount = 0;
-
-      const chunkSize = 50;
-      const chunks: string[][] = [];
-      for (let i = 0; i < vehicleIds.length; i += chunkSize) {
-        chunks.push(vehicleIds.slice(i, i + chunkSize));
-      }
-
-      for (const title of productTitles) {
-        if (!title.externalId) {
-          results.push({ title: title.title, status: 'skipped', reason: 'missing_externalId' });
-          continue;
-        }
-        for (const chunk of chunks) {
-          const payloadML = {
-            products: chunk.map((id) => ({ id })),
-            site_id: 'MLB',
-            domain_id: 'MLB-CARS_AND_VANS',
-          };
-          try {
-            const resp = await this.mercadoLivreCompatibilityAdapter.syncCompatibility(
-              title.externalId,
-              payloadML,
-            );
-            results.push({
-              title: title.title,
-              itemId: title.externalId,
-              status: 'success',
-              count: chunk.length,
-              response: resp,
-            });
-            successCount += chunk.length;
-          } catch (err: any) {
-            this.logger.warn(
-              `syncCompatibility falhou item=${title.externalId} chunk=${chunk.length}: ${err?.message}`,
-            );
-            results.push({
-              title: title.title,
-              itemId: title.externalId,
-              status: 'error',
-              message: err?.response?.message || err?.message,
-              cause: err?.response?.cause || err?.response,
-            });
-            errorCount += chunk.length;
-          }
-        }
-      }
+      const { successCount, errorCount, results } = await this.pushCompatibilitiesToMercadoLivre(productTitles, vehicleIds);
 
       return {
         message: 'Compatibilidades diretas sincronizadas imediatamente',
@@ -1185,21 +1337,22 @@ export class ProductService {
 
       // Estatísticas por marca de veículo
       const brandStats = compatibilities.reduce((acc, comp) => {
-        const brand = comp.vehicleBrand || 'Não especificada';
+        const brand = comp.vehicle?.make || 'Não especificada';
         acc[brand] = (acc[brand] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);
 
       // Estatísticas por ano
       const yearStats = compatibilities.reduce((acc, comp) => {
-        const year = comp.vehicleYear || 'Não especificado';
+        const years: number[] = comp.vehicle?.years ?? [];
+        const year = years.length ? String(Math.max(...years)) : 'Não especificado';
         acc[year] = (acc[year] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);
 
       // Estatísticas por combustível
       const fuelStats = compatibilities.reduce((acc, comp) => {
-        const fuel = comp.vehicleFuelType || 'Não especificado';
+        const fuel = comp.vehicle?.fuel?.fuelType || comp.vehicle?.engine?.fuelType || 'Não especificado';
         acc[fuel] = (acc[fuel] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);
@@ -1216,14 +1369,6 @@ export class ProductService {
       this.logger.error('Erro ao buscar estatísticas de compatibilidade:', error);
       throw error;
     }
-  }
-
-  /**
-   * Atualizar keywords de compatibilidade quando compatibilidades são alteradas
-   */
-  @ValidateMongoId()
-  async updateCompatibilityKeywords(productId: string): Promise<void> {
-    await this.productFilterService.updateProductCompatibilityKeywords(productId);
   }
 
   async findProductsWithCompatibilitySearch(filters: ProductFilterDto): Promise<PaginatedResponseDto<ProductModel>> {
@@ -1260,11 +1405,6 @@ export class ProductService {
     });
   }
 
-  async countByCategory(categoryId: string): Promise<number> {
-    const query = { category: new Types.ObjectId(categoryId), active: true };
-    return this.productRepository.count(query);
-  }
-
   async createFromDiscovery(dto: CreateFromDiscoveryDto, userId?: string): Promise<ProductModel> {
     // 1. Busca a marca
     const brand = await this.brandModel.findById(dto.brandId).lean().exec();
@@ -1286,7 +1426,10 @@ export class ProductService {
     if (existing) return this.productRepository.findByIdClean(existing.id);
 
     // 4. Generate slug (same pattern as create())
-    const slugBase = `${dto.partNumber}-${brand.name || 'generic'}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+    const slugBase = await buildUniqueProductSlug(
+      { name: discoveryData.name, brandShortName: (brand as any).shortName, partNumber: dto.partNumber },
+      async (candidate) => !!(await this.productRepository.findOneRaw({ slug: candidate })),
+    );
 
     // 5. Cria o produto com campos pré-preenchidos
     const created = await this.productRepository.create({

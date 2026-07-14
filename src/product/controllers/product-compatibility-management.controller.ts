@@ -42,14 +42,8 @@ export class ProductCompatibilityManagementController {
       vehicleIds: string[];
       vehicleDetails?: Array<{
         id: string;
+        mlVehicleId?: string;
         name?: string;
-        brand?: string;
-        model?: string;
-        year?: string;
-        version?: string;
-        engine?: string;
-        fuelType?: string;
-        transmission?: string;
       }>;
     }
   ) {
@@ -60,11 +54,13 @@ export class ProductCompatibilityManagementController {
         throw new HttpException('vehicleIds é obrigatório', HttpStatus.BAD_REQUEST);
       }
 
-      return await this.productService.addProductCompatibilities(
+      const { compatibilities, mlSync } = await this.productService.addProductCompatibilities(
         productId,
         vehicleIds,
         vehicleDetails
       );
+
+      return { compatibilities, mlSync };
     } catch (error) {
       this.logger.error('Erro ao adicionar compatibilidades ao produto:', error);
       throw new HttpException(
@@ -90,6 +86,29 @@ export class ProductCompatibilityManagementController {
       this.logger.error('Erro ao remover compatibilidade do produto:', error);
       throw new HttpException(
         error.message || 'Erro ao remover compatibilidade',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  @Delete(':productId/compatibilities')
+  async removeProductCompatibilities(
+    @Param('productId') productId: string,
+    @Body() body: { compatibilityIds: string[] }
+  ) {
+    try {
+      const compatibilityIds = body?.compatibilityIds ?? [];
+      if (compatibilityIds.length === 0) {
+        throw new HttpException('compatibilityIds é obrigatório', HttpStatus.BAD_REQUEST);
+      }
+
+      await this.productService.removeProductCompatibilities(productId, compatibilityIds);
+
+      return { message: 'Compatibilidades removidas com sucesso', count: compatibilityIds.length };
+    } catch (error) {
+      this.logger.error('Erro ao remover compatibilidades em lote do produto:', error);
+      throw new HttpException(
+        error.message || 'Erro ao remover compatibilidades em lote',
         error.status || HttpStatus.INTERNAL_SERVER_ERROR
       );
     }

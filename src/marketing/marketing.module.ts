@@ -7,6 +7,7 @@ import { CampaignService } from './services/campaign.service';
 import { BannerController } from './controllers/banner.controller';
 import { CampaignController } from './controllers/campaign.controller';
 import { ProductModule } from '../product/product.module'; // ProductRepository for campaign product lookup
+import { PricingModule } from '../pricing/pricing.module';
 
 @Module({
     imports: [
@@ -15,6 +16,7 @@ import { ProductModule } from '../product/product.module'; // ProductRepository 
             { name: Campaign.name, schema: CampaignSchema },
         ]),
         ProductModule,
+        PricingModule,
     ],
     controllers: [BannerController, CampaignController],
     providers: [BannerService, CampaignService],

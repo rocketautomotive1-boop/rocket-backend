@@ -28,6 +28,10 @@ class OrderLogSnapshot {
 
 @Schema()
 class OrderCustomerSnapshot {
+    /** Vínculo com CustomerModel (loja B2C) — ausente em pedidos ingeridos de marketplace. */
+    @Prop({ type: Types.ObjectId, ref: 'CustomerModel', index: true })
+    customerId?: Types.ObjectId;
+
     @Prop() name: string;
     @Prop() document: string;
     @Prop() email: string;
@@ -42,6 +46,26 @@ class OrderCustomerSnapshot {
         city: string;
         state: string;
     };
+}
+
+@Schema({ _id: false })
+class OrderShippingSubstatusEntry {
+    @Prop() substatus: string;
+    @Prop() at: Date;
+}
+
+@Schema({ _id: false })
+class OrderShippingSnapshot {
+    @Prop() status?: string;       // shipping.status do marketplace (ex.: 'shipped', 'delivered')
+    @Prop() substatus?: string;    // substatus atual — fonte dos marcos de notificação
+    @Prop() trackingCode?: string;
+    @Prop() carrier?: string;
+    @Prop() estimatedDelivery?: Date;
+    @Prop() deliveredAt?: Date;    // setado quando substatus → delivered
+    @Prop() updatedAt?: Date;
+
+    @Prop({ type: [SchemaFactory.createForClass(OrderShippingSubstatusEntry)], default: [] })
+    history: OrderShippingSubstatusEntry[];
 }
 
 @Schema()
@@ -125,11 +149,23 @@ export class OrderModel {
     @Prop({ required: true, default: 0 })
     shippingAmount: number;
 
+    /** Desconto de cupom aplicado (já refletido em totalAmount) — auditoria. */
+    @Prop({ default: 0 })
+    discountAmount?: number;
+
     @Prop({ default: 'pending', index: true }) // 'pending' | 'processing' | 'deducted' | 'unresolved' | 'error' | 'skipped'
     logisticsStatus: string;
 
     @Prop()
     trackingCode: string;
+
+    /**
+     * Estado de ENVIO do pedido (distinto de `status` comercial e de `logisticsStatus`,
+     * que é estoque). Atualizado por webhooks orders_v2 de logística. `history` é
+     * append-only delta (só quando o substatus muda).
+     */
+    @Prop({ type: SchemaFactory.createForClass(OrderShippingSnapshot) })
+    shipping?: OrderShippingSnapshot;
 
     @Prop({ type: OrderCustomerSnapshot })
     customer: OrderCustomerSnapshot;
@@ -144,6 +180,8 @@ export class OrderModel {
         taxAmount: number;         // Taxes withheld at source
         installments: number;
         authorizationCode?: string; // Payment authorization code
+        mpPaymentId?: string;      // ID do pagamento no Mercado Pago (checkout B2C) — usado p/ webhook confirmar/atualizar
+        mpStatus?: string;         // status bruto do MP (approved/pending/in_process/rejected)
     };
 
     @Prop()
@@ -240,3 +278,4 @@ OrderSchema.index({ 'customer.document': 1 }); // Great for customer history loo
 OrderSchema.index({ marketplaceId: 1, status: 1 });
 OrderSchema.index({ logisticsStatus: 1, status: 1 });
 OrderSchema.index({ 'items.productId': 1 });
+OrderSchema.index({ 'payment.mpPaymentId': 1 }, { sparse: true }); // lookup no webhook do Mercado Pago

@@ -91,6 +91,7 @@ export class ProductMovementController {
       quantity: dto.quantity,
       condition: (dto.condition as any) ?? 'new',
       unitCost: dto.costPrice ?? dto.price,
+      salePrice: dto.salePrice,
       reference: dto.reference,
       reason: dto.reason,
       toBoxId: dto.boxId ? String(dto.boxId) : undefined,

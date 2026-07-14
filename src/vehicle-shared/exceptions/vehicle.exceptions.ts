@@ -29,3 +29,15 @@ export class VehicleAiParseException extends BadRequestException {
     super(`Failed to parse AI response${raw ? `: ${raw.slice(0, 150)}` : ''}`);
   }
 }
+
+export class InvalidPlateFormatException extends BadRequestException {
+  constructor(plate: string) {
+    super(`Formato de placa inválido: ${plate}`);
+  }
+}
+
+export class PlateNotFoundException extends NotFoundException {
+  constructor(plate: string) {
+    super(`Não conseguimos localizar essa placa: ${plate}`);
+  }
+}

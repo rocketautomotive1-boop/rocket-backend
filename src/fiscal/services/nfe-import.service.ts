@@ -8,6 +8,7 @@ import { ProductModel } from '../../product/schemas/product.schema';
 import { BrandModel } from '../../product/schemas/brand.schema';
 import { StockService } from '../../stock/stock.service';
 import { StockMovementType } from '../../stock/domain/movement-type';
+import { buildUniqueProductSlug } from '../../product/utils/product-slug.util';
 import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 import { ProductService } from '../../product/product.service';
 import { ProductDraftsService } from '../../ai/product-drafts.service';
@@ -530,10 +531,10 @@ export class NfeImportService {
             return existing;
         }
 
-        // Ensure slug is unique-ish or handle error? Schema has unique slug.
-        // Assuming partNumber is unique enough, but duplicate descriptions might conflict on slug if we just use description.
-        // Let's use partNumber in slug.
-        const slug = `${xmlItem.description.slice(0, 50)}-${xmlItem.code}`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const slug = await buildUniqueProductSlug(
+            { name: xmlItem.description, partNumber: xmlItem.code },
+            async (candidate) => !!(await this.productModel.findOne({ slug: candidate })),
+        );
 
         // Generate Barcode Fallback
         let barcode = xmlItem.ean;

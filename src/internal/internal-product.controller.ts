@@ -1,4 +1,5 @@
-import { Controller, Get, Param, Patch, Body, UseGuards, Query, Inject } from '@nestjs/common';
+import { Controller, Get, Param, Patch, Body, UseGuards, Query, Inject, forwardRef } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { InternalKeyGuard } from './internal-key.guard';
@@ -8,8 +9,11 @@ import { MarketplaceDescriptionService } from '../marketplace/services/marketpla
 import { MarketplaceConfigCacheService } from '../marketplace/services/marketplace-config-cache.service';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
+import { CategorySnapshotService } from '../product/services/category-snapshot.service';
+import { ProductService } from '../product/product.service';
 
 @UseGuards(InternalKeyGuard)
+@SkipThrottle()
 @Controller('internal/products')
 export class InternalProductController {
     constructor(
@@ -19,6 +23,8 @@ export class InternalProductController {
         private readonly descriptionService: MarketplaceDescriptionService,
         @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
         @Inject(PRICING_PORT) private readonly pricing: PricingPort,
+        private readonly categorySnapshot: CategorySnapshotService,
+        @Inject(forwardRef(() => ProductService)) private readonly productService: ProductService,
     ) {}
 
     @Get(':id')
@@ -30,6 +36,15 @@ export class InternalProductController {
             .exec();
         if (!doc) return null;
         const normalized = this.normalizeBson(doc);
+
+        // Fonte ÚNICA de prontidão: computa AO VIVO (mesma via que o frontend usa em
+        // GET /products/:id/completion). O campo `readyToPublish` persistido no doc é
+        // apenas um marker interno do ProductReadinessService para detectar a transição
+        // false→true e é volátil (defasa quando o estado muda por um caminho assíncrono
+        // sem evento — ex.: rembg concluindo). O gate de publicação NUNCA deve ler o
+        // persistido; deriva da mesma verdade que o app mostra ao usuário.
+        const completion = await this.productService.getProductCompletion(id);
+        normalized.readyToPublish = !!completion?.readyToPublish;
 
         // Resolve o category_id do ML a partir do marketplaceMappings quando o campo
         // direto (mlCategoryId) estiver ausente — itens general têm o mapping do ML
@@ -47,6 +62,16 @@ export class InternalProductController {
         normalized.stockQuantity = stock.onHand;
         normalized.basePrice = basePrice;
         normalized.effectivePrice = effectivePrice;
+
+        // Payload canônico de publicação ML — fonte única de verdade dos atributos
+        // (incl. obrigatórios). O orchestrator publica isto sem remontar. Só resolve
+        // quando o request é para o marketplace do ML (o worker sempre passa marketplaceId).
+        if (marketplaceId) {
+            const mlId = await this.configCache.resolveId('mercadolivre');
+            if (mlId && String(marketplaceId) === mlId) {
+                normalized.mlPublish = await this.categorySnapshot.resolveMlPublish(id, mlId);
+            }
+        }
 
         return normalized;
     }
@@ -105,6 +130,9 @@ export class InternalProductController {
         return listings.map((l) => ({
             ...l,
             marketplaceTag: tagMap.get(String(l.marketplaceId)) ?? '',
+            // Conta DONA (string) para o orchestrator rotear o token no UPDATE/DELETE.
+            // Ausente até o backfill carimbar — o worker cai na conta ativa nesse caso.
+            accountId: (l as any).accountId ? String((l as any).accountId) : null,
         }));
     }
 

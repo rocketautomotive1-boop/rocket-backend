@@ -90,6 +90,89 @@ export function normalizeFuelTags(raw?: string): string[] {
   return [...new Set(tags)];
 }
 
+const TRACTION_RE = /\b(4x4|4wd|4x2|awd)\b/i;
+
+const TRIM_STRIP_PATTERNS: RegExp[] = [
+  /\b\d+(?:[.,]\d+)?\s*cc\b/gi,
+  /\b\d[.,]\d\b/g,
+  /\b\d\s*p\b/gi,
+  /\bflex\b/gi,
+  /\bgasolina\b/gi,
+  /\bgasol\b/gi,
+  /\b[ae]lcool\b/gi,
+  /\betanol\b/gi,
+  /\bhibrid[oa]?\b/gi,
+  /\beletric[oa]?\b/gi,
+  /\bgnv\b/gi,
+  /\bgas natural\b/gi,
+  /\bcng\b/gi,
+  /\bdiesel\b/gi,
+  /\baut\.?\b/gi,
+  /\bautomatic[ao]\b/gi,
+  /\bautomatizada\b/gi,
+  /\bsequencial\b/gi,
+  /\bsemiautomatic[ao]\b/gi,
+  /\bmanual\b/gi,
+  /\bcvt\b/gi,
+  /\b4x4\b/gi,
+  /\b4wd\b/gi,
+  /\b4x2\b/gi,
+  /\bawd\b/gi,
+];
+
+const TRIM_ACRONYMS = new Set([
+  'rs', 'ss', 'glx', 'gls', 'le', 'gt', 'gti', 'xei', 'lt', 'ltz', 'se', 'sl', 'sv',
+  'tsi', 'tdi', 'hdi', 'cdi', 'vht', 'srv', 'ltd', 'xls', 'xlt', 'sw4', 'ex', 'exl', 'gli',
+]);
+
+/** Detecta menção de tração no texto: "4x4"/"4wd" -> "4x4", "4x2" -> "4x2", "awd" -> "awd". */
+export function extractTraction(version: string): string | undefined {
+  if (!version) return undefined;
+  const match = version.match(TRACTION_RE);
+  if (!match) return undefined;
+  const token = match[1].toLowerCase();
+  if (token === '4wd') return '4x4';
+  return token;
+}
+
+/**
+ * Title Case locale-aware para PT-BR: normaliza acentos antes de capitalizar (evita bugs tipo
+ * "FurgãO") e mantém siglas conhecidas (RS, GLX, TSI...) em uppercase em vez de "Rs"/"Glx".
+ */
+export function toTitleCasePtBr(text: string): string {
+  return collapseSpaces(text ?? '')
+    .split(' ')
+    .map((word) => {
+      if (!word) return word;
+      const bare = word.replace(/[().]/g, '');
+      if (TRIM_ACRONYMS.has(removeAccents(bare).toLowerCase())) {
+        return word.toUpperCase();
+      }
+      const lower = word.toLowerCase();
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    })
+    .join(' ');
+}
+
+/**
+ * Remove de version os tokens redundantes já capturados em campos estruturados (cilindrada,
+ * portas, combustível, transmissão, tração) e retorna o texto residual (nome comercial/edição)
+ * em Title Case PT-BR → undefined se nada sobrar.
+ */
+export function extractTrim(version: string): string | undefined {
+  if (!version) return undefined;
+
+  let remaining = version;
+  for (const pattern of TRIM_STRIP_PATTERNS) {
+    remaining = remaining.replace(pattern, ' ');
+  }
+
+  const cleaned = collapseSpaces(remaining.replace(/[()]+/g, ' ')).replace(/(?:^|\s)\.(?=\s|$)/g, '');
+  if (!cleaned) return undefined;
+
+  return toTitleCasePtBr(cleaned);
+}
+
 export function normalizeVersionForKey(version: string): string {
   return tokenize(version ?? '')
     .filter((t) => !VERSION_NOISE_TOKENS.has(t))

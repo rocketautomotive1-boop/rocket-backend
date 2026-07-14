@@ -70,6 +70,15 @@ export class MarketplaceDescriptionTemplateSnapshot {
     @Prop({ type: String, required: false })
     domain?: string;
 
+    /**
+     * Conta de publicação que este template atende (override por conta). Ausente =
+     * template do domínio (comportamento legado). Preenchido = só vale quando a conta
+     * ativa de publicação do marketplace (`activeAccountId`) for esta. Precedência:
+     * (domain+accountId) > (domain) > clássico.
+     */
+    @Prop({ type: String, required: false })
+    accountId?: string;
+
     @Prop({ type: Object, nullable: true })
     placeholders: Record<string, any>;
 

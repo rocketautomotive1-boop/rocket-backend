@@ -29,6 +29,33 @@ describe('OrderNotificationTranslator', () => {
     }));
   });
 
+  it('SHIPPING_UPDATED (delivered) → NotificationRequested só sino/app (sem whatsapp)', () => {
+    const emitter = new EventEmitter2();
+    const spy = jest.spyOn(emitter, 'emit');
+    new OrderNotificationTranslator(emitter).onShippingUpdated({
+      orderId: 'o1', externalId: 'EXT', marketplaceId: 'm1', marketplaceName: 'ML',
+      substatus: 'delivered', trackingCode: 'TRK1', triggeredBy: 'webhook',
+    } as any);
+    const [, req] = spy.mock.calls.find(([evt]: any[]) => evt === NOTIFICATION_EVENTS.REQUESTED)!;
+    expect(req).toEqual(expect.objectContaining({
+      type: 'order.shipping', aggregateType: 'order', aggregateId: 'o1',
+      title: 'Pedido entregue', severity: 'info',
+      deduplicationKey: 'order.shipping:EXT:delivered',
+    }));
+    expect((req as any).channels).toBeUndefined(); // nunca WhatsApp
+  });
+
+  it('SHIPPING_UPDATED (not_delivered) → severidade warning', () => {
+    const emitter = new EventEmitter2();
+    const spy = jest.spyOn(emitter, 'emit');
+    new OrderNotificationTranslator(emitter).onShippingUpdated({
+      orderId: 'o1', externalId: 'EXT', marketplaceId: 'm1', marketplaceName: 'ML',
+      substatus: 'not_delivered', trackingCode: null, triggeredBy: 'webhook',
+    } as any);
+    const [, req] = spy.mock.calls.find(([evt]: any[]) => evt === NOTIFICATION_EVENTS.REQUESTED)!;
+    expect(req).toEqual(expect.objectContaining({ severity: 'warning', title: 'Falha na entrega' }));
+  });
+
   // Helper: encontra a NotificationRequested de canal WhatsApp entre as emissões.
   const whatsappCall = (spy: jest.SpyInstance) =>
     spy.mock.calls.find(

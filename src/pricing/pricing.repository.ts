@@ -13,6 +13,13 @@ export class PricingRepository {
     return this.model.findOne({ productId: new Types.ObjectId(productId) }).lean().exec();
   }
 
+  findByProducts(productIds: string[]) {
+    return this.model
+      .find({ productId: { $in: productIds.map((id) => new Types.ObjectId(id)) } })
+      .lean()
+      .exec();
+  }
+
   upsertBase(productId: string, basePrice: Types.Decimal128) {
     return this.model
       .updateOne(
@@ -42,11 +49,34 @@ export class PricingRepository {
       .exec();
   }
 
-  upsertMeta(productId: string, meta: any, listPrice?: Types.Decimal128) {
-    const set: any = { meta };
-    if (listPrice !== undefined) set.listPrice = listPrice;
+  upsertMeta(productId: string, meta: any) {
     return this.model
-      .updateOne({ productId: new Types.ObjectId(productId) }, { $set: set }, { upsert: true })
+      .updateOne({ productId: new Types.ObjectId(productId) }, { $set: { meta } }, { upsert: true })
+      .exec();
+  }
+
+  upsertPromotion(productId: string, promotion: { listPrice: Types.Decimal128; startsAt: Date; endsAt: Date }) {
+    return this.model
+      .updateOne(
+        { productId: new Types.ObjectId(productId) },
+        { $set: { promotion } },
+        { upsert: true },
+      )
+      .exec();
+  }
+
+  clearPromotion(productId: string) {
+    return this.model
+      .updateOne({ productId: new Types.ObjectId(productId) }, { $unset: { promotion: '' } })
+      .exec();
+  }
+
+  /** Produtos com promoção vigente agora — usado pelo rail "deals". */
+  findActivePromotionProductIds(now: Date = new Date()) {
+    return this.model
+      .find({ 'promotion.startsAt': { $lte: now }, 'promotion.endsAt': { $gte: now } })
+      .select('productId')
+      .lean()
       .exec();
   }
 }

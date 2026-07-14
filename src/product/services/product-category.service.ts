@@ -13,6 +13,7 @@ import { ProductModel, ProductDocument } from '../schemas/product.schema';
 import { AiService } from '../../ai/ai.service';
 import { MarketplaceService } from '../../marketplace/services/marketplace.service';
 import { CategorySyncService } from '../../marketplace/services/category/category-sync.service';
+import { MercadoLivreCategoryAdapter } from '../../marketplace/adapters/mercado-livre/mercado-livre-category.adapter';
 
 @Injectable()
 export class ProductCategoryService {
@@ -32,6 +33,8 @@ export class ProductCategoryService {
     @Inject(forwardRef(() => CategoryDiscoveryService)) private readonly categoryDiscoveryService: CategoryDiscoveryService,
     private readonly marketplaceService: MarketplaceService,
     private readonly categorySyncService: CategorySyncService,
+    @Inject(forwardRef(() => MercadoLivreCategoryAdapter))
+    private readonly mlCategoryAdapter: MercadoLivreCategoryAdapter,
   ) { }
 
   private async generateBreadcrumbs(category: CategoryDocument): Promise<string> {
@@ -379,6 +382,49 @@ export class ProductCategoryService {
       this.logger.error(`ensureCategoryFromMl create failed for ${tag}/${ext}: ${msg}`);
       return { categoryId: null, status: 'failed', error: msg };
     }
+  }
+
+  /**
+   * Resolve a categoria ML FOLHA publicável para um produto e garante a categoria
+   * interna mapeada. Usado quando a categoria escolhida mapeia para um nó ML não-folha
+   * (não publicável): pedimos ao ML o predictor (domain_discovery) a partir do texto do
+   * produto — que SEMPRE devolve uma folha — e reusamos ensureCategoryFromMl (idempotente)
+   * para materializar/mapear a categoria interna. Fonte única: o ML decide a folha.
+   */
+  async resolveMlLeafForProduct(
+    productId: string,
+    domain: string = 'autopecas',
+  ): Promise<{ categoryId: string | null; externalCategoryId: string | null; status: 'existing' | 'created' | 'failed'; error?: string }> {
+    if (!Types.ObjectId.isValid(productId)) {
+      return { categoryId: null, externalCategoryId: null, status: 'failed', error: 'productId inválido.' };
+    }
+    const product = await this.productModel.findById(productId).populate('brand', 'name').lean().exec();
+    if (!product) {
+      return { categoryId: null, externalCategoryId: null, status: 'failed', error: 'Produto não encontrado.' };
+    }
+
+    const title = [product.name, (product as any).brand?.name, (product as any).partNumber]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    if (!title) {
+      return { categoryId: null, externalCategoryId: null, status: 'failed', error: 'Produto sem título para prever a categoria.' };
+    }
+
+    let leafMlId: string;
+    try {
+      const predicted = await this.mlCategoryAdapter.discoverCategory(title);
+      leafMlId = String(predicted?.category_id ?? '').trim();
+      if (!leafMlId) {
+        return { categoryId: null, externalCategoryId: null, status: 'failed', error: 'ML não previu uma categoria folha.' };
+      }
+    } catch (e: any) {
+      return { categoryId: null, externalCategoryId: null, status: 'failed', error: e?.message ?? 'Falha no predictor de categoria do ML.' };
+    }
+
+    // A folha prevista é materializada/mapeada de forma idempotente.
+    const ensured = await this.ensureCategoryFromMl('mercadolivre', leafMlId, domain);
+    return { ...ensured, externalCategoryId: leafMlId };
   }
 
   /**
@@ -821,6 +867,10 @@ export class ProductCategoryService {
         ));
 
         this.logger.log('Re-indexing complete.');
+      }
+
+      if (bulkOps.length > 0) {
+        this.categorySearchService.invalidateTreeCache();
       }
 
       return {

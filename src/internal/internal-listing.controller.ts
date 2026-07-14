@@ -1,10 +1,12 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { InternalKeyGuard } from './internal-key.guard';
 import { ListingModel } from '../listing/schemas/listing.schema';
 
 @UseGuards(InternalKeyGuard)
+@SkipThrottle()
 @Controller('internal/listings')
 export class InternalListingController {
     constructor(

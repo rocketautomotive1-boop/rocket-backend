@@ -1,16 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { VehicleCompatibilityDocument, VehicleCompatibilityModel } from '../schemas/vehicle-compatibility.schema';
 import { CreateVehicleCompatibilityDto } from '../dto/create-vehicle-compatibility.dto';
 import { UpdateVehicleCompatibilityDto } from '../dto/update-vehicle-compatibility.dto';
 import { SearchVehicleCompatibilitiesDto } from '../dto/search-vehicle-compatibilities.dto';
 import { UpsertVehicleCompatibilityDto } from '../dto/upsert-vehicle-compatibility.dto';
+import { ResolveVehicleDto } from '../dto/resolve-vehicle.dto';
+import { VehicleCompatibilityFacetsDto } from '../dto/vehicle-compatibility-facets.dto';
 import { VehicleCompatibilityNotFoundException } from '../../vehicle-shared/exceptions/vehicle.exceptions';
 import {
   buildSearchText,
   computeDataQualityScore,
   deriveAliases,
+  extractTraction,
+  extractTrim,
   generateCanonicalKey,
   generateEngineSignature,
   normalizeDisplacementCc,
@@ -23,6 +27,8 @@ import {
 import { parseVehicleQuery, ParsedVehicleQuery } from '../../vehicle-shared/utils/vehicle-query-parser.util';
 import { VehicleMarket, VehicleOrigin } from '../../vehicle-shared/types/vehicle.types';
 import { VEHICLE_CONSTANTS } from '../../vehicle-shared/constants/vehicle.constants';
+
+const DISPLACEMENT_TOLERANCE_CC = 100;
 
 @Injectable()
 export class VehicleCompatibilityService {
@@ -86,6 +92,13 @@ export class VehicleCompatibilityService {
     return doc;
   }
 
+  /** Busca em lote por _id, best-effort (ids inexistentes/inválidos são omitidos do resultado). */
+  async findManyByIds(ids: string[]): Promise<VehicleCompatibilityDocument[]> {
+    const validIds = [...new Set(ids)].filter((id) => Types.ObjectId.isValid(id));
+    if (!validIds.length) return [];
+    return this.model.find({ _id: { $in: validIds } }).lean().exec() as any;
+  }
+
   async update(id: string, dto: UpdateVehicleCompatibilityDto): Promise<VehicleCompatibilityDocument> {
     const update: Record<string, any> = { ...dto, origin: VehicleOrigin.MANUAL, lastEditedAt: new Date() };
     const doc = await this.model.findByIdAndUpdate(id, { $set: update }, { new: true }).exec();
@@ -135,6 +148,40 @@ export class VehicleCompatibilityService {
     return { data: data as any, total };
   }
 
+  /**
+   * Resolve texto livre de veículo ("gol 1.6 2015 flex") a candidatos estruturados de
+   * vehicle_compatibilities, para uso pela garagem do cliente (rocket-b2c) — diferente de
+   * `search`, que serve a tela de curadoria interna e devolve o documento completo.
+   */
+  async resolve(dto: ResolveVehicleDto): Promise<{
+    candidates: Array<{
+      vehicleId: string;
+      make: string;
+      model: string;
+      version: string;
+      versionDisplay?: string;
+      year?: number;
+      engineTokens?: string[];
+      fuelTags?: string[];
+    }>;
+  }> {
+    const parsed = parseVehicleQuery(dto.q);
+    const { data } = await this.atlasSearch({ q: dto.q, active: true, limit: dto.limit ?? 20 }, parsed);
+
+    const candidates = data.map((doc: any) => ({
+      vehicleId: String(doc._id),
+      make: doc.make,
+      model: doc.model,
+      version: doc.version,
+      versionDisplay: doc.versionDisplay ?? doc.normalized?.versionDisplay,
+      year: Array.isArray(doc.years) && doc.years.length > 0 ? Math.max(...doc.years) : undefined,
+      engineTokens: doc.normalized?.engineTokens,
+      fuelTags: doc.normalized?.fuelTags,
+    }));
+
+    return { candidates };
+  }
+
   async atlasSearch(
     dto: SearchVehicleCompatibilitiesDto,
     parsed?: ParsedVehicleQuery,
@@ -182,7 +229,11 @@ export class VehicleCompatibilityService {
     }
     if (parsed?.displacementCc !== undefined) {
       searchStage.$search.compound.filter.push({
-        equals: { path: 'normalized.displacementCc', value: parsed.displacementCc },
+        range: {
+          path: 'normalized.displacementCc',
+          gte: parsed.displacementCc - DISPLACEMENT_TOLERANCE_CC,
+          lte: parsed.displacementCc + DISPLACEMENT_TOLERANCE_CC,
+        },
       });
     }
 
@@ -207,13 +258,16 @@ export class VehicleCompatibilityService {
       if (dto.market) filter.market = dto.market;
       if (dto.year) filter.years = dto.year;
       if (parsed?.yearRange) {
-        filter.years = { $gte: parsed.yearRange.from, $lte: parsed.yearRange.to };
+        filter.years = { $elemMatch: { $gte: parsed.yearRange.from, $lte: parsed.yearRange.to } };
       }
       if (parsed?.fuelTags?.length) {
         filter['normalized.fuelTags'] = { $in: parsed.fuelTags };
       }
       if (parsed?.displacementCc !== undefined) {
-        filter['normalized.displacementCc'] = parsed.displacementCc;
+        filter['normalized.displacementCc'] = {
+          $gte: parsed.displacementCc - DISPLACEMENT_TOLERANCE_CC,
+          $lte: parsed.displacementCc + DISPLACEMENT_TOLERANCE_CC,
+        };
       }
 
       const [data, total] = await Promise.all([
@@ -228,6 +282,63 @@ export class VehicleCompatibilityService {
       ]);
       return { data: data as any, total };
     }
+  }
+
+  /**
+   * Facets em cascata p/ dropdowns de filtro estruturado (marca→modelo→ano→carroceria→câmbio):
+   * cada faceta é escopada pelos filtros já escolhidos EXCETO ela mesma, senão selecionar uma
+   * marca zeraria a própria lista de marcas na próxima chamada.
+   */
+  async getFacets(dto: VehicleCompatibilityFacetsDto): Promise<{
+    makes: Array<{ value: string; count: number }>;
+    models: Array<{ value: string; count: number }>;
+    years: Array<{ value: number; count: number }>;
+    bodyTypes: Array<{ value: string; count: number }>;
+    transmissions: Array<{ value: string; count: number }>;
+  }> {
+    const active = dto.active ?? true;
+    const baseFilter: Record<string, any> = { active };
+    if (dto.make) baseFilter['normalized.make'] = normalizeMake(dto.make);
+    if (dto.model) baseFilter['normalized.model'] = normalizeModel(dto.model);
+    if (dto.year) baseFilter.years = dto.year;
+    if (dto.bodyType) baseFilter.bodyType = dto.bodyType;
+    if (dto.transmission) baseFilter.transmission = dto.transmission;
+
+    const filterWithout = (key: keyof typeof baseFilter) => {
+      const { [key]: _omit, ...rest } = baseFilter;
+      return rest;
+    };
+
+    const countBy = (field: string, filter: Record<string, any>, unwind = false): any[] => [
+      { $match: filter },
+      ...(unwind ? [{ $unwind: `$${field}` }] : []),
+      { $match: { [field]: { $ne: null } } },
+      { $group: { _id: `$${field}`, count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $project: { _id: 0, value: '$_id', count: 1 } },
+    ];
+
+    const result = await this.model
+      .aggregate<any>([
+        {
+          $facet: {
+            makes: countBy('make', filterWithout('normalized.make')),
+            models: countBy('model', filterWithout('normalized.model')),
+            years: countBy('years', filterWithout('years'), true),
+            bodyTypes: countBy('bodyType', filterWithout('bodyType')),
+            transmissions: countBy('transmission', filterWithout('transmission'), true),
+          } as any,
+        },
+      ])
+      .exec();
+
+    return {
+      makes: result?.[0]?.makes ?? [],
+      models: result?.[0]?.models ?? [],
+      years: result?.[0]?.years ?? [],
+      bodyTypes: result?.[0]?.bodyTypes ?? [],
+      transmissions: result?.[0]?.transmissions ?? [],
+    };
   }
 
   private buildEnrichedFields(
@@ -301,6 +412,8 @@ export class VehicleCompatibilityService {
         engineTokens,
         displacementCc: normalizeDisplacementCc((dto.engine as any)?.displacement),
         fuelTags: normalizeFuelTags((dto.engine as any)?.fuelType),
+        trim: extractTrim(dto.version),
+        traction: extractTraction(dto.version),
       },
       canonicalKey,
       dataQualityScore,

@@ -31,8 +31,19 @@ export class CategoryModel {
     @Prop()
     image?: string;
 
+    @Prop()
+    icon?: string; // lucide-react icon name, e.g. "Lightbulb", "Disc3"
+
     @Prop({ default: 0, index: true })
     relevance: number;
+
+    /**
+     * Peso manual de prioridade para o relevanceScore de produtos desta categoria (ex:
+     * "Óleo de Motor" = 3). Sem herança pai→filho — cada categoria-folha configura o próprio
+     * peso; ver docs/superpowers/specs/2026-07-13-product-relevance-rails-design.md.
+     */
+    @Prop({ default: 1 })
+    priorityWeight: number;
 
     @Prop({ default: 0 })
     productCount: number;

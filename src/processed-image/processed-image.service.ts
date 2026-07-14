@@ -15,6 +15,8 @@ type SaveProcessedImageInput = {
   mimeType?: string;
   fileName?: string | null;
   source?: string | null;
+  /** When set, the save is idempotent by jobId (upsert) — never duplicates a paid result. */
+  jobId?: string | null;
 };
 
 type ListProcessedImagesInput = {
@@ -32,7 +34,7 @@ export class ProcessedImageService {
   ) {}
 
   async saveProcessedImage(input: SaveProcessedImageInput) {
-    const doc = await this.processedImageModel.create({
+    const fields = {
       batchCode: input.batchCode,
       batchNote: input.batchNote || null,
       productId: input.productId || null,
@@ -41,8 +43,20 @@ export class ProcessedImageService {
       mimeType: input.mimeType || 'image/png',
       fileName: input.fileName || null,
       source: input.source || null,
-    });
+    };
 
+    // Idempotent path: keyed by jobId so a retried/duplicated success callback upserts
+    // the same repository row (the "never lose, never double-charge" guarantee).
+    if (input.jobId) {
+      const doc = await this.processedImageModel.findOneAndUpdate(
+        { jobId: input.jobId },
+        { $set: fields, $setOnInsert: { jobId: input.jobId } },
+        { new: true, upsert: true },
+      );
+      return this.toOutput(doc);
+    }
+
+    const doc = await this.processedImageModel.create(fields);
     return this.toOutput(doc);
   }
 
@@ -92,6 +106,7 @@ export class ProcessedImageService {
       mimeType: item.mimeType || 'image/png',
       fileName: item.fileName || null,
       source: item.source || null,
+      jobId: item.jobId || null,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
     };

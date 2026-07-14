@@ -40,6 +40,33 @@ describe('decideIngestAction', () => {
     expect(a.kind).toBe('SKIP');
   });
 
+  it('UPDATE_SHIPPING when deducted, same status, shipping substatus changed', () => {
+    const a = decideIngestAction(
+      { logisticsStatus: 'deducted', status: 'paid', shippingSubstatus: 'ready_to_ship', notificationStatus: { whatsapp: { status: 'sent' } } },
+      { status: 'paid', shippingSubstatus: 'delivered' },
+      'webhook',
+    );
+    expect(a.kind).toBe('UPDATE_SHIPPING');
+  });
+
+  it('SKIP when deducted, same status AND same shipping substatus', () => {
+    const a = decideIngestAction(
+      { logisticsStatus: 'deducted', status: 'paid', shippingSubstatus: 'delivered', notificationStatus: { whatsapp: { status: 'sent' } } },
+      { status: 'paid', shippingSubstatus: 'delivered' },
+      'webhook',
+    );
+    expect(a.kind).toBe('SKIP');
+  });
+
+  it('UPDATE_STATUS takes precedence when both status and shipping change', () => {
+    const a = decideIngestAction(
+      { logisticsStatus: 'deducted', status: 'paid', shippingSubstatus: 'ready_to_ship', notificationStatus: { whatsapp: { status: 'sent' } } },
+      { status: 'shipped', shippingSubstatus: 'delivered' },
+      'webhook',
+    );
+    expect(a.kind).toBe('UPDATE_STATUS');
+  });
+
   it('RECOVER_NOTIFICATION when deducted, same status, notification missing', () => {
     const a = decideIngestAction(
       { logisticsStatus: 'deducted', status: 'paid', notificationStatus: {} },

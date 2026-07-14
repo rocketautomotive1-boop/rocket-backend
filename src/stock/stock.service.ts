@@ -61,7 +61,14 @@ export class StockService {
           orderId: dto.orderId ? new Types.ObjectId(dto.orderId) : undefined,
           reason: dto.reason,
           origin: dto.origin ? { type: dto.origin.type, location: dto.origin.location } : undefined,
-          metadata: dto.reference ? { externalReference: dto.reference } : undefined,
+          // Snapshot do preço de venda vigente (NUNCA no unitCost — que é custo do lote).
+          metadata:
+            dto.reference != null || dto.salePrice != null
+              ? {
+                  ...(dto.reference != null ? { externalReference: dto.reference } : {}),
+                  ...(dto.salePrice != null ? { salePrice: dto.salePrice } : {}),
+                }
+              : undefined,
         },
         session,
       );

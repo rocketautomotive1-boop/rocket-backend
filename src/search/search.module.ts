@@ -7,7 +7,8 @@ import { CategoryDiscoveryController } from './category-discovery.controller';
 import { MongooseModule } from '@nestjs/mongoose';
 import { CategoryModel, CategorySchema } from '../product/schemas/category.schema';
 import { ListingModule } from '../listing/listing.module';
-// CategoryDiscoveryService and CategorySearchService use MongoDB Atlas Search ($search aggregation).
+// CategorySearchService (tree cache) and CategoryDiscoveryService (in-memory regex, since
+// the Atlas Search index 'categories_discovery' was dropped) both search in-process over Mongo.
 // Elasticsearch (and the former product SearchService) was removed.
 
 @Module({

@@ -19,6 +19,8 @@ class CompatibilityNormalizedSchema {
   @Prop({ type: [String] }) engineTokens?: string[];
   @Prop({ type: Number, index: true }) displacementCc?: number;
   @Prop({ type: [String], index: true }) fuelTags?: string[];
+  @Prop() trim?: string;
+  @Prop({ enum: ['4x2', '4x4', 'awd'], index: true }) traction?: string;
 }
 
 @Schema({ collection: 'vehicle_compatibilities', timestamps: true })
@@ -81,3 +83,4 @@ VehicleCompatibilitySchema.index({ 'engine.family': 1 });
 VehicleCompatibilitySchema.index({ active: 1, market: 1 });
 VehicleCompatibilitySchema.index({ searchText: 'text' });
 VehicleCompatibilitySchema.index({ 'productionYears.from': 1, 'productionYears.to': 1 });
+VehicleCompatibilitySchema.index({ 'normalized.trim': 1 });

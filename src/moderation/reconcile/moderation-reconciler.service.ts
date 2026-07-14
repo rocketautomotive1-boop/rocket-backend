@@ -11,13 +11,13 @@ import { ModerationRepository } from '../moderation.repository';
 import { ModerationIngestService } from '../ingest/moderation-ingest.service';
 import { diffModerations } from './moderation-diff';
 
-/** Adaptive interval, mirroring the order reconciler. */
+/**
+ * Moderation reconciliation runs once a day — that cadence is enough. /infractions changes slowly,
+ * and the `items` webhook probe already covers low-latency cases between runs.
+ */
 const RECON = {
-  FLOOR_MS: 5 * 60 * 1000,
-  CEILING_MS: 20 * 60 * 1000,
+  DAILY_MS: 24 * 60 * 60 * 1000,
 };
-const nextInterval = (current: number, cleanRun: boolean): number =>
-  cleanRun ? Math.min(current * 2, RECON.CEILING_MS) : RECON.FLOOR_MS;
 
 /**
  * PRIMARY moderation source of truth. ML has no `moderations` webhook topic — infractions are
@@ -27,14 +27,13 @@ const nextInterval = (current: number, cleanRun: boolean): number =>
  *   - RESOLVES rows that vanished from /infractions — closing the state and clearing the listing's
  *     pending_removal/syncIssue, then asking the orchestrator to re-publish. The old polling never
  *     closed anything, so local state diverged and got stuck; this is the fix.
- * The interval is adaptive (doubles on clean runs, resets to the floor when a change is found).
+ * Runs once a day — that cadence is enough; the `items` webhook probe covers low-latency cases.
  */
 @Injectable()
 export class ModerationReconciler implements OnModuleInit {
   private readonly logger = new Logger(ModerationReconciler.name);
   private readonly mlProvider = new MercadoLivreModerationProvider();
   private timers = new Map<string, NodeJS.Timeout>();
-  private intervals = new Map<string, number>();
 
   constructor(
     @InjectModel(ListingModel.name) private readonly listingModel: Model<ListingDocument>,
@@ -62,14 +61,13 @@ export class ModerationReconciler implements OnModuleInit {
       const accounts = await this.broker.listAccountsWithToken(marketplaceId);
       const targets = accounts.length ? accounts.map((a) => a.accountId) : [undefined];
       for (const accountId of targets) {
-        this.scheduleNext(marketplaceId, RECON.FLOOR_MS, accountId);
+        this.scheduleNext(marketplaceId, RECON.DAILY_MS, accountId);
       }
     }
   }
 
   private scheduleNext(marketplaceId: string, delay: number, accountId?: string): void {
     const k = this.key(marketplaceId, accountId);
-    this.intervals.set(k, delay);
     const t = setTimeout(
       () =>
         this.runFor(marketplaceId, accountId).catch((e) =>
@@ -90,14 +88,14 @@ export class ModerationReconciler implements OnModuleInit {
         : await this.broker.ensureValidToken(marketplaceId);
     } catch (err) {
       this.logger.warn(`[Moderation] ${k} no token — skipping: ${(err as Error).message}`);
-      this.scheduleNext(marketplaceId, RECON.CEILING_MS, accountId);
+      this.scheduleNext(marketplaceId, RECON.DAILY_MS, accountId);
       return;
     }
 
     const userId = token.additionalData?.userId;
     if (!userId) {
       this.logger.warn(`[Moderation] ${k} token has no userId — cannot query /infractions`);
-      this.scheduleNext(marketplaceId, RECON.CEILING_MS, accountId);
+      this.scheduleNext(marketplaceId, RECON.DAILY_MS, accountId);
       return;
     }
 
@@ -141,13 +139,10 @@ export class ModerationReconciler implements OnModuleInit {
       changes++;
     }
 
-    const cleanRun = changes === 0;
-    const current = this.intervals.get(k) ?? RECON.FLOOR_MS;
-    const next = nextInterval(current, cleanRun);
     this.logger.log(
-      `[Moderation] ${k} active=${activeById.size} open=${openRows.length} ingested=${toIngest.length} resolved=${toResolve.length} nextMs=${next}`,
+      `[Moderation] ${k} active=${activeById.size} open=${openRows.length} ingested=${toIngest.length} resolved=${toResolve.length} changes=${changes} nextMs=${RECON.DAILY_MS}`,
     );
-    this.scheduleNext(marketplaceId, next, accountId);
+    this.scheduleNext(marketplaceId, RECON.DAILY_MS, accountId);
   }
 
   /**
@@ -185,7 +180,6 @@ export class ModerationReconciler implements OnModuleInit {
         productId,
         reason: 'moderation_resolved',
         resolutionSignal: 'moderation_resolved',
-        force: false,
         targetMarketplaceIds: [marketplaceId],
       });
     }

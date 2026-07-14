@@ -12,7 +12,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { VehicleBodyType, VehicleMarket, VehicleSourceType } from '../../vehicle-shared/types/vehicle.types';
+import { VehicleBodyType, VehicleMarket, VehicleOrigin } from '../../vehicle-shared/types/vehicle.types';
 
 class EngineDto {
   @IsOptional() @IsString() code?: string;
@@ -23,6 +23,7 @@ class EngineDto {
   @IsOptional() @IsString() valvetrain?: string;
   @IsOptional() @IsNumber() powerCvGasoline?: number;
   @IsOptional() @IsNumber() powerCvEthanol?: number;
+  @IsOptional() @IsNumber() powerHp?: number;
   @IsOptional() @IsNumber() torqueNm?: number;
 }
 
@@ -36,6 +37,8 @@ class FipeDto {
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsString() reference?: string;
   @IsOptional() @IsNumber() value?: number;
+  @IsOptional() @IsNumber() priceUsed?: number;
+  @IsOptional() @IsNumber() priceNew?: number;
 }
 
 export class CreateVehicleCompatibilityDto {
@@ -59,10 +62,12 @@ export class CreateVehicleCompatibilityDto {
 
   @IsOptional() @ValidateNested() @Type(() => FipeDto) fipe?: FipeDto;
   @IsOptional() @IsObject() chassis?: Record<string, any>;
+  @IsOptional() @IsObject() dimensions?: Record<string, any>;
+  @IsOptional() @IsArray() @IsString({ each: true }) features?: string[];
   @IsOptional() @IsArray() @IsString({ each: true }) aliases?: string[];
   @IsOptional() @IsArray() @IsString({ each: true }) tags?: string[];
 
-  @IsOptional() @IsEnum(VehicleSourceType) sourceType?: VehicleSourceType;
-  @IsOptional() @IsNumber() confidence?: number;
+  @IsOptional() @IsEnum(VehicleOrigin) origin?: VehicleOrigin;
+  @IsOptional() @IsString() mlVehicleId?: string;
   @IsOptional() @IsBoolean() active?: boolean;
 }

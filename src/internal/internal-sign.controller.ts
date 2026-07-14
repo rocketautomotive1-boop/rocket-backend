@@ -1,4 +1,5 @@
 import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { InternalKeyGuard } from '../common/guards/internal-key.guard';
 import { MarketplaceSignerService } from '../marketplace/auth/services/marketplace-signer.service';
@@ -15,6 +16,7 @@ import { MarketplaceSignerService } from '../marketplace/auth/services/marketpla
 @ApiTags('internal')
 @Controller('internal/sign')
 @UseGuards(InternalKeyGuard)
+@SkipThrottle()
 export class InternalSignController {
   constructor(private readonly signer: MarketplaceSignerService) {}
 

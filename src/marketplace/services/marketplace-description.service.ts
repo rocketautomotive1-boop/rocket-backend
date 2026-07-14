@@ -106,8 +106,10 @@ export class MarketplaceDescriptionService {
     isDefault = false,
     placeholders?: Record<string, any>,
     sections?: Record<string, any>[],
+    domain?: string,
+    accountId?: string,
   ): Promise<MarketplaceDescriptionTemplateSnapshot> {
-    return this.templateRepo.create(marketplaceId, { name, title, template, isDefault, placeholders, sections });
+    return this.templateRepo.create(marketplaceId, { name, title, template, isDefault, placeholders, sections, domain, accountId });
   }
 
   async updateTemplate(

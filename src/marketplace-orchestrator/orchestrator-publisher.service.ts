@@ -5,7 +5,6 @@ import { OutboxRepository } from '../outbox/outbox.repository';
 export interface SyncRequestedEvent {
     productId: string;
     reason?: string;
-    force?: boolean;
     requesterId?: string;
     resolutionSignal?: string;
     targetMarketplaceIds?: string[];

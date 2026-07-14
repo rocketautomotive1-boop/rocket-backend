@@ -133,7 +133,6 @@ export class MarketplaceIssuesService {
         await this.orchestratorPublisher.requestSync({
             productId: String(listing.productId),
             requesterId,
-            force: false,
             reason: 'manual_issue_resolution',
             resolutionSignal,
             targetMarketplaceIds: [String(listing.marketplaceId)],
@@ -180,7 +179,6 @@ export class MarketplaceIssuesService {
         await this.orchestratorPublisher.requestSync({
             productId: String(listing.productId),
             requesterId,
-            force: true,
             reason: 'manual_recreate',
             resolutionSignal: 'user_publish',
             targetMarketplaceIds: [String(listing.marketplaceId)],

@@ -30,6 +30,10 @@ export class OrderRepository {
      * Used by reconcile/gap-detection where only existence + status matter (efficiency:
      * avoids the cross-model populate that the full read does).
      */
+    async findOne(query: any): Promise<OrderDocument | null> {
+        return this.orderModel.findOne(query).exec();
+    }
+
     async findStatusByExternalId(
         externalId: string,
     ): Promise<{ _id: any; externalId: string; status: string; logisticsStatus?: string } | null> {

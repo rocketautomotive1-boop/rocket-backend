@@ -455,7 +455,9 @@ export class OLXController {
       marketplace._id,
       templateData.isDefault || false,
       templateData.placeholders,
-      templateData.sections
+      templateData.sections,
+      templateData.domain,
+      templateData.accountId
     );
   }
 

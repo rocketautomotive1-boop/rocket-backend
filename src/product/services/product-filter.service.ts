@@ -9,6 +9,8 @@ import { CategoryModel, CategoryDocument } from '../schemas/category.schema';
 import { ProductService } from '../product.service';
 import { ProductRepository } from '../product.repository';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
+import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
+import { ProductVehicleSearchService } from './product-vehicle-search.service';
 import {
   ProductFilterDto,
   PaginatedResponseDto,
@@ -20,9 +22,9 @@ import {
   AttributeFilterDto,
   MarketplaceFilterDto,
   ImageFilterDto,
-  CompatibilityFilterDto,
   SortDto,
-  PaginationDto
+  PaginationDto,
+  CompatibilitySearchResponseDto
 } from '../dto/product-filter.dto';
 
 @Injectable()
@@ -39,6 +41,8 @@ export class ProductFilterService {
     @InjectModel(ListingModel.name) private listingModel: Model<ListingDocument>,
     private readonly productRepository: ProductRepository,
     @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+    private readonly productVehicleSearchService: ProductVehicleSearchService,
+    @Inject(PRICING_PORT) private readonly pricingPort: PricingPort,
   ) { }
 
   async findProducts(filters: ProductFilterDto): Promise<PaginatedResponseDto<ProductModel>> {
@@ -51,7 +55,6 @@ export class ProductFilterService {
     await this.applyMarketplaceFilters(query, filters.marketplace);
     this.applyImageFilters(query, filters.images);
     this.applyAttributeFilters(query, filters.attributes);
-    this.applyCompatibilityFilters(query, filters.compatibilities);
     await this.applySearchFilter(query, filters.search);
 
     const sort = this.getSortOptions(filters);
@@ -77,6 +80,24 @@ export class ProductFilterService {
       // Map listings to product.titles (legacy)
       data.forEach(p => {
         (p as any).titles = listings.filter(l => String(l.productId) === String(p._id));
+      });
+    }
+
+    // price vive no PricingModule (product_pricing), não em ProductModel — join em lote pra
+    // evitar N+1 e devolver o preço de fato pro consumidor da listagem.
+    if (data.length > 0) {
+      const priceById = await this.pricingPort.getBasePrices(data.map(p => String(p._id)));
+      data.forEach(p => {
+        (p as any).price = priceById.get(String(p._id)) ?? 0;
+      });
+    }
+
+    // estoque vive no StockModule (ledger+lots), não em ProductModel — mesmo join em lote
+    // usado por product-rails/product-vehicle-search, pra listagem não cair em "esgotado" à toa.
+    if (data.length > 0) {
+      const stockById = await this.stockQuery.getAvailableBulk(data.map(p => String(p._id)));
+      data.forEach(p => {
+        (p as any).stockQuantity = stockById.get(String(p._id)) ?? 0;
       });
     }
 
@@ -209,22 +230,6 @@ export class ProductFilterService {
     });
   }
 
-  private applyCompatibilityFilters(query: any, compFilter?: CompatibilityFilterDto): void {
-    if (!compFilter) return;
-    const criteria: any = {};
-    if (compFilter.vehicleBrands?.length) criteria.vehicleBrand = { $in: compFilter.vehicleBrands };
-    if (compFilter.vehicleModels?.length) criteria.vehicleModel = { $in: compFilter.vehicleModels };
-    if (compFilter.vehicleYears?.length) criteria.vehicleYear = { $in: compFilter.vehicleYears };
-    if (compFilter.syncedWithMarketplace !== undefined) criteria.syncedWithMarketplace = compFilter.syncedWithMarketplace;
-
-    if (Object.keys(criteria).length > 0) {
-      query.compatibilities = { $elemMatch: criteria };
-    }
-    if (compFilter.hasCompatibilities) {
-      query.compatibilities = { $exists: true, $not: { $size: 0 } };
-    }
-  }
-
   private async applySearchFilter(query: any, search?: string): Promise<void> {
     if (!search) return;
     const regex = new RegExp(search, 'i');
@@ -238,7 +243,6 @@ export class ProductFilterService {
       { partNumber: regex },
       { 'brand.name': regex },
       { category: { $in: categoryIds } },
-      { compatibilityKeywords: regex }
     ];
   }
 
@@ -259,42 +263,47 @@ export class ProductFilterService {
   }
 
   private getSortOptions(filters: ProductFilterDto): any {
-    const field = filters.sort?.field || filters.sortField || 'updatedAt';
+    const field = filters.sort?.field || filters.sortField || 'relevanceScore';
     const direction = (filters.sort?.direction || filters.sortDirection || 'DESC').toUpperCase() === 'ASC' ? 1 : -1;
     const fieldMap: any = {
       id: 'sku',
       name: 'name',
       price: 'price',
       createdAt: 'createdAt',
-      updatedAt: 'updatedAt'
+      updatedAt: 'updatedAt',
+      relevanceScore: 'relevanceScore'
     };
-    return { [fieldMap[field] || 'updatedAt']: direction };
-  }
-
-  async updateProductCompatibilityKeywords(productId: string): Promise<void> {
-    const product = await this.productService.findOne(productId);
-    // product.compatibilities check removed, fetching from service
-    if (!product) return;
-
-    const keywords = new Set<string>();
-    const compatibilities = await this.productService.getProductCompatibilities(productId);
-    compatibilities.forEach(comp => {
-      if (comp.vehicleBrand) keywords.add(comp.vehicleBrand);
-      if (comp.vehicleModel) keywords.add(comp.vehicleModel);
-    });
-    // save logic if needed
+    return { [fieldMap[field] || 'relevanceScore']: direction };
   }
 
   async findSimilarProductsByCompatibility(id: number, options: any): Promise<ProductModel[]> {
     return [];
   }
 
+  /** Resumo de compatibilidade do produto — lido de compatibilitySummary (denormalizado). */
   async getProductCompatibilityStats(id: string): Promise<any> {
-    return { total: 0, brands: [] };
+    const product = await this.productModel.findById(id).select('compatibilitySummary').lean().exec();
+    const summary = (product as any)?.compatibilitySummary;
+    if (!summary) return { total: 0, brands: [], models: [] };
+    return {
+      total: summary.vehicleCount ?? 0,
+      brands: summary.makes ?? [],
+      models: summary.models ?? [],
+    };
   }
 
-  async findProductsByCompatibilityKeywords(keywords: string, options: any): Promise<PaginatedResponseDto<ProductModel>> {
-    return { data: [], pagination: { page: 1, limit: options.limit || 10, total: 0, totalPages: 0, hasNext: false, hasPrev: false } };
+  /** Busca combinada produto+veículo em texto livre (ex.: "palheta toro 2025") — sem parsing determinístico. */
+  async findProductsByCompatibilityKeywords(keywords: string, options: any): Promise<CompatibilitySearchResponseDto> {
+    return this.productVehicleSearchService.searchByText(keywords, {
+      page: options.page,
+      limit: options.limit,
+      brandNames: options.brandNames,
+      categoryNames: options.categoryNames,
+      priceMin: options.priceMin,
+      priceMax: options.priceMax,
+      vehicleId: options.vehicleId,
+      sort: options.sort,
+    });
   }
 
   async findProductsIntelligent(term: string, options: any): Promise<PaginatedResponseDto<ProductModel>> {

@@ -1,8 +1,12 @@
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ProductCompatibilityModel } from '../schemas/product-compatibility.schema';
+import { ProductModel } from '../schemas/product.schema';
 import { CreateCompatibilityDto, CreateMultipleCompatibilitiesDto } from '../dto/create-compatibility.dto';
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import { buildProductCompatibilitySearchText } from '../utils/product-compatibility-search.util';
+import { VehicleCompatibilityService } from '../../vehicle-compatibility/services/vehicle-compatibility.service';
+import { VehicleCompatibilityDocument } from '../../vehicle-compatibility/schemas/vehicle-compatibility.schema';
 
 @Injectable()
 export class ProductCompatibilityService {
@@ -10,7 +14,15 @@ export class ProductCompatibilityService {
 
   constructor(
     @InjectModel(ProductCompatibilityModel.name) private compatibilityModel: Model<ProductCompatibilityModel>,
+    @InjectModel(ProductModel.name) private productModel: Model<ProductModel>,
+    private vehicleCompatibilityService: VehicleCompatibilityService,
   ) { }
+
+  /** Busca em lote os veículos referenciados por vehicleId, indexados por _id (string). */
+  private async resolveVehiclesByIds(vehicleIds: string[]): Promise<Map<string, VehicleCompatibilityDocument>> {
+    const vehicles = await this.vehicleCompatibilityService.findManyByIds(vehicleIds);
+    return new Map(vehicles.map((v: any) => [String(v._id), v]));
+  }
 
   async createCompatibility(createDto: CreateCompatibilityDto): Promise<ProductCompatibilityModel> {
     try {
@@ -32,9 +44,17 @@ export class ProductCompatibilityService {
         return existingCompatibility;
       }
 
+      const vehicle = (await this.resolveVehiclesByIds([createDto.vehicleId])).get(createDto.vehicleId);
+      const searchText = await this.buildSearchText(createDto, vehicle);
+
       const compatibility = new this.compatibilityModel({
-        ...createDto,
-        product: createDto.productId
+        vehicleId: createDto.vehicleId,
+        mlVehicleId: createDto.mlVehicleId,
+        vehicleName: createDto.vehicleName,
+        status: createDto.status,
+        syncedWithMarketplace: createDto.syncedWithMarketplace,
+        product: createDto.productId,
+        searchText,
       });
       const savedCompatibility = await compatibility.save();
 
@@ -44,6 +64,8 @@ export class ProductCompatibilityService {
         productId: savedCompatibility.product,
         vehicleId: savedCompatibility.vehicleId
       });
+
+      if (createDto.productId) await this.recomputeCompatibilitySummary(createDto.productId);
 
       return savedCompatibility;
     } catch (error) {
@@ -68,14 +90,8 @@ export class ProductCompatibilityService {
         const compatibilityData: CreateCompatibilityDto = {
           productId: createDto.productId,
           vehicleId,
+          mlVehicleId: vehicleDetails?.mlVehicleId,
           vehicleName: vehicleDetails?.name,
-          vehicleBrand: vehicleDetails?.brand,
-          vehicleModel: vehicleDetails?.model,
-          vehicleYear: vehicleDetails?.year,
-          vehicleVersion: vehicleDetails?.version,
-          vehicleEngine: vehicleDetails?.engine,
-          vehicleFuelType: vehicleDetails?.fuelType,
-          vehicleTransmission: vehicleDetails?.transmission,
           status: 'active',
           syncedWithMarketplace: false,
         };
@@ -117,27 +133,39 @@ export class ProductCompatibilityService {
 
       this.logger.log(`🆕 Compatibilidades novas a serem criadas: ${newVehicleIds.length}`);
 
-      // 3. Preparar dados para inserção em batch (apenas productId)
+      // 3. Buscar nome do produto e dados dos veículos (usados em todos os searchText do batch)
+      const productName = createDto.productId ? await this.getProductName(createDto.productId) : undefined;
+      const vehiclesById = await this.resolveVehiclesByIds(newVehicleIds);
+
+      // 4. Preparar dados para inserção em batch (apenas productId)
       const compatibilitiesToInsert = newVehicleIds.map(vehicleId => {
         const vehicleDetails = createDto.vehicleDetails?.find(v => v.id === vehicleId);
+        const vehicle = vehiclesById.get(vehicleId);
 
         return {
-          product: createDto.productId, // Map to product field
+          product: createDto.productId ? new Types.ObjectId(createDto.productId) : undefined, // Map to product field
           vehicleId,
+          mlVehicleId: vehicleDetails?.mlVehicleId,
           vehicleName: vehicleDetails?.name,
-          vehicleBrand: vehicleDetails?.brand,
-          vehicleModel: vehicleDetails?.model,
-          vehicleYear: vehicleDetails?.year,
-          vehicleVersion: vehicleDetails?.version,
-          vehicleEngine: vehicleDetails?.engine,
-          vehicleFuelType: vehicleDetails?.fuelType,
-          vehicleTransmission: vehicleDetails?.transmission,
           status: 'active',
           syncedWithMarketplace: false,
+          searchText: buildProductCompatibilitySearchText(
+            { name: productName },
+            vehicle
+              ? {
+                  make: vehicle.make,
+                  model: vehicle.model,
+                  version: vehicle.version,
+                  versionDisplay: vehicle.versionDisplay,
+                  years: vehicle.years,
+                  aliases: vehicle.aliases,
+                }
+              : undefined,
+          ),
         };
       });
 
-      // 4. Inserir em batch usando insertMany
+      // 5. Inserir em batch usando insertMany
       if (compatibilitiesToInsert.length > 0) {
         this.logger.log(` Inserindo ${compatibilitiesToInsert.length} compatibilidades em BATCH...`);
 
@@ -146,8 +174,10 @@ export class ProductCompatibilityService {
         this.logger.log(`✅ Inserção em BATCH concluída. IDs inseridos: ${insertResult.length}`);
       }
 
-      // 5. Buscar todas as compatibilidades (existentes + novas) em uma única query
+      // 6. Buscar todas as compatibilidades (existentes + novas) em uma única query
       const allCompatibilities = await this.getAllCompatibilities(createDto);
+
+      if (createDto.productId) await this.recomputeCompatibilitySummary(createDto.productId);
 
       const endTime = Date.now();
       const duration = endTime - startTime;
@@ -241,13 +271,29 @@ export class ProductCompatibilityService {
     return chunks;
   }
 
-  async getCompatibilitiesByProduct(productId: string): Promise<ProductCompatibilityModel[]> {
+  async getCompatibilitiesByProduct(productId: string): Promise<any[]> {
     try {
       this.logger.debug(`Buscando compatibilidades para produto ID: ${productId}`);
       const query: any = { product: new Types.ObjectId(productId) };
-      const results = await this.compatibilityModel.find(query).sort({ createdAt: -1 }).exec();
+      const results = await this.compatibilityModel.find(query).sort({ createdAt: -1 }).lean().exec();
       this.logger.debug(`Encontradas ${results.length} compatibilidades para o produto ${productId}`);
-      return results;
+
+      const vehiclesById = await this.resolveVehiclesByIds(results.map((r: any) => r.vehicleId));
+      return results.map((r: any) => ({
+        ...r,
+        vehicle: vehiclesById.get(r.vehicleId)
+          ? {
+              make: vehiclesById.get(r.vehicleId)!.make,
+              model: vehiclesById.get(r.vehicleId)!.model,
+              version: vehiclesById.get(r.vehicleId)!.version,
+              versionDisplay: vehiclesById.get(r.vehicleId)!.versionDisplay,
+              years: vehiclesById.get(r.vehicleId)!.years,
+              engine: vehiclesById.get(r.vehicleId)!.engine,
+              fuel: vehiclesById.get(r.vehicleId)!.fuel,
+              transmission: vehiclesById.get(r.vehicleId)!.transmission,
+            }
+          : undefined,
+      }));
     } catch (error) {
       this.logger.error('Erro ao buscar compatibilidades do produtoo:', error);
       throw new HttpException(
@@ -260,12 +306,39 @@ export class ProductCompatibilityService {
   async deleteCompatibility(id: string | number): Promise<void> {
     try {
       const query = { _id: id };
+      const existing = await this.compatibilityModel.findOne(query).exec();
       await this.compatibilityModel.deleteOne(query).exec();
       this.logger.log(`Compatibilidade ${id} deletada com sucesso`);
+
+      const productId = existing?.productId ?? (existing?.product ? String(existing.product) : undefined);
+      if (productId) await this.recomputeCompatibilitySummary(productId);
     } catch (error) {
       this.logger.error('Erro ao deletar compatibilidade:', error);
       throw new HttpException(
         'Erro ao deletar compatibilidade',
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  /** Remove várias compatibilidades de uma vez, recomputando o summary do produto UMA única vez. */
+  async deleteMultipleCompatibilities(ids: Array<string | number>): Promise<void> {
+    if (!ids.length) return;
+    try {
+      const existing = await this.compatibilityModel.find({ _id: { $in: ids } }).exec();
+      await this.compatibilityModel.deleteMany({ _id: { $in: ids } }).exec();
+      this.logger.log(`${ids.length} compatibilidade(s) deletada(s) em lote`);
+
+      const productIds = [...new Set(
+        existing
+          .map((c) => c.productId ?? (c.product ? String(c.product) : undefined))
+          .filter((id): id is string => !!id),
+      )];
+      await Promise.all(productIds.map((productId) => this.recomputeCompatibilitySummary(productId)));
+    } catch (error) {
+      this.logger.error('Erro ao deletar compatibilidades em lote:', error);
+      throw new HttpException(
+        'Erro ao deletar compatibilidades em lote',
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
@@ -302,5 +375,64 @@ export class ProductCompatibilityService {
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
+  }
+
+  /**
+   * Recalcula compatibilitySummary (makes/models/vehicleCount) no Product a partir do estado
+   * atual de product_compatibilities. Chamado de forma síncrona a cada mutação — ver
+   * docs/superpowers/specs/2026-07-09-product-vehicle-search-design.md, Seção 2.
+   */
+  async recomputeCompatibilitySummary(productId: string): Promise<void> {
+    if (!Types.ObjectId.isValid(productId)) return;
+
+    const rows = await this.compatibilityModel
+      .find({ productId })
+      .select('vehicleId')
+      .lean()
+      .exec();
+
+    const vehiclesById = await this.resolveVehiclesByIds(rows.map((r: any) => r.vehicleId));
+    const makes = [...new Set([...vehiclesById.values()].map((v: any) => v.make).filter(Boolean))];
+    const models = [...new Set([...vehiclesById.values()].map((v: any) => v.model).filter(Boolean))];
+
+    await this.productModel.updateOne(
+      { _id: productId },
+      {
+        $set: {
+          compatibilitySummary: {
+            makes,
+            models,
+            vehicleCount: rows.length,
+            updatedAt: new Date(),
+          },
+        },
+      },
+    ).exec();
+  }
+
+  private async getProductName(productId: string): Promise<string | undefined> {
+    if (!Types.ObjectId.isValid(productId)) return undefined;
+    const product = await this.productModel.findById(productId).select('name').lean().exec();
+    return (product as any)?.name;
+  }
+
+  private async buildSearchText(
+    dto: CreateCompatibilityDto,
+    vehicle?: VehicleCompatibilityDocument,
+  ): Promise<string> {
+    const productName = dto.productId ? await this.getProductName(dto.productId) : undefined;
+    return buildProductCompatibilitySearchText(
+      { name: productName },
+      vehicle
+        ? {
+            make: (vehicle as any).make,
+            model: (vehicle as any).model,
+            version: (vehicle as any).version,
+            versionDisplay: (vehicle as any).versionDisplay,
+            years: (vehicle as any).years,
+            aliases: (vehicle as any).aliases,
+          }
+        : undefined,
+    );
   }
 }

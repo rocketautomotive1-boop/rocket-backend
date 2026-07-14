@@ -13,11 +13,13 @@ export type IngestSource = 'webhook' | 'reconcile' | 'manual' | 'retry' | 'sync'
 export interface ExistingOrderView {
   logisticsStatus?: string;
   status?: string;
+  shippingSubstatus?: string;
   notificationStatus?: { whatsapp?: { status?: string } };
 }
 
 export interface IncomingOrderView {
   status?: string;
+  shippingSubstatus?: string;
 }
 
 export type IngestAction =
@@ -25,6 +27,7 @@ export type IngestAction =
   | { kind: 'CREATE_PENDING' }
   | { kind: 'UPSERT_DEDUCT' }
   | { kind: 'UPDATE_STATUS' }
+  | { kind: 'UPDATE_SHIPPING' }
   | { kind: 'CANCEL' }
   | { kind: 'SKIP' }
   | { kind: 'RECOVER_NOTIFICATION' };
@@ -51,6 +54,13 @@ export function decideIngestAction(
   if (existing.logisticsStatus === 'deducted') {
     if (inStatus !== lc(existing.status)) {
       return inStatus === 'cancelled' ? { kind: 'CANCEL' } : { kind: 'UPDATE_STATUS' };
+    }
+    // Status comercial igual, mas o ENVIO avançou (ex.: shipped → delivered). O webhook
+    // orders_v2 dispara nessas transições de logística; sem isso elas caíam em SKIP e a
+    // atualização de entrega era descartada. Delta-only: só dispara quando o substatus muda.
+    const inSub = lc(incoming.shippingSubstatus);
+    if (inSub && inSub !== lc(existing.shippingSubstatus)) {
+      return { kind: 'UPDATE_SHIPPING' };
     }
     const wa = lc(existing.notificationStatus?.whatsapp?.status);
     return NOTIFIED.has(wa) ? { kind: 'SKIP' } : { kind: 'RECOVER_NOTIFICATION' };

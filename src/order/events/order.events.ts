@@ -25,7 +25,34 @@ export const ORDER_EVENTS = {
      * e roteia para os canais. Mantém o transporte/canal sem acoplamento a order.
      */
     SALE_NOTIFICATION: 'order.sale.notification',
+    /**
+     * Envio do pedido avançou para um MARCO de logística (shipped/out_for_delivery/
+     * delivered/not_delivered/returning_to_sender). Emitido pelo pipeline em UPDATE_SHIPPING.
+     * Payload autocontido — notifications só monta o NotificationRequested (canal sino/app).
+     */
+    SHIPPING_UPDATED: 'order.shipping.updated',
 };
+
+/** Marcos de envio que geram notificação. Outras transições são persistidas mas silenciosas. */
+export const SHIPPING_MILESTONES = new Set([
+    'shipped',
+    'out_for_delivery',
+    'delivered',
+    'not_delivered',
+    'returning_to_sender',
+]);
+
+export class OrderShippingUpdatedEvent {
+    constructor(
+        public readonly orderId: string,
+        public readonly externalId: string,
+        public readonly marketplaceId: string,
+        public readonly marketplaceName: string,
+        public readonly substatus: string,
+        public readonly trackingCode: string | null,
+        public readonly triggeredBy: 'webhook' | 'reconcile' | 'gap-detector' | 'sync' | 'retry' | 'manual',
+    ) {}
+}
 
 export interface OrderSaleNotificationFinancial {
     gross: number;

@@ -5,6 +5,7 @@ import {
   OrderProcessedEvent,
   OrderCancelledEvent,
   OrderSaleNotificationEvent,
+  OrderShippingUpdatedEvent,
 } from '../../order/events/order.events';
 import { NOTIFICATION_EVENTS } from '../events/notification.events';
 import { NotificationRequested } from '../contracts/notification-requested.event';
@@ -36,6 +37,53 @@ export class OrderNotificationTranslator {
       },
     };
     this.emitter.emit(NOTIFICATION_EVENTS.REQUESTED, req);
+  }
+
+  /**
+   * Marco de envio (shipped/out_for_delivery/delivered/...) → notificação SÓ no app
+   * (sino + push + websocket via pipeline). Sem `channels` = sem WhatsApp por decisão de
+   * produto. Dedup por (externalId, substatus) evita repetir o mesmo marco quando webhook
+   * e reconciler pegam a mesma transição.
+   */
+  @OnEvent(ORDER_EVENTS.SHIPPING_UPDATED, { async: true })
+  onShippingUpdated(event: OrderShippingUpdatedEvent): void {
+    const isReturn = event.substatus === 'returning_to_sender';
+    const req: NotificationRequested = {
+      type: 'order.shipping', aggregateType: 'order', aggregateId: event.orderId,
+      title: shippingTitle(event.substatus),
+      body: `Pedido ${event.externalId}`,
+      severity: (event.substatus === 'not_delivered' || isReturn) ? 'warning' : 'info',
+      deduplicationKey: `order.shipping:${event.externalId}:${event.substatus}`,
+      source: event.triggeredBy as any,
+      data: {
+        externalId: event.externalId, marketplaceId: event.marketplaceId,
+        marketplaceName: event.marketplaceName, substatus: event.substatus,
+        trackingCode: event.trackingCode ?? undefined, actionRoute: '/(drawer)/orders',
+      },
+    };
+    this.emitter.emit(NOTIFICATION_EVENTS.REQUESTED, req);
+
+    // Devolução logística (pacote voltando ao remetente) → também no WhatsApp. O evento de
+    // shipping não carrega itens/comprador, então a mensagem é enxuta (pedido + rastreio).
+    // 'sync' (fix em massa) fica silencioso; dedup evita repetir o mesmo marco.
+    if (isReturn && event.triggeredBy !== 'sync') {
+      const lines = [
+        `🔁 *DEVOLUÇÃO EM TRÂNSITO*`,
+        `🏪 Marketplace: ${(event.marketplaceName ?? '').toUpperCase()}`,
+        `📦 O pacote está voltando ao remetente.`,
+        ...(event.trackingCode ? [`🚚 Rastreio: ${event.trackingCode}`] : []),
+        `🔗 Pedido: ${event.externalId}`,
+      ];
+      this.emitter.emit(NOTIFICATION_EVENTS.REQUESTED, {
+        type: 'order.shipping.return.whatsapp', aggregateType: 'order', aggregateId: event.orderId,
+        title: 'Devolução em trânsito', body: lines.join('\n'),
+        severity: 'warning',
+        channels: ['whatsapp'],
+        deduplicationKey: `order.shipping.return.whatsapp:${event.externalId}`,
+        source: event.triggeredBy as any,
+        data: { externalId: event.externalId, substatus: event.substatus },
+      } as NotificationRequested);
+    }
   }
 
   /**
@@ -116,5 +164,17 @@ export class OrderNotificationTranslator {
         data: { externalId: event.externalId },
       } as NotificationRequested);
     }
+  }
+}
+
+/** Título PT-BR por marco de envio (substatus do marketplace). */
+function shippingTitle(substatus: string): string {
+  switch (substatus) {
+    case 'shipped': return 'Pedido enviado';
+    case 'out_for_delivery': return 'Pedido saiu para entrega';
+    case 'delivered': return 'Pedido entregue';
+    case 'not_delivered': return 'Falha na entrega';
+    case 'returning_to_sender': return 'Pedido em devolução';
+    default: return 'Atualização de entrega';
   }
 }

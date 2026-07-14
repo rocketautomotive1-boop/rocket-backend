@@ -7,6 +7,7 @@ import {
 import { MercadoPagoClient } from './mercado-pago.client';
 import { MercadoPagoBalanceService } from './mercado-pago-balance.service';
 import { MercadoPagoBalanceScheduler } from './mercado-pago-balance.scheduler';
+import { MercadoPagoCheckoutService } from './mercado-pago-checkout.service';
 
 /**
  * Módulo dedicado ao Mercado Pago. Por ora cobre o saldo (disponível + a liberar).
@@ -20,7 +21,7 @@ import { MercadoPagoBalanceScheduler } from './mercado-pago-balance.scheduler';
       { name: MpBalanceSnapshotModel.name, schema: MpBalanceSnapshotSchema },
     ]),
   ],
-  providers: [MercadoPagoClient, MercadoPagoBalanceService, MercadoPagoBalanceScheduler],
-  exports: [MercadoPagoBalanceService],
+  providers: [MercadoPagoClient, MercadoPagoBalanceService, MercadoPagoBalanceScheduler, MercadoPagoCheckoutService],
+  exports: [MercadoPagoBalanceService, MercadoPagoCheckoutService],
 })
 export class MercadoPagoModule {}

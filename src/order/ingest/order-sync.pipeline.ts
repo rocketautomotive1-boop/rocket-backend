@@ -6,7 +6,7 @@ import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { OrderModel, OrderDocument } from '../schemas/order.schema';
 import { OrderRepository } from '../order.repository';
 import { OrderMapperService } from './order-mapper.service';
-import { ORDER_EVENTS, OrderProcessedEvent, OrderCancelledEvent } from '../events/order.events';
+import { ORDER_EVENTS, OrderProcessedEvent, OrderCancelledEvent, OrderShippingUpdatedEvent, SHIPPING_MILESTONES } from '../events/order.events';
 import { decideIngestAction, CONFIRMED_STATUSES, IngestSource } from './order-ingest.decision';
 import { MARKETPLACE_ORDER_GATEWAY, MarketplaceOrderGateway } from '../ports/marketplace-order.gateway';
 import { STOCK_LEDGER_PORT, StockLedgerPort } from '../ports/stock-ledger.port';
@@ -49,7 +49,11 @@ export class OrderSyncPipeline {
         const existing = await this.orderRepository.findByExternalId(externalId);
 
         // ── PASSO 2: DECIDE (pure idempotency rules) ──────────────────────────
-        const action = decideIngestAction(existing as any, { status: orderData.status }, source);
+        const action = decideIngestAction(
+            existing as any,
+            { status: orderData.status, shippingSubstatus: orderData.shipping?.substatus },
+            source,
+        );
         this.logger.log(`[Pipeline] Order ${externalId} action=${action.kind} (existing=${!!existing})`);
 
         switch (action.kind) {
@@ -63,6 +67,10 @@ export class OrderSyncPipeline {
 
             case 'UPDATE_STATUS':
                 await this.applyStatusUpdate(existing!, orderData);
+                return;
+
+            case 'UPDATE_SHIPPING':
+                await this.applyShippingUpdate(existing!, orderData, externalId, marketplaceId, marketplaceName, source);
                 return;
 
             case 'CANCEL':
@@ -95,6 +103,57 @@ export class OrderSyncPipeline {
                 },
             },
         });
+    }
+
+    /**
+     * Atualização de ENVIO (status comercial inalterado). Persiste o subdoc shipping +
+     * append delta no history, e emite SHIPPING_UPDATED se o novo substatus for um marco.
+     * Substatus fora dos marcos é salvo mas não notifica ("salvar tudo, notificar marcos").
+     */
+    private async applyShippingUpdate(
+        existing: OrderDocument,
+        orderData: any,
+        externalId: string,
+        marketplaceId: string,
+        marketplaceName: string,
+        source: IngestSource,
+    ): Promise<void> {
+        const sub = (orderData.shipping?.substatus ?? '').toLowerCase();
+        const now = new Date();
+        this.logger.log(`[Pipeline] Order ${externalId} shipping update: ${existing.shipping?.substatus ?? '∅'} → ${sub}`);
+
+        const set: Record<string, any> = {
+            'shipping.status': orderData.shipping?.status,
+            'shipping.substatus': sub,
+            'shipping.updatedAt': now,
+            syncedAt: now,
+        };
+        if (orderData.shipping?.trackingCode) set['shipping.trackingCode'] = orderData.shipping.trackingCode;
+        if (orderData.shipping?.estimatedDelivery) set['shipping.estimatedDelivery'] = orderData.shipping.estimatedDelivery;
+        if (sub === 'delivered') set['shipping.deliveredAt'] = now;
+
+        await this.orderModel.findByIdAndUpdate(existing._id, {
+            $set: set,
+            $push: { 'shipping.history': { substatus: sub, at: now } },
+        });
+
+        if (!SHIPPING_MILESTONES.has(sub)) {
+            this.logger.log(`[Pipeline] Order ${externalId} shipping substatus '${sub}' não é marco — salvo sem notificar.`);
+            return;
+        }
+
+        this.eventEmitter.emit(
+            ORDER_EVENTS.SHIPPING_UPDATED,
+            new OrderShippingUpdatedEvent(
+                existing._id.toString(),
+                externalId,
+                marketplaceId,
+                marketplaceName,
+                sub,
+                orderData.shipping?.trackingCode ?? existing.shipping?.trackingCode ?? null,
+                source as any,
+            ),
+        );
     }
 
     /** Re-emit PROCESSED for an already-deducted order whose notification was lost. */

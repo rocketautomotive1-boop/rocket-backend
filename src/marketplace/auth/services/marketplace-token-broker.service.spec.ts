@@ -154,6 +154,8 @@ describe('MarketplaceTokenBrokerService', () => {
     const resolved = await broker.ensureValidToken(MP_ID, 'autopecas');
     expect(resolved.accessToken).toBe('AT');
     expect(resolved.additionalData.userId).toBe(9);
+    // Injeta o accountId resolvido — o CREATE o carimba no listing p/ rotear UPDATEs.
+    expect(resolved.additionalData.accountId).toBe(String(ACC_ID));
     expect(adapterMock.refreshToken).not.toHaveBeenCalled();
   });
 

@@ -105,6 +105,17 @@ export class OrderMapperService {
             status: externalOrder.status,
             totalAmount: externalOrder.total_amount,
             shippingAmount: externalOrder.shipping?.cost || 0,
+            // Estado de envio bruto vindo do adapter (substatus = fonte dos marcos). A
+            // persistência do subdoc/history + o evento de marco são feitos no pipeline
+            // (UPDATE_SHIPPING); aqui só carregamos os campos atuais.
+            shipping: {
+                status: externalOrder.shipping?.status || undefined,
+                substatus: externalOrder.shipping?.substatus || undefined,
+                trackingCode: externalOrder.shipping?.trackingCode || externalOrder.shipping?.tracking_number || undefined,
+                estimatedDelivery: externalOrder.shipping?.estimatedDelivery
+                    ? new Date(externalOrder.shipping.estimatedDelivery)
+                    : undefined,
+            },
             syncedAt: new Date(),
             // Data real de criação do pedido no marketplace (date_created). Distinta do
             // createdAt (timestamps = momento da nossa ingestão). Ausente → undefined.

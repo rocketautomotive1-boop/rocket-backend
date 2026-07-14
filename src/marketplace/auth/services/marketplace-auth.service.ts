@@ -72,12 +72,15 @@ export class MarketplaceAuthService {
      * Para oauth2, o TokenManager delega ao broker (que renova se expirando).
      * Estratégias não-oauth (aws_sigv4/none/api_key/hybrid) seguem inalteradas.
      */
-    async ensureValidToken(marketplaceId: string | any, domain?: string): Promise<ResolvedToken> {
+    async ensureValidToken(
+        marketplaceId: string | any,
+        selector?: string | { domain?: string; accountId?: string },
+    ): Promise<ResolvedToken> {
         const idStr = String(marketplaceId);
         if (!/^[0-9a-fA-F]{24}$/.test(idStr)) {
             throw new Error(`Invalid Marketplace ID format for token check: ${idStr}`);
         }
-        return this.tokenManager.resolveToken(idStr, domain);
+        return this.tokenManager.resolveToken(idStr, selector);
     }
 
     /**

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, Put, Delete, BadRequestException, UseInterceptors, UploadedFiles, Logger, Query, ClassSerializerInterceptor, HttpStatus, HttpException, HttpCode, Req, Inject, forwardRef } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Put, Delete, BadRequestException, UseInterceptors, UploadedFiles, Logger, Query, HttpStatus, HttpException, HttpCode, Req, Inject, forwardRef } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBody, ApiBearerAuth, ApiExtraModels, ApiQuery, ApiParam } from '@nestjs/swagger';
@@ -10,7 +10,7 @@ import 'multer';
 import { UpdateProductCategoryDto } from './dto/update-product-category.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ProductBrandService } from './services/product-brand.service';
-import { PaginatedResponseDto, ProductFilterDto, ProductResponseDto, ProductStatus } from './dto/product-filter.dto';
+import { PaginatedResponseDto, ProductFilterDto, ProductResponseDto, ProductStatus, CompatibilitySearchResponseDto } from './dto/product-filter.dto';
 import { ProductFilterService } from './services/product-filter.service';
 import { ProductCategoryService } from './services/product-category.service';
 import { ProductTitle } from './schemas/product.schema';
@@ -27,9 +27,13 @@ import { CreateFromDiscoveryDto } from './dto/create-from-discovery.dto';
 import { BoxItemService } from './services/box-item.service';
 import { BoxService } from './services/box.service';
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
+import { RembgEnqueueService } from '../gateways/rembg-enqueue.service';
+import { imageSlotsSchema, ImageSlot } from './dto/image-slots.dto';
+import { ProductVehicleSearchService } from './services/product-vehicle-search.service';
+import { CategoryHintService } from './services/category-hint.service';
+import { ProductRailsService, ProductRailType, ProductRailItem } from './services/product-rails.service';
 
 @ApiTags('Products')
-@UseInterceptors(ClassSerializerInterceptor)
 @ApiBearerAuth()
 @ApiExtraModels(ProductFilterDto, ProductResponseDto)
 @Controller('products')
@@ -42,6 +46,7 @@ export class ProductController {
     private readonly s3Service: S3Service,
     private readonly productFilterService: ProductFilterService,
     private readonly productCategoryService: ProductCategoryService,
+    private readonly categoryHintService: CategoryHintService,
     private readonly productTitleService: ProductTitleService,
     private readonly boxItemService: BoxItemService,
     private readonly boxService: BoxService,
@@ -49,7 +54,15 @@ export class ProductController {
     private readonly sourceRefreshService: SourceRefreshService,
     private readonly categorySnapshotService: CategorySnapshotService,
     @Inject(PRICING_PORT) private readonly pricing: PricingPort,
+    private readonly rembgEnqueueService: RembgEnqueueService,
+    private readonly productVehicleSearchService: ProductVehicleSearchService,
+    private readonly productRailsService: ProductRailsService,
   ) { }
+
+  private toStringArray(value?: string | string[]): string[] | undefined {
+    if (!value) return undefined;
+    return Array.isArray(value) ? value : [value];
+  }
 
   @Post('pre-register')
   @ApiOperation({ summary: 'Pré-cadastro: cria produto draft e dispara discovery' })
@@ -684,8 +697,8 @@ export class ProductController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Produtos encontrados por compatibilidade',
-    type: ProductResponseDto
+    description: 'Produtos encontrados por compatibilidade, com facets de marca/categoria/preço',
+    type: CompatibilitySearchResponseDto
   })
   @ApiQuery({
     name: 'keywords',
@@ -707,6 +720,30 @@ export class ProductController {
     type: Number,
     description: 'Itens por página (padrão: 20)',
     example: 20
+  })
+  @ApiQuery({
+    name: 'brandNames',
+    required: false,
+    type: [String],
+    description: 'Filtrar por nomes de marca (facet selecionado)',
+  })
+  @ApiQuery({
+    name: 'categoryNames',
+    required: false,
+    type: [String],
+    description: 'Filtrar por nomes de categoria (facet selecionado)',
+  })
+  @ApiQuery({
+    name: 'priceMin',
+    required: false,
+    type: Number,
+    description: 'Preço mínimo',
+  })
+  @ApiQuery({
+    name: 'priceMax',
+    required: false,
+    type: Number,
+    description: 'Preço máximo',
   })
   @ApiQuery({
     name: 'includeBrand',
@@ -736,15 +773,33 @@ export class ProductController {
     description: 'Incluir dados do inventário',
     example: true
   })
+  @ApiQuery({
+    name: 'vehicleId',
+    required: false,
+    type: String,
+    description: 'Filtra por veículo ativo da garagem (vehicleId de vehicle_compatibilities) — filtro rígido combinado ao texto livre',
+  })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: ['relevance', 'price_asc', 'price_desc'],
+    description: 'Ordenação do resultado (padrão: relevance)',
+  })
   async searchByCompatibility(
     @Query('keywords') keywords: string,
-    @Query('page') page: number = 1,
-    @Query('limit') limit: number = 20,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('brandNames') brandNames?: string | string[],
+    @Query('categoryNames') categoryNames?: string | string[],
+    @Query('priceMin') priceMin?: number,
+    @Query('priceMax') priceMax?: number,
     @Query('includeBrand') includeBrand: boolean = true,
     @Query('includeCategory') includeCategory: boolean = true,
     @Query('includeImages') includeImages: boolean = true,
-    @Query('includeInventory') includeInventory: boolean = true
-  ): Promise<PaginatedResponseDto<ProductModel>> {
+    @Query('includeInventory') includeInventory: boolean = true,
+    @Query('vehicleId') vehicleId?: string,
+    @Query('sort') sort?: 'relevance' | 'price_asc' | 'price_desc',
+  ): Promise<CompatibilitySearchResponseDto> {
     try {
       if (!keywords || keywords.trim().length === 0) {
         throw new HttpException(
@@ -757,24 +812,21 @@ export class ProductController {
         );
       }
 
-      /*
-  @Post('compatibility/keywords/search')
-   async findByCompatKeywords(
-      @Body() filters: any
-   ) {
-      // return await this.productFilterService.findProductsByCompatibilityKeywords(filters);
-      return [];
-   }
-   */
       return await this.productFilterService.findProductsByCompatibilityKeywords(
         keywords.trim(),
         {
-          page,
-          limit,
+          page: page ? Number(page) : 1,
+          limit: limit ? Number(limit) : 20,
+          brandNames: this.toStringArray(brandNames),
+          categoryNames: this.toStringArray(categoryNames),
+          priceMin: priceMin !== undefined ? Number(priceMin) : undefined,
+          priceMax: priceMax !== undefined ? Number(priceMax) : undefined,
           includeBrand,
           includeCategory,
           includeImages,
-          includeInventory
+          includeInventory,
+          vehicleId,
+          sort,
         }
       );
     } catch (error) {
@@ -790,6 +842,64 @@ export class ProductController {
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  @Get('rails/:railType')
+  @ApiOperation({
+    summary: 'Buscar produtos de um rail de recomendação da home',
+    description: 'railType: universal | best-sellers | for-your-car | accessories-for-your-car | deals. for-your-car e accessories-for-your-car exigem vehicleId. Ordenado por relevanceScore.'
+  })
+  @ApiParam({ name: 'railType', enum: ['universal', 'best-sellers', 'for-your-car', 'accessories-for-your-car', 'deals'] })
+  @ApiQuery({ name: 'vehicleId', required: false, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getProductRail(
+    @Param('railType') railType: ProductRailType,
+    @Query('vehicleId') vehicleId?: string,
+    @Query('limit') limit?: number,
+  ): Promise<ProductRailItem[]> {
+    return this.productRailsService.getRail(railType, {
+      vehicleId,
+      limit: limit ? Number(limit) : 20,
+    });
+  }
+
+  @Get('by-vehicle')
+  @ApiOperation({
+    summary: 'Buscar produtos compatíveis com um veículo',
+    description: 'Aceita vehicleId (registro específico de vehicle_compatibilities) OU make+model (família inteira). Inclui produtos isUniversalFit.'
+  })
+  @ApiQuery({ name: 'vehicleId', required: false, type: String })
+  @ApiQuery({ name: 'make', required: false, type: String })
+  @ApiQuery({ name: 'model', required: false, type: String })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async findProductsByVehicle(
+    @Query('vehicleId') vehicleId?: string,
+    @Query('make') make?: string,
+    @Query('model') model?: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ): Promise<PaginatedResponseDto<ProductModel>> {
+    return this.productVehicleSearchService.findByVehicle({
+      vehicleId,
+      make,
+      model,
+      page: page ? Number(page) : 1,
+      limit: limit ? Number(limit) : 20,
+    });
+  }
+
+  @Get(':id/compatible-with/:vehicleId')
+  @ApiOperation({
+    summary: 'Checar compatibilidade de um produto com um veículo específico',
+    description: 'Usado pela PDP para exibir aviso quando o produto não é compatível com o veículo ativo da garagem do cliente.'
+  })
+  async checkCompatibility(
+    @Param('id') id: string,
+    @Param('vehicleId') vehicleId: string,
+  ): Promise<{ compatible: boolean }> {
+    const compatible = await this.productVehicleSearchService.isCompatible(id, vehicleId);
+    return { compatible };
   }
 
   @Get('filters/brands')
@@ -833,64 +943,17 @@ export class ProductController {
     }
   }
 
-  @Get('filters/categories')
+  @Get('category-hint')
   @ApiOperation({
-    summary: 'Obter lista de categorias para filtros',
-    description: 'Retorna lista de categorias disponíveis para uso em filtros.'
+    summary: 'Sugerir categoria a partir do histórico de uso de um displayName',
+    description: 'Consulta display_name_category_hints e retorna a categoria mais usada para o nome curto informado, se houver.',
   })
-  @ApiResponse({
-    status: 200,
-    description: 'Lista de categorias',
-    schema: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          id: { type: 'number' },
-          name: { type: 'string' },
-          parentId: { type: 'string', nullable: true },
-          productCount: { type: 'number' }
-        }
-      }
-    }
-  })
-  async getCategoriesForFilter(): Promise<any[]> {
-    try {
-      // Buscar todas as categorias ativas do banco de dados
-      const categories = await this.productCategoryService.findAll();
-
-      // Para cada categoria, contar quantos produtos ela possui
-      const categoriesWithCount = await Promise.all(
-        categories.map(async (category) => {
-          // Contar produtos desta categoria
-          const productCount = await this.productService.countByCategory(category.id);
-
-          return {
-            id: category.id,
-            name: category.name,
-            parentId: category.parentId ? category.parentId.toString() : null,
-            productCount: productCount
-          };
-        })
-      );
-
-      // Filtrar apenas categorias que têm produtos e ordenar por nome
-      const filteredCategories = categoriesWithCount
-        .filter(category => category.productCount > 0)
-        .sort((a, b) => a.name.localeCompare(b.name));
-
-      return filteredCategories;
-    } catch (error) {
-      this.logger.error('Erro ao obter categorias para filtro:', error);
-      throw new HttpException(
-        {
-          status: HttpStatus.INTERNAL_SERVER_ERROR,
-          error: 'Erro ao obter categorias',
-          message: error.message,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+  @ApiQuery({ name: 'displayName', required: true, type: String })
+  async getCategoryHint(
+    @Query('displayName') displayName: string,
+  ): Promise<{ categoryId: string; categoryName: string; count: number } | null> {
+    if (!displayName) return null;
+    return this.categoryHintService.suggestCategory(displayName);
   }
 
   @Get(':id/inventory')
@@ -1025,106 +1088,168 @@ export class ProductController {
       },
     },
   })
-  @UseInterceptors(FilesInterceptor('files', 10))
+  @UseInterceptors(FilesInterceptor('files', 20))
   async uploadImages(
     @Param('id') id: string,
     @UploadedFiles() files: any[],
     @Body() body: any,
   ): Promise<ProductModel> {
-    const keptImagesRaw = body.keptImages;
-    let keptImages: any[] = [];
-
+    // ── Ordered-slot contract ────────────────────────────────────────────────
+    // The frontend list is the single source of truth. It sends ONE ordered array of
+    // slots; the final product.images is assembled STRICTLY by slot.position. Every
+    // subdoc carries a stable slotId (identity) so async rembg results reconcile into
+    // the exact slot the user placed — the order is never re-derived by concatenation.
+    let slots: ImageSlot[];
     try {
-      if (keptImagesRaw) {
-        keptImages = typeof keptImagesRaw === 'string' ? JSON.parse(keptImagesRaw) : keptImagesRaw;
+      const raw = typeof body.slots === 'string' ? JSON.parse(body.slots) : body.slots;
+      slots = imageSlotsSchema.parse(raw);
+    } catch (e: any) {
+      if (e instanceof ZodError) {
+        throw new BadRequestException(`Payload de imagens inválido: ${e.issues.map(i => i.message).join('; ')}`);
       }
-    } catch (e) {
-      this.logger.warn(`Erro ao fazer parse de keptImages: ${e.message}`);
+      throw new BadRequestException('Payload de imagens inválido (slots ausente ou malformado)');
     }
 
-    if ((!files || files.length === 0) && keptImages.length === 0) {
+    if (slots.length === 0) {
       throw new BadRequestException('Nenhuma imagem enviada');
     }
 
-    this.logger.log(`[DEBUG] Processing uploadImages for ${id}. Files: ${files?.length}, Kept: ${keptImages.length}`);
-
-    // Buscar o produto para verificar se existe
     const product = await this.productService.findOne(id);
     if (!product) {
       throw new BadRequestException(`Produto com ID ${id} não encontrado`);
     }
 
-    // Processar imagens mantidas para recuperar chaves perdidas (legacy)
-    const processedKeptImages = keptImages.map(img => {
-      if (!img.key && img.url) {
-        const match = img.url.match(/(products\/[^/]+\/.+)/);
-        if (match && match[1]) {
-          this.logger.log(`Recuperada chave S3 da URL para imagem: ${match[1]}`);
-          return { ...img, key: match[1] };
-        }
+    // Upload every new binary to S3 once, indexed by fileIndex (real MIME via magic
+    // bytes — the client forces image/png even for JPEG from Discovery suggestions).
+    const uploadedByFileIndex = new Map<number, { url: string; key: string; filename: string; mimeType: string }>();
+    const filesArr = files ?? [];
+    for (let fi = 0; fi < filesArr.length; fi++) {
+      const file = filesArr[fi];
+      const detected = detectImageMimeType(file.buffer);
+      if (detected.mime === 'application/octet-stream') {
+        throw new BadRequestException(`Formato de imagem não suportado (não é JPEG/PNG/WEBP/GIF): ${file.originalname}`);
       }
-      return img;
-    });
+      const baseName = (file.originalname || `image-${Date.now()}-${fi}`).replace(/\.[^.]+$/, '');
+      const filename = `${baseName}.${detected.ext}`;
+      const key = `products/${id}/${Date.now()}-${fi}-${filename}`;
+      const url = await this.s3Service.uploadFile(file.buffer, key, detected.mime, true);
+      uploadedByFileIndex.set(fi, { url, key, filename, mimeType: detected.mime });
+    }
 
-    // Chaves das imagens que devem ser mantidas no S3
-    const keptKeys = processedKeptImages.map(img => img.key).filter(k => !!k);
-    const newKeys: string[] = [];
-    const uploadedFiles: any[] = [];
+    const serverImages: any[] = (product as any).images ?? [];
+    const serverBySlotId = new Map<string, any>(
+      serverImages.filter((img: any) => img.slotId).map((img: any) => [img.slotId, img]),
+    );
 
-    // Fazer upload de cada nova imagem para o S3.
-    // Detecta MIME real pelos magic bytes do buffer — ignora originalname/mimetype enviados pelo cliente
-    // (mobile força 'image.png'/'image/png' mesmo para JPEG vindo de suggestedImages do Discovery).
-    if (files && files.length > 0) {
-      for (const file of files) {
-        const detected = detectImageMimeType(file.buffer);
-        if (detected.mime === 'application/octet-stream') {
-          throw new BadRequestException(`Formato de imagem não suportado (não é JPEG/PNG/WEBP/GIF): ${file.originalname}`);
+    // Assemble the final list strictly by position. `kind` decides how each slot resolves.
+    const ordered = [...slots].sort((a, b) => a.position - b.position);
+    const finalImages: any[] = [];
+    const rembgToEnqueue: Array<{ slotId: string; file: any }> = [];
+
+    const partNumber = (product as any).partNumber ?? '';
+    const brandName = (product as any).brand?.name ?? '';
+    const batchNote = [partNumber, brandName].filter(Boolean).join(' ').trim() || undefined;
+
+    for (let position = 0; position < ordered.length; position++) {
+      const slot = ordered[position];
+      const main = position === 0;
+
+      if (slot.kind === 'kept') {
+        // Recover the S3 key from the URL for legacy rows that never stored one.
+        let key = slot.key;
+        if (!key && slot.url) {
+          const match = slot.url.match(/(products\/[^/]+\/.+)/);
+          if (match?.[1]) key = match[1];
         }
-        const baseName = (file.originalname || `image-${Date.now()}`).replace(/\.[^.]+$/, '');
-        const filename = `${baseName}.${detected.ext}`;
-        const key = `products/${id}/${Date.now()}-${filename}`;
-        const url = await this.s3Service.uploadFile(
-          file.buffer,
+        const prev = serverBySlotId.get(slot.slotId);
+        finalImages.push({
+          slotId: slot.slotId,
+          url: slot.url ?? prev?.url,
           key,
-          detected.mime,
-          true
-        );
-        uploadedFiles.push({ url, key, filename, mimeType: detected.mime });
-        newKeys.push(key);
+          mimeType: slot.mimeType ?? prev?.mimeType,
+          order: position,
+          main,
+          status: 'active',
+        });
+      } else {
+        // upload | pending — both reference a freshly uploaded binary by fileIndex.
+        const uploaded = slot.fileIndex !== undefined ? uploadedByFileIndex.get(slot.fileIndex) : undefined;
+        if (!uploaded) {
+          throw new BadRequestException(`Slot ${slot.position} (${slot.kind}) sem arquivo correspondente (fileIndex ${slot.fileIndex})`);
+        }
+        if (slot.kind === 'upload') {
+          finalImages.push({
+            slotId: slot.slotId,
+            url: uploaded.url,
+            key: uploaded.key,
+            mimeType: uploaded.mimeType,
+            order: position,
+            main,
+            status: 'active',
+          });
+        } else {
+          // pending → reserve a placeholder in place; rembg fills it by slotId later.
+          finalImages.push({
+            slotId: slot.slotId,
+            url: uploaded.url,        // raw preview until processed
+            key: uploaded.key,
+            mimeType: uploaded.mimeType,
+            order: position,
+            main,
+            status: 'processing',
+          });
+          rembgToEnqueue.push({ slotId: slot.slotId, file: filesArr[slot.fileIndex!] });
+        }
       }
     }
 
-    // The frontend only knows about images that were loaded when the screen opened.
-    // Images added by other async flows (e.g. rembg commitBatch) after the screen loaded
-    // are unknown to the frontend and must not be dropped.
-    //
-    // Strategy: build the final list by honouring the frontend's explicit ordering of the
-    // keys it knows about, then appending any server-side images whose keys were NOT in the
-    // frontend's payload (they arrived after the screen opened).
-    const sentKeys = new Set([...keptKeys, ...newKeys]);
-    const serverImages: any[] = (product as any).images ?? [];
-    const serverOnlyImages = serverImages.filter(
-      (img: any) => img.key && !sentKeys.has(img.key),
-    );
-
-    // Final list: frontend-ordered kept + new uploads + any server-only images the
-    // frontend didn't see.
-    const allImagesList = [...processedKeptImages, ...uploadedFiles, ...serverOnlyImages];
-
-    // Sincronizar pasta do S3 — only clean up keys under the products/ prefix that were
-    // explicitly removed by the frontend (i.e. in the server set but not in sentKeys and
-    // not in serverOnlyImages).  We pass all keys we want to keep so syncFolder preserves them.
+    // S3 cleanup: keep every key referenced by the final list under products/.
     const folderPrefix = `products/${id}`;
-    const allKeysToKeep = [...keptKeys, ...newKeys, ...serverOnlyImages.map((img: any) => img.key).filter(Boolean)];
-    await this.s3Service.syncFolder(folderPrefix, allKeysToKeep);
+    const keysToKeep = finalImages.map(img => img.key).filter(Boolean);
+    await this.s3Service.syncFolder(folderPrefix, keysToKeep);
 
-    // Atualizar o produto com a lista completa de imagens
-    const updatedProduct = await this.productService.updateImages(id, allImagesList);
+    const updatedProduct = await this.productService.updateImages(id, finalImages);
 
-    // Auto-publish removed (GlobalWatcher handles it)
-    // this.triggerAutoPublish(updatedProduct._id, 'uploadImages');
+    // Enqueue rembg for reserved slots AFTER the slots exist on the product, so the
+    // worker's positional $set always finds its slotId. One shared batchCode per save.
+    //
+    // DECOUPLED FROM THE SAVE: the images are already persisted. A dispatch failure
+    // (e.g. broker unavailable) must NOT fail the save — that would leave the user
+    // staring at "processando" with the request 500ing. Failed dispatches mark their
+    // slot 'failed' so the UI can surface it and the user can retry, never silently.
+    if (rembgToEnqueue.length > 0) {
+      const batchCode = `RB-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+      // Canonical processing options for the microservice (was hardcoded in the old WS
+      // consumer). Persisted on the job so retries/reconciliation reprocess identically.
+      const rembgOptions = {
+        crop: true,
+        shadow: true,
+        padding: 10,
+        target_size: 1000,
+        alpha_matting: true,
+        clahe: false,
+        model: 'isnet-general-use',
+      };
+      for (const { slotId, file } of rembgToEnqueue) {
+        try {
+          await this.rembgEnqueueService.enqueue({
+            productId: id,
+            slotId,
+            fileBuffer: file.buffer,
+            originalName: file.originalname || 'upload.jpg',
+            mimeType: file.mimetype || 'image/jpeg',
+            batchCode,
+            batchNote,
+            options: rembgOptions,
+          });
+        } catch (err: any) {
+          this.logger.error(`Falha ao criar job rembg (slot ${slotId}): ${err?.message}`);
+          await this.productService.markImageSlotFailed(id, slotId).catch(() => {});
+        }
+      }
+    }
 
-    return updatedProduct;
+    return this.productService.findOne(id);
   }
 
   @Post(':id/titles')
@@ -1461,7 +1586,7 @@ export class ProductController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Obter um produto pelo _id' })
+  @ApiOperation({ summary: 'Obter um produto pelo _id ou slug (storefront)' })
   @ApiQuery({
     name: 'view',
     required: false,
@@ -1474,11 +1599,15 @@ export class ProductController {
     @Param('id') id: string,
     @Query('view') view?: string,
   ): Promise<ProductModel> {
-    const product = await this.productService.findOne(id, { lean: view === 'lean' });
+    // view=lean só se aplica à busca por _id (rota interna); a busca por slug
+    // (storefront) sempre retorna full — a PDP pública precisa dos campos completos.
+    const product = view === 'lean' && Types.ObjectId.isValid(id)
+      ? await this.productService.findOne(id, { lean: true })
+      : await this.productService.findOneBySlugOrId(id);
     if (!product) {
       throw new BadRequestException(`Produto com ID ${id} não encontrado`);
     }
-    const basePrice = await this.pricing.getBasePrice(id);
+    const basePrice = await this.pricing.getBasePrice(String((product as any)._id ?? id));
     return { ...(product as any), basePrice };
   }
 }

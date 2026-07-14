@@ -7,6 +7,9 @@ export const StockMoveSchema = z.object({
   quantity: z.number().int('quantidade deve ser inteira'),
   condition: z.enum(['new', 'damaged', 'used', 'refurbished']).default('new'),
   unitCost: z.number().nonnegative().optional(),
+  /** Snapshot do preço de venda vigente neste movimento (vai em metadata.salePrice).
+   *  Nunca confundir com unitCost (custo do lote). */
+  salePrice: z.number().nonnegative().optional(),
   fromBoxId: z.string().optional(),
   toBoxId: z.string().optional(),
   reference: z.string().optional(),

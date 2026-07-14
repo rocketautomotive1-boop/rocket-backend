@@ -99,6 +99,7 @@ export class StockQueryService implements StockQueryPort {
       quantity: m.quantity,
       date: m.date,
       unitCost: m.unitCost != null ? Number(m.unitCost.toString()) : undefined,
+      salePrice: m.metadata?.salePrice != null ? Number(m.metadata.salePrice) : undefined,
       condition: m.condition ?? 'new',
       reason: m.reason,
     }));

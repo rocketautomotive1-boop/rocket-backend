@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
 import { ProductModule } from '../product/product.module';
+import { GarageModule } from '../garage/garage.module';
 import { AiBatchController } from './ai-batch.controller';
 import { AiBatchService } from './ai-batch.service';
 import { AiClerkController } from './ai-clerk.controller';
@@ -14,21 +15,26 @@ import { ProcessedImageModule } from '../processed-image/processed-image.module'
 import { AiImageController } from './ai-image.controller';
 import { AiImageService } from './ai-image.service';
 import { OpenAiImageClient } from './openai-image.client';
+import { IntentExtractionService } from './intent-extraction.service';
+import { AiChatSessionService } from './ai-chat-session.service';
+import { AiChatSessionModel, AiChatSessionSchema } from './schemas/ai-chat-session.schema';
 
 @Module({
   imports: [
     ConfigModule,
     forwardRef(() => ProductModule),
+    GarageModule,
     S3Module,
     ProcessedImageModule,
     MongooseModule.forFeature([
       { name: ProductDraftModel.name, schema: ProductDraftSchema },
       { name: 'UserModel', schema: require('../auth/schemas/user.schema').UserSchema },
       { name: 'VehicleModel', schema: require('../customer/schemas/vehicle.schema').VehicleSchema },
+      { name: AiChatSessionModel.name, schema: AiChatSessionSchema },
     ])
   ],
   controllers: [AiBatchController, ProductDraftsController, AiClerkController, AiImageController],
-  providers: [AiBatchService, ProductDraftsService, AiService, OpenAiImageClient, AiImageService],
+  providers: [AiBatchService, ProductDraftsService, AiService, OpenAiImageClient, AiImageService, IntentExtractionService, AiChatSessionService],
   exports: [AiService, ProductDraftsService, AiBatchService]
 })
 export class AiModule { }

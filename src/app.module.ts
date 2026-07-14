@@ -14,8 +14,6 @@ import { ModerationModule } from './moderation/moderation.module';
 import { ReturnsModule } from './returns/returns.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { StatsModule } from './stats/stats.module';
-import { CompatibilityModule } from './compatibility/compatibility.module';
-import { CompatibilitiesModule } from './compatibilities/compatibilities.module';
 import { OLXModule } from './marketplace/adapters/olx/olx.module';
 import { AiModule } from './ai/ai.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -30,6 +28,7 @@ import { CostSimulationModule } from './cost-simulation/cost-simulation.module';
 import { LogisticsModule } from './logistics/logistics.module';
 import { CustomerModule } from './customer/customer.module';
 import { CheckoutModule } from './checkout/checkout.module';
+import { GarageModule } from './garage/garage.module';
 import { PaymentModule } from './payment/payment.module';
 import { OrderModule } from './order/order.module';
 import { StockModule } from './stock/stock.module';
@@ -44,13 +43,14 @@ import { ScraperModule } from './scraper/scraper.module';
 import { FinancialModule } from './financial/financial.module';
 import { ListingModule } from './listing/listing.module'; // Added ListingModule
 import { MarketplaceOrchestratorModule } from './marketplace-orchestrator/marketplace-orchestrator.module';
-import { VehicleDiscoveryModule } from './vehicle-discovery/vehicle-discovery.module';
 import { VehicleCompatibilityModule } from './vehicle-compatibility/vehicle-compatibility.module';
+import { VehicleImportModule } from './vehicle-import/vehicle-import.module';
 import { InternalModule } from './internal/internal.module';
 import { GeneralProductModule } from './general-product/general-product.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { MercadoPagoModule } from './mercado-pago/mercado-pago.module';
 import { PriceTrackerModule } from './price-tracker/price-tracker.module';
+import { ReviewsModule } from './reviews/reviews.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
@@ -97,8 +97,6 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
     ReturnsModule,
     MonitoringModule,
     StatsModule,
-    CompatibilityModule,
-    CompatibilitiesModule,
     OLXModule,
     AiModule,
     NotificationsModule,
@@ -112,6 +110,7 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
     StockModule,
     PricingModule,
     CustomerModule,
+    GarageModule,
     CheckoutModule,
     PaymentModule,
     ThrottlerModule.forRoot([{
@@ -139,11 +138,12 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
     UserProductivityModule,
     GatewaysModule,
     VehicleCompatibilityModule,
-    VehicleDiscoveryModule,
+    VehicleImportModule,
     InternalModule,
     OutboxModule,
     MercadoPagoModule,
     PriceTrackerModule,
+    ReviewsModule,
   ],
   controllers: [],
   providers: [

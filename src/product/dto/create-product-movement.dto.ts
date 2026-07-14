@@ -60,6 +60,11 @@ export class CreateProductMovementDto {
   @IsNumber()
   costPrice?: number;
 
+  @ApiPropertyOptional({ description: 'Preço de venda vigente neste movimento (snapshot). Vai em metadata.salePrice.' })
+  @IsOptional()
+  @IsNumber()
+  salePrice?: number;
+
   @ApiPropertyOptional({ description: 'Vencimento/validade do lote (ISO date) — saúde/beleza/alimentos' })
   @IsOptional()
   // String vazia do formulário vira undefined — não é uma data inválida, é "sem vencimento".

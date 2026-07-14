@@ -29,6 +29,18 @@ export class CouponModel {
 
     @Prop({ default: 0 })
     usedCount: number;
+
+    /** Vazio = todas as categorias elegíveis. Ver docs/superpowers/specs/2026-07-13-offers-system-design.md. */
+    @Prop({ type: [String], default: [] })
+    categoryIds?: string[];
+
+    /** Vazio = todos os produtos elegíveis. */
+    @Prop({ type: [String], default: [] })
+    productIds?: string[];
+
+    /** null = sem limite por cliente (só o usageLimit global vale). */
+    @Prop({ default: null })
+    usageLimitPerCustomer?: number;
 }
 
 export const CouponSchema = SchemaFactory.createForClass(CouponModel);

@@ -7,10 +7,17 @@ export type ProductDocument = HydratedDocument<ProductModel>;
 
 @Schema()
 export class ProductImage {
+    /** Stable identity of the list slot. Survives reorder; used to reconcile async
+     *  rembg results back into the exact slot the user placed. */
+    @Prop({ index: true }) slotId: string;
     @Prop() url: string;
+    @Prop() key: string;
+    @Prop() mimeType: string;
     @Prop() main: boolean;
     @Prop() originalName: string;
+    /** Position in the list = source of truth for ordering. */
     @Prop() order: number;
+    /** 'active' | 'processing' | 'failed'. A reserved rembg slot is 'processing'. */
     @Prop() status: string;
 }
 
@@ -133,6 +140,12 @@ export class ProductModel {
 
     @Prop({ required: true, index: true })
     name: string;
+
+    // Nome curto/resumido (ex: "Disco de Embreagem"), separado do `name` completo
+    // usado para SEO/marketplace. Editável na tela de Categoria; ver
+    // docs/superpowers/specs/2026-07-13-product-display-name-category-hint-design.md.
+    @Prop({ type: String, required: false })
+    displayName?: string;
 
     // Opcional: autopeças sempre preenchem; itens gerais (domain:'general') usam
     // `barcode` como identidade. unique+sparse permite ausência sem colidir.
@@ -293,6 +306,32 @@ export class ProductModel {
     @Prop({ type: [String], index: true })
     applicationSummary: string[]; // SEO Keywords: "Civic 2008", "Corolla 2010"
 
+    /**
+     * Resumo denormalizado de product_compatibilities — só para listagem/exibição rápida sem
+     * buscar a lista completa de vínculos. Fonte de verdade continua em product_compatibilities;
+     * ver docs/superpowers/specs/2026-07-09-product-vehicle-search-design.md.
+     */
+    @Prop({ type: Object })
+    compatibilitySummary?: {
+        makes: string[];
+        models: string[];
+        vehicleCount: number;
+        updatedAt: Date;
+    };
+
+    /** Peça universal: aparece em qualquer busca por veículo sem vínculo em product_compatibilities. */
+    @Prop({ default: false, index: true })
+    isUniversalFit?: boolean;
+
+    /**
+     * Score de relevância para ordenação dos rails da home (universal/best-sellers/for-your-car/
+     * accessories-for-your-car), recalculado periodicamente por RelevanceScoreJob a partir de
+     * totalSold/ratingAverage/ratingCount e do priorityWeight da categoria — ver
+     * docs/superpowers/specs/2026-07-13-product-relevance-rails-design.md.
+     */
+    @Prop({ default: 0, index: true })
+    relevanceScore: number;
+
     @Prop({ type: Object })
     draftData: any; // Data from AI Drafts or NFe Imports
 
@@ -344,4 +383,5 @@ ProductSchema.index({ name: 'text' });
 ProductSchema.index({ active: 1, 'category': 1 });
 ProductSchema.index({ partNumber: 1, 'brand.name': 1 });
 ProductSchema.index({ active: 1, ratingAverage: -1 }); // Sorting by best rated active products
+ProductSchema.index({ active: 1, isUniversalFit: 1, relevanceScore: -1 }); // Rails da home (universal/best-sellers)
 

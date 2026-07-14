@@ -37,10 +37,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
                             type: 'topic',
                         },
                         {
-                            name: 'rocket.rembg',
-                            type: 'topic',
-                        },
-                        {
                             name: 'rocket.orchestrator',
                             type: 'topic',
                             options: { durable: true },

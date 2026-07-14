@@ -33,6 +33,11 @@ export class CreateProductCategoryDto {
   @IsOptional()
   image?: string;
 
+  @ApiProperty({ description: 'Nome do ícone lucide-react para a categoria', required: false, example: 'Lightbulb' })
+  @IsString()
+  @IsOptional()
+  icon?: string;
+
   @ApiProperty({ description: 'Relevância da categoria na busca (0-100)', required: false, example: 10, default: 0 })
   @IsNumber()
   @IsOptional()
