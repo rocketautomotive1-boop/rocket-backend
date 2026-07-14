@@ -44,7 +44,6 @@ import { FinancialModule } from './financial/financial.module';
 import { ListingModule } from './listing/listing.module'; // Added ListingModule
 import { MarketplaceOrchestratorModule } from './marketplace-orchestrator/marketplace-orchestrator.module';
 import { VehicleCompatibilityModule } from './vehicle-compatibility/vehicle-compatibility.module';
-import { VehicleImportModule } from './vehicle-import/vehicle-import.module';
 import { InternalModule } from './internal/internal.module';
 import { GeneralProductModule } from './general-product/general-product.module';
 import { OutboxModule } from './outbox/outbox.module';
@@ -138,7 +137,6 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
     UserProductivityModule,
     GatewaysModule,
     VehicleCompatibilityModule,
-    VehicleImportModule,
     InternalModule,
     OutboxModule,
     MercadoPagoModule,
