@@ -19,29 +19,39 @@ async function main(): Promise<void> {
 
   console.log('[backfill-trim-traction] connected');
 
-  const cursor = vehicleCompatibilities.find({
+  const filter = {
     $or: [
       { 'normalized.trim': { $exists: false } },
       { 'normalized.traction': { $exists: false } },
     ],
-  });
+  };
 
+  const BATCH_SIZE = 500;
   let total = 0;
   let updated = 0;
 
-  while (await cursor.hasNext()) {
-    const row = await cursor.next();
-    if (!row) continue;
-    total++;
+  // Relê o filtro a cada lote (em vez de manter um cursor aberto por toda a execução) para
+  // evitar timeout de cursor ocioso do MongoDB Atlas em bases grandes (~30k docs).
+  while (true) {
+    const batch = await vehicleCompatibilities.find(filter).limit(BATCH_SIZE).toArray();
+    if (batch.length === 0) break;
 
-    const trim = extractTrim(row.version) ?? null;
-    const traction = extractTraction(row.version) ?? null;
+    const bulkOps = batch.map((row) => ({
+      updateOne: {
+        filter: { _id: row._id },
+        update: {
+          $set: {
+            'normalized.trim': extractTrim(row.version) ?? null,
+            'normalized.traction': extractTraction(row.version) ?? null,
+          },
+        },
+      },
+    }));
 
-    await vehicleCompatibilities.updateOne(
-      { _id: row._id },
-      { $set: { 'normalized.trim': trim, 'normalized.traction': traction } },
-    );
-    updated++;
+    const result = await vehicleCompatibilities.bulkWrite(bulkOps);
+    total += batch.length;
+    updated += result.modifiedCount + result.matchedCount;
+    console.log(`[backfill-trim-traction] progresso: total=${total}`);
   }
 
   console.log(`[backfill-trim-traction] total=${total} updated=${updated}`);
