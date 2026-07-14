@@ -68,6 +68,14 @@ export function normalizeDisplacementCc(raw?: string): number | undefined {
   return undefined;
 }
 
+/** Extrai a cilindrada como string de exibição do texto de version ("1.0 5p" -> "1.0") → undefined se irreconhecível. */
+export function extractEngineDisplay(version: string): string | undefined {
+  if (!version) return undefined;
+  const match = version.match(/\b(\d[.,]\d)\b/);
+  if (!match) return undefined;
+  return match[1].replace(',', '.');
+}
+
 const FUEL_TAG_DICTIONARY: Array<{ tag: string; substrings: string[] }> = [
   { tag: 'diesel', substrings: ['diesel'] },
   { tag: 'gasoline', substrings: ['gasolina', 'gasol'] },
@@ -203,29 +211,21 @@ export function generateVersionStandard(
     .trim();
 }
 
-export function generateEngineSignature(engine?: {
-  family?: string;
-  displacement?: string;
-  aspiration?: string;
+export function generateEngineSignature(input?: {
+  displacementCc?: number;
   fuelType?: string;
 }): string {
-  if (!engine) return '';
+  if (!input) return '';
 
-  const toNormalizedToken = (
-    value: unknown,
-    replacer?: (v: string) => string,
-  ): string => {
+  const toNormalizedToken = (value: unknown): string => {
     if (value === null || value === undefined) return '';
     const str = String(value).toLowerCase().trim();
-    if (!str) return '';
-    return replacer ? replacer(str) : str;
+    return str;
   };
 
   const parts = [
-    toNormalizedToken(engine.family, (v) => v.replace(/[\s/]/g, '_')),
-    toNormalizedToken(engine.displacement, (v) => v.replace(/\s+/g, '_')),
-    toNormalizedToken(engine.aspiration),
-    toNormalizedToken(engine.fuelType),
+    toNormalizedToken(input.displacementCc),
+    toNormalizedToken(input.fuelType),
   ].filter(Boolean);
   return parts.join('_');
 }
@@ -305,12 +305,9 @@ export function computeDataQualityScore(input: {
   make?: string;
   model?: string;
   version?: string;
-  productionYears?: number[];
-  engine?: {
-    family?: string;
-    displacement?: string;
-    fuelType?: string;
-  };
+  years?: number[];
+  displacementCc?: number;
+  fuelType?: string;
   transmission?: string[];
   bodyType?: string;
   platform?: string;
@@ -323,10 +320,9 @@ export function computeDataQualityScore(input: {
   if (input.make) score += 15;
   if (input.model) score += 15;
   if (input.version) score += 10;
-  if (input.productionYears?.length) score += 12;
-  if (input.engine?.family) score += 10;
-  if (input.engine?.displacement) score += 8;
-  if (input.engine?.fuelType) score += 10;
+  if (input.years?.length) score += 12;
+  if (input.displacementCc) score += 18;
+  if (input.fuelType) score += 10;
   if (input.transmission?.length) score += 6;
   if (input.bodyType) score += 4;
   if (input.platform) score += 4;

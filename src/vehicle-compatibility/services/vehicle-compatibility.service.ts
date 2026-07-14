@@ -14,12 +14,12 @@ import {
   computeDataQualityScore,
   deriveAliases,
   extractCabType,
+  extractEngineDisplay,
   extractTraction,
   extractTrim,
   generateCanonicalKey,
   generateEngineSignature,
   normalizeDisplacementCc,
-  normalizeEngineTokens,
   normalizeFuelTags,
   normalizeMake,
   normalizeModel,
@@ -121,13 +121,11 @@ export class VehicleCompatibilityService {
     if (dto.market) filter.market = dto.market;
     if (dto.bodyType) filter.bodyType = dto.bodyType;
     if (dto.year) filter.years = dto.year;
-    if (dto.engineCode) filter['engine.code'] = dto.engineCode;
-    if (dto.engineFamily) filter['engine.family'] = dto.engineFamily;
     if (dto.transmission) filter.transmission = dto.transmission;
 
-    if (dto.make) filter['normalized.make'] = normalizeMake(dto.make);
-    if (dto.model) filter['normalized.model'] = normalizeModel(dto.model);
-    if (dto.version) filter['normalized.version'] = normalizeVersionDisplay(dto.version);
+    if (dto.make) filter.makeKey = normalizeMake(dto.make);
+    if (dto.model) filter.modelKey = normalizeModel(dto.model);
+    if (dto.version) filter.versionKey = normalizeVersionDisplay(dto.version);
 
     if (dto.q) {
       const parsed = parseVehicleQuery(dto.q);
@@ -162,7 +160,6 @@ export class VehicleCompatibilityService {
       version: string;
       versionDisplay?: string;
       year?: number;
-      engineTokens?: string[];
       fuelTags?: string[];
     }>;
   }> {
@@ -174,10 +171,9 @@ export class VehicleCompatibilityService {
       make: doc.make,
       model: doc.model,
       version: doc.version,
-      versionDisplay: doc.versionDisplay ?? doc.normalized?.versionDisplay,
+      versionDisplay: doc.versionDisplay,
       year: Array.isArray(doc.years) && doc.years.length > 0 ? Math.max(...doc.years) : undefined,
-      engineTokens: doc.normalized?.engineTokens,
-      fuelTags: doc.normalized?.fuelTags,
+      fuelTags: doc.fuelTags,
     }));
 
     return { candidates };
@@ -196,9 +192,9 @@ export class VehicleCompatibilityService {
         index: 'vehicle_compatibility_search',
         compound: {
           should: [
-            { text: { query: freeText, path: 'normalized.make', score: { boost: { value: 5 } } } },
-            { text: { query: freeText, path: 'normalized.model', score: { boost: { value: 5 } } } },
-            { text: { query: freeText, path: 'normalized.version', score: { boost: { value: 3 } } } },
+            { text: { query: freeText, path: 'makeKey', score: { boost: { value: 5 } } } },
+            { text: { query: freeText, path: 'modelKey', score: { boost: { value: 5 } } } },
+            { text: { query: freeText, path: 'versionKey', score: { boost: { value: 3 } } } },
             { text: { query: freeText, path: 'aliases', score: { boost: { value: 2 } } } },
             { text: { query: freeText, path: 'tags', score: { boost: { value: 1 } } } },
             { text: { query: freeText, path: 'searchText', fuzzy: { maxEdits: 1 }, score: { boost: { value: 1 } } } },
@@ -225,13 +221,13 @@ export class VehicleCompatibilityService {
     }
     if (parsed?.fuelTags?.length) {
       searchStage.$search.compound.filter.push({
-        in: { path: 'normalized.fuelTags', value: parsed.fuelTags },
+        in: { path: 'fuelTags', value: parsed.fuelTags },
       });
     }
     if (parsed?.displacementCc !== undefined) {
       searchStage.$search.compound.filter.push({
         range: {
-          path: 'normalized.displacementCc',
+          path: 'displacementCc',
           gte: parsed.displacementCc - DISPLACEMENT_TOLERANCE_CC,
           lte: parsed.displacementCc + DISPLACEMENT_TOLERANCE_CC,
         },
@@ -262,10 +258,10 @@ export class VehicleCompatibilityService {
         filter.years = { $elemMatch: { $gte: parsed.yearRange.from, $lte: parsed.yearRange.to } };
       }
       if (parsed?.fuelTags?.length) {
-        filter['normalized.fuelTags'] = { $in: parsed.fuelTags };
+        filter.fuelTags = { $in: parsed.fuelTags };
       }
       if (parsed?.displacementCc !== undefined) {
-        filter['normalized.displacementCc'] = {
+        filter.displacementCc = {
           $gte: parsed.displacementCc - DISPLACEMENT_TOLERANCE_CC,
           $lte: parsed.displacementCc + DISPLACEMENT_TOLERANCE_CC,
         };
@@ -299,8 +295,8 @@ export class VehicleCompatibilityService {
   }> {
     const active = dto.active ?? true;
     const baseFilter: Record<string, any> = { active };
-    if (dto.make) baseFilter['normalized.make'] = normalizeMake(dto.make);
-    if (dto.model) baseFilter['normalized.model'] = normalizeModel(dto.model);
+    if (dto.make) baseFilter.makeKey = normalizeMake(dto.make);
+    if (dto.model) baseFilter.modelKey = normalizeModel(dto.model);
     if (dto.year) baseFilter.years = dto.year;
     if (dto.bodyType) baseFilter.bodyType = dto.bodyType;
     if (dto.transmission) baseFilter.transmission = dto.transmission;
@@ -323,8 +319,8 @@ export class VehicleCompatibilityService {
       .aggregate<any>([
         {
           $facet: {
-            makes: countBy('make', filterWithout('normalized.make')),
-            models: countBy('model', filterWithout('normalized.model')),
+            makes: countBy('make', filterWithout('makeKey')),
+            models: countBy('model', filterWithout('modelKey')),
             years: countBy('years', filterWithout('years'), true),
             bodyTypes: countBy('bodyType', filterWithout('bodyType')),
             transmissions: countBy('transmission', filterWithout('transmission'), true),
@@ -355,16 +351,18 @@ export class VehicleCompatibilityService {
 
     const tags = [...new Set((dto.tags ?? []).map((v) => v.toLowerCase().trim()))];
 
-    const engineTokens = normalizeEngineTokens([
-      (dto.engine as any)?.family,
-      (dto.engine as any)?.displacement,
-    ].filter(Boolean).join(' '));
+    const rawEngine = dto.engine as any;
+    const rawDimensions = (dto as any).dimensions;
+
+    const displacementCc = normalizeDisplacementCc(rawEngine?.displacement);
+    const fuelType = rawEngine?.fuelType;
+    const doors = rawDimensions?.doors;
 
     const canonicalKey = `${VEHICLE_CONSTANTS.CANONICAL_VERSION}:${generateCanonicalKey(
       dto.make,
       dto.model,
       dto.version,
-      generateEngineSignature(dto.engine as any),
+      generateEngineSignature({ displacementCc, fuelType }),
       market,
       dto.years,
     )}`;
@@ -373,8 +371,9 @@ export class VehicleCompatibilityService {
       make: dto.make,
       model: dto.model,
       version: dto.version,
-      productionYears: dto.years,
-      engine: dto.engine as any,
+      years: dto.years,
+      displacementCc,
+      fuelType,
       transmission: dto.transmission,
       bodyType: dto.bodyType,
       platform: dto.platform,
@@ -387,36 +386,41 @@ export class VehicleCompatibilityService {
       model: dto.model,
       version: dto.version,
       versionDisplay: dto.versionDisplay ?? normalizeVersionDisplay(dto.version),
+      makeKey: normalizeMake(dto.make),
+      modelKey: normalizeModel(dto.model),
+      versionKey: normalizeVersionDisplay(dto.version),
       market,
-      engine: dto.engine as any,
+      engineDisplay: extractEngineDisplay(dto.version),
+      displacementCc,
+      fuelType,
+      fuelTags: normalizeFuelTags(fuelType),
+      engine: rawEngine?.powerHp !== undefined ? { powerHp: rawEngine.powerHp } : undefined,
       transmission: dto.transmission,
-      productionYears: dto.productionYears as any,
       years: dto.years,
-      fuel: dto.fuel as any,
+      doors,
+      trim: extractTrim(dto.version),
+      traction: extractTraction(dto.version),
+      cabType: extractCabType(dto.version),
+      bodyType: dto.bodyType,
+      dimensions: rawDimensions
+        ? {
+            fuelCapacityL: rawDimensions.fuelCapacityL,
+            heightMm: rawDimensions.heightMm,
+            lengthMm: rawDimensions.lengthMm,
+            passengerCapacity: rawDimensions.passengerCapacity,
+            wheelbaseMm: rawDimensions.wheelbaseMm,
+            widthMm: rawDimensions.widthMm,
+          }
+        : undefined,
       platform: dto.platform,
       generation: dto.generation,
       facelift: dto.facelift,
-      bodyType: dto.bodyType,
       segment: dto.segment,
       fipe: dto.fipe as any,
-      chassis: dto.chassis as any,
-      dimensions: (dto as any).dimensions,
       features: (dto as any).features,
       aliases: [...new Set(allAliases)].slice(0, 20),
       tags,
       searchText: buildSearchText(dto.make, dto.model, dto.version, allAliases, tags),
-      normalized: {
-        make: normalizeMake(dto.make),
-        model: normalizeModel(dto.model),
-        version: normalizeVersionDisplay(dto.version),
-        versionDisplay: normalizeVersionDisplay(dto.version),
-        engineTokens,
-        displacementCc: normalizeDisplacementCc((dto.engine as any)?.displacement),
-        fuelTags: normalizeFuelTags((dto.engine as any)?.fuelType),
-        trim: extractTrim(dto.version),
-        traction: extractTraction(dto.version),
-        cabType: extractCabType(dto.version),
-      },
       canonicalKey,
       dataQualityScore,
       active: dto.active ?? true,

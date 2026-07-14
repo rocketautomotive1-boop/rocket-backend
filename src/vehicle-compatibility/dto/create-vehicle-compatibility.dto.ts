@@ -27,11 +27,6 @@ class EngineDto {
   @IsOptional() @IsNumber() torqueNm?: number;
 }
 
-class ProductionYearsDto {
-  @Type(() => Number) @IsInt() from: number;
-  @Type(() => Number) @IsInt() to: number;
-}
-
 class FipeDto {
   @IsOptional() @IsString() code?: string;
   @IsOptional() @IsString() description?: string;
@@ -50,9 +45,7 @@ export class CreateVehicleCompatibilityDto {
 
   @IsOptional() @ValidateNested() @Type(() => EngineDto) engine?: EngineDto;
   @IsOptional() @IsArray() @IsString({ each: true }) transmission?: string[];
-  @IsOptional() @ValidateNested() @Type(() => ProductionYearsDto) productionYears?: ProductionYearsDto;
   @IsOptional() @IsArray() @Type(() => Number) @IsInt({ each: true }) years?: number[];
-  @IsOptional() @IsObject() fuel?: Record<string, any>;
 
   @IsOptional() @IsString() platform?: string;
   @IsOptional() @IsString() generation?: string;
@@ -61,7 +54,6 @@ export class CreateVehicleCompatibilityDto {
   @IsOptional() @IsString() segment?: string;
 
   @IsOptional() @ValidateNested() @Type(() => FipeDto) fipe?: FipeDto;
-  @IsOptional() @IsObject() chassis?: Record<string, any>;
   @IsOptional() @IsObject() dimensions?: Record<string, any>;
   @IsOptional() @IsArray() @IsString({ each: true }) features?: string[];
   @IsOptional() @IsArray() @IsString({ each: true }) aliases?: string[];

@@ -1,4 +1,33 @@
-import { extractCabType, extractTraction, extractTrim, toTitleCasePtBr } from './vehicle-normalizer.util';
+import {
+  extractCabType,
+  extractEngineDisplay,
+  extractTraction,
+  extractTrim,
+  toTitleCasePtBr,
+} from './vehicle-normalizer.util';
+
+describe('extractEngineDisplay', () => {
+  it('extrai "1.0" de "1.0 5p"', () => {
+    expect(extractEngineDisplay('1.0 5p')).toBe('1.0');
+  });
+
+  it('extrai "1.8" de "1.8 Adventure Locker Flex 5p"', () => {
+    expect(extractEngineDisplay('1.8 Adventure Locker Flex 5p')).toBe('1.8');
+  });
+
+  it('normaliza vírgula para ponto', () => {
+    expect(extractEngineDisplay('1,4 Flex 4p')).toBe('1.4');
+  });
+
+  it('retorna undefined para entrada vazia', () => {
+    expect(extractEngineDisplay('')).toBeUndefined();
+    expect(extractEngineDisplay(undefined as any)).toBeUndefined();
+  });
+
+  it('retorna undefined sem padrão de cilindrada reconhecível', () => {
+    expect(extractEngineDisplay('Adventure 5p')).toBeUndefined();
+  });
+});
 
 describe('extractTraction', () => {
   it('detecta "4x4" -> "4x4"', () => {

@@ -1352,7 +1352,7 @@ export class ProductService {
 
       // Estatísticas por combustível
       const fuelStats = compatibilities.reduce((acc, comp) => {
-        const fuel = comp.vehicle?.fuel?.fuelType || comp.vehicle?.engine?.fuelType || 'Não especificado';
+        const fuel = comp.vehicle?.fuelType || 'Não especificado';
         acc[fuel] = (acc[fuel] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);

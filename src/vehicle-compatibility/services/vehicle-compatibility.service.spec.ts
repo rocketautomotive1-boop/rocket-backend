@@ -73,7 +73,7 @@ describe('VehicleCompatibilityService.resolve', () => {
           version: 'Freedom',
           versionDisplay: 'Freedom 2.0',
           years: [2018, 2019, 2020],
-          normalized: { engineTokens: ['2.0'], fuelTags: ['diesel'] },
+          fuelTags: ['diesel'],
         },
       ],
       total: 1,
@@ -89,7 +89,6 @@ describe('VehicleCompatibilityService.resolve', () => {
         version: 'Freedom',
         versionDisplay: 'Freedom 2.0',
         year: 2020,
-        engineTokens: ['2.0'],
         fuelTags: ['diesel'],
       },
     ]);
@@ -97,7 +96,7 @@ describe('VehicleCompatibilityService.resolve', () => {
 
   it('candidato sem years retorna year undefined em vez de quebrar', async () => {
     atlasSearchSpy.mockResolvedValue({
-      data: [{ _id: 'xyz', make: 'VW', model: 'Gol', version: '1.6', normalized: {} }],
+      data: [{ _id: 'xyz', make: 'VW', model: 'Gol', version: '1.6' }],
       total: 1,
     });
 

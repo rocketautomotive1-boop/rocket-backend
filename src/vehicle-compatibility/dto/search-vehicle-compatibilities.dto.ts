@@ -14,8 +14,6 @@ export class SearchVehicleCompatibilitiesDto {
   @IsOptional() @IsString() make?: string;
   @IsOptional() @IsString() model?: string;
   @IsOptional() @IsString() version?: string;
-  @IsOptional() @IsString() engineCode?: string;
-  @IsOptional() @IsString() engineFamily?: string;
   @IsOptional() @IsString() transmission?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(500) limit?: number;

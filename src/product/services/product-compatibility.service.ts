@@ -291,12 +291,13 @@ export class ProductCompatibilityService {
                 versionDisplay: vehicle.versionDisplay,
                 years: vehicle.years,
                 engine: vehicle.engine,
-                fuel: vehicle.fuel,
+                fuelType: vehicle.fuelType,
                 transmission: vehicle.transmission,
-                doors: (vehicle.dimensions as any)?.doors,
-                trim: (vehicle.normalized as any)?.trim,
-                traction: (vehicle.normalized as any)?.traction,
-                cabType: (vehicle.normalized as any)?.cabType,
+                doors: vehicle.doors,
+                engineDisplay: vehicle.engineDisplay,
+                trim: vehicle.trim,
+                traction: vehicle.traction,
+                cabType: vehicle.cabType,
               }
             : undefined,
         };
