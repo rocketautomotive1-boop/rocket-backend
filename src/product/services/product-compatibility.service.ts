@@ -279,21 +279,28 @@ export class ProductCompatibilityService {
       this.logger.debug(`Encontradas ${results.length} compatibilidades para o produto ${productId}`);
 
       const vehiclesById = await this.resolveVehiclesByIds(results.map((r: any) => r.vehicleId));
-      return results.map((r: any) => ({
-        ...r,
-        vehicle: vehiclesById.get(r.vehicleId)
-          ? {
-              make: vehiclesById.get(r.vehicleId)!.make,
-              model: vehiclesById.get(r.vehicleId)!.model,
-              version: vehiclesById.get(r.vehicleId)!.version,
-              versionDisplay: vehiclesById.get(r.vehicleId)!.versionDisplay,
-              years: vehiclesById.get(r.vehicleId)!.years,
-              engine: vehiclesById.get(r.vehicleId)!.engine,
-              fuel: vehiclesById.get(r.vehicleId)!.fuel,
-              transmission: vehiclesById.get(r.vehicleId)!.transmission,
-            }
-          : undefined,
-      }));
+      return results.map((r: any) => {
+        const vehicle = vehiclesById.get(r.vehicleId);
+        return {
+          ...r,
+          vehicle: vehicle
+            ? {
+                make: vehicle.make,
+                model: vehicle.model,
+                version: vehicle.version,
+                versionDisplay: vehicle.versionDisplay,
+                years: vehicle.years,
+                engine: vehicle.engine,
+                fuel: vehicle.fuel,
+                transmission: vehicle.transmission,
+                doors: (vehicle.dimensions as any)?.doors,
+                trim: (vehicle.normalized as any)?.trim,
+                traction: (vehicle.normalized as any)?.traction,
+                cabType: (vehicle.normalized as any)?.cabType,
+              }
+            : undefined,
+        };
+      });
     } catch (error) {
       this.logger.error('Erro ao buscar compatibilidades do produtoo:', error);
       throw new HttpException(

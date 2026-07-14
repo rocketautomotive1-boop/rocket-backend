@@ -21,6 +21,7 @@ class CompatibilityNormalizedSchema {
   @Prop({ type: [String], index: true }) fuelTags?: string[];
   @Prop() trim?: string;
   @Prop({ enum: ['4x2', '4x4', 'awd'], index: true }) traction?: string;
+  @Prop({ enum: ['simples', 'dupla'], index: true }) cabType?: string;
 }
 
 @Schema({ collection: 'vehicle_compatibilities', timestamps: true })

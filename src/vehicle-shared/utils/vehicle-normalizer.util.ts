@@ -118,12 +118,23 @@ const TRIM_STRIP_PATTERNS: RegExp[] = [
   /\b4wd\b/gi,
   /\b4x2\b/gi,
   /\bawd\b/gi,
+  /\bcab(?:ine|\.)?\s*(?:dupla|simples)\b/gi,
 ];
 
 const TRIM_ACRONYMS = new Set([
-  'rs', 'ss', 'glx', 'gls', 'le', 'gt', 'gti', 'xei', 'lt', 'ltz', 'se', 'sl', 'sv',
+  'rs', 'ss', 'ls', 'glx', 'gls', 'le', 'gt', 'gti', 'xei', 'lt', 'ltz', 'se', 'sl', 'sv',
   'tsi', 'tdi', 'hdi', 'cdi', 'vht', 'srv', 'ltd', 'xls', 'xlt', 'sw4', 'ex', 'exl', 'gli',
 ]);
+
+const CAB_TYPE_RE = /\bcab(?:ine|\.)?\s*(dupla|simples)\b/i;
+
+/** Detecta tipo de cabine no texto: "Cab. Dupla"/"Cabine Dupla" -> "dupla", "Cab. Simples" -> "simples". */
+export function extractCabType(version: string): string | undefined {
+  if (!version) return undefined;
+  const match = version.match(CAB_TYPE_RE);
+  if (!match) return undefined;
+  return match[1].toLowerCase();
+}
 
 /** Detecta menção de tração no texto: "4x4"/"4wd" -> "4x4", "4x2" -> "4x2", "awd" -> "awd". */
 export function extractTraction(version: string): string | undefined {

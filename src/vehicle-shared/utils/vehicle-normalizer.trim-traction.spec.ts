@@ -1,4 +1,4 @@
-import { extractTraction, extractTrim, toTitleCasePtBr } from './vehicle-normalizer.util';
+import { extractCabType, extractTraction, extractTrim, toTitleCasePtBr } from './vehicle-normalizer.util';
 
 describe('extractTraction', () => {
   it('detecta "4x4" -> "4x4"', () => {
@@ -55,14 +55,18 @@ describe('extractTrim', () => {
     expect(extractTrim('1.8 Adventure Locker Flex 5p')).toBe('Adventure Locker');
   });
 
-  it('extrai trim de picape com cabine dupla e tração', () => {
+  it('extrai trim de picape com cabine dupla e tração, sem incluir a cabine no trim', () => {
     expect(extractTrim('2.4 Triton Sport Outdoor Cab. Dupla 4X4 Aut. 4P')).toBe(
-      'Triton Sport Outdoor Cab. Dupla',
+      'Triton Sport Outdoor',
     );
   });
 
   it('mantém sigla em uppercase no trim', () => {
     expect(extractTrim('1.6 Rs Turbo Aut. 5p')).toBe('RS Turbo');
+  });
+
+  it('mantém sigla LS em uppercase no trim', () => {
+    expect(extractTrim('2.4 Ls Cab. Dupla 4x2 Flex 4p')).toBe('LS');
   });
 
   it('retorna undefined quando não sobra nada além de motor/portas', () => {
@@ -76,5 +80,28 @@ describe('extractTrim', () => {
 
   it('remove cilindrada em formato "cc"', () => {
     expect(extractTrim('1000 cc Turbo Sport 5p')).toBe('Turbo Sport');
+  });
+});
+
+describe('extractCabType', () => {
+  it('detecta "Cab. Dupla" -> "dupla"', () => {
+    expect(extractCabType('2.4 Triton Sport Outdoor Cab. Dupla 4X4 Aut. 4P')).toBe('dupla');
+  });
+
+  it('detecta "Cabine Simples" -> "simples"', () => {
+    expect(extractCabType('1.4 Cabine Simples Flex 2p')).toBe('simples');
+  });
+
+  it('detecta "Cab Dupla" sem ponto -> "dupla"', () => {
+    expect(extractCabType('2.8 Cd Cab Dupla 4x2 Diesel')).toBe('dupla');
+  });
+
+  it('retorna undefined sem menção de cabine', () => {
+    expect(extractCabType('1.8 Adventure Locker Flex 5p')).toBeUndefined();
+  });
+
+  it('retorna undefined para entrada vazia', () => {
+    expect(extractCabType('')).toBeUndefined();
+    expect(extractCabType(undefined as any)).toBeUndefined();
   });
 });
