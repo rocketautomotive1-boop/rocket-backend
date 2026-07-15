@@ -255,6 +255,7 @@ import { PricingModule } from '../pricing/pricing.module';
     ProductTitleService,
     ProductCategoryService,
     ProductCompatibilityService,
+    ProductCompatibilityPositionService,
     ProductConditionService,
     WarehouseService,
     BoxService,

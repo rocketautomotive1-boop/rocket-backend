@@ -6,7 +6,7 @@ import { MarketplaceConfigCacheService } from '../../marketplace/services/market
 
 describe('ProductCompatibilityPositionService', () => {
   let service: ProductCompatibilityPositionService;
-  let compatModel: { findById: jest.Mock; findByIdAndUpdate: jest.Mock };
+  let compatModel: { findById: jest.Mock; findByIdAndUpdate: jest.Mock; find: jest.Mock };
   let productModel: { findById: jest.Mock };
   let categoryModel: { findById: jest.Mock };
   let mlAdapter: { searchCatalogProductsByPartNumber: jest.Mock; getCatalogProduct: jest.Mock };
@@ -16,7 +16,7 @@ describe('ProductCompatibilityPositionService', () => {
   const categoryId = '507f1f77bcf86cd799439022';
 
   beforeEach(async () => {
-    compatModel = { findById: jest.fn(), findByIdAndUpdate: jest.fn() };
+    compatModel = { findById: jest.fn(), findByIdAndUpdate: jest.fn(), find: jest.fn() };
     productModel = { findById: jest.fn() };
     categoryModel = { findById: jest.fn() };
     mlAdapter = { searchCatalogProductsByPartNumber: jest.fn(), getCatalogProduct: jest.fn() };
@@ -126,5 +126,73 @@ describe('ProductCompatibilityPositionService', () => {
     await service.resolveForCompatibility('c1');
 
     expect(compatModel.findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  describe('computeCatalogEligibility', () => {
+    function mockFind(rows: any[]) {
+      compatModel.find.mockReturnValue({
+        select: () => ({ lean: () => ({ exec: () => Promise.resolve(rows) }) }),
+      });
+    }
+
+    it('não elegível quando não há linhas sincronizadas', async () => {
+      mockFind([]);
+
+      const result = await service.computeCatalogEligibility('p1');
+
+      expect(result).toEqual({ eligible: false, catalogProductId: null });
+    });
+
+    it('elegível quando 1 linha resolvida sem needsReview', async () => {
+      mockFind([{ mlCatalogProductId: 'MLB37361266', positionNeedsReview: false }]);
+
+      const result = await service.computeCatalogEligibility('p1');
+
+      expect(result).toEqual({ eligible: true, catalogProductId: 'MLB37361266' });
+    });
+
+    it('elegível quando múltiplas linhas convergem para o mesmo catalogProductId', async () => {
+      mockFind([
+        { mlCatalogProductId: 'MLB37361266', positionNeedsReview: false },
+        { mlCatalogProductId: 'MLB37361266', positionNeedsReview: false },
+      ]);
+
+      const result = await service.computeCatalogEligibility('p1');
+
+      expect(result).toEqual({ eligible: true, catalogProductId: 'MLB37361266' });
+    });
+
+    it('não elegível quando linhas divergem em catalogProductId', async () => {
+      mockFind([
+        { mlCatalogProductId: 'MLB37361266', positionNeedsReview: false },
+        { mlCatalogProductId: 'MLB99999999', positionNeedsReview: false },
+      ]);
+
+      const result = await service.computeCatalogEligibility('p1');
+
+      expect(result).toEqual({ eligible: false, catalogProductId: null });
+    });
+
+    it('não elegível quando alguma linha tem positionNeedsReview pendente', async () => {
+      mockFind([
+        { mlCatalogProductId: 'MLB37361266', positionNeedsReview: false },
+        { mlCatalogProductId: 'MLB37361266', positionNeedsReview: true },
+      ]);
+
+      const result = await service.computeCatalogEligibility('p1');
+
+      expect(result).toEqual({ eligible: false, catalogProductId: null });
+    });
+
+    it('não elegível quando alguma linha não tem mlCatalogProductId resolvido', async () => {
+      mockFind([
+        { mlCatalogProductId: 'MLB37361266', positionNeedsReview: false },
+        { mlCatalogProductId: undefined, positionNeedsReview: false },
+      ]);
+
+      const result = await service.computeCatalogEligibility('p1');
+
+      expect(result).toEqual({ eligible: false, catalogProductId: null });
+    });
   });
 });

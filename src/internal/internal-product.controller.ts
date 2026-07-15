@@ -11,6 +11,14 @@ import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.por
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { CategorySnapshotService } from '../product/services/category-snapshot.service';
 import { ProductService } from '../product/product.service';
+import { ProductCompatibilityPositionService } from '../product/services/product-compatibility-position.service';
+
+// Piloto Fase 2 (catalog listing): só category_id do ML já validados ao vivo como
+// portadores de POSITION/SIDE_POSITION no catálogo de peças (GET /categories/{id}/attributes).
+// Ver docs/superpowers/specs/2026-07-15-ml-catalog-listing-publish-design.md.
+const CATALOG_LISTING_PILOT_ML_CATEGORY_IDS = new Set<string>([
+    'MLB22709', // Amortecedores (Peças de Carros e Caminhonetes > Suspensão e Direção) — domain MLB-VEHICLE_SHOCK_ABSORBERS
+]);
 
 @UseGuards(InternalKeyGuard)
 @SkipThrottle()
@@ -25,6 +33,7 @@ export class InternalProductController {
         @Inject(PRICING_PORT) private readonly pricing: PricingPort,
         private readonly categorySnapshot: CategorySnapshotService,
         @Inject(forwardRef(() => ProductService)) private readonly productService: ProductService,
+        private readonly compatibilityPosition: ProductCompatibilityPositionService,
     ) {}
 
     @Get(':id')
@@ -114,7 +123,7 @@ export class InternalProductController {
 
     @Get(':id/listings')
     async getListings(@Param('id') id: string) {
-        const listings = await this.listingModel
+        let listings = await this.listingModel
             .find({ productId: new Types.ObjectId(id), status: { $ne: 'removed' } })
             .lean()
             .exec();
@@ -127,6 +136,14 @@ export class InternalProductController {
                 .map((m: any) => [String(m._id), m.tag as string]),
         );
 
+        const decided = await this.maybeDecideCatalogListing(id, listings, tagMap);
+        if (decided.length) {
+            const decidedById = new Map(decided.map((d) => [String(d._id), d.catalogListing]));
+            listings = listings.map((l) =>
+                decidedById.has(String(l._id)) ? { ...l, catalogListing: decidedById.get(String(l._id)) } : l,
+            );
+        }
+
         return listings.map((l) => ({
             ...l,
             marketplaceTag: tagMap.get(String(l.marketplaceId)) ?? '',
@@ -134,6 +151,57 @@ export class InternalProductController {
             // Ausente até o backfill carimbar — o worker cai na conta ativa nesse caso.
             accountId: (l as any).accountId ? String((l as any).accountId) : null,
         }));
+    }
+
+    /**
+     * Fase 2 (catalog listing): para listings de ML ainda sem externalId (CREATE pendente)
+     * e sem catalogListing gravado, decide (lazy, uma vez) se o produto é elegível a
+     * publicar via catalog listing e persiste a decisão no listing. Restrito ao piloto
+     * (CATALOG_LISTING_PILOT_ML_CATEGORY_IDS). Nunca lança — falha vira log, listing segue
+     * como item comum (comportamento atual). Ver
+     * docs/superpowers/specs/2026-07-15-ml-catalog-listing-publish-design.md.
+     */
+    private async maybeDecideCatalogListing(
+        productId: string,
+        listings: any[],
+        tagMap: Map<string, string>,
+    ): Promise<Array<{ _id: any; catalogListing: any }>> {
+        const candidates = listings.filter(
+            (l) => !l.externalId && !l.catalogListing && tagMap.get(String(l.marketplaceId)) === 'mercadolivre',
+        );
+        if (!candidates.length) return [];
+
+        try {
+            const product = await this.productModel
+                .findById(productId)
+                .populate('category', '_id mlCategoryId marketplaceMappings')
+                .lean()
+                .exec();
+            const category: any = (product as any)?.category;
+            await this.fillMlCategoryId(category);
+            const mlCategoryId = category?.mlCategoryId ? String(category.mlCategoryId) : null;
+            if (!mlCategoryId || !CATALOG_LISTING_PILOT_ML_CATEGORY_IDS.has(mlCategoryId)) return [];
+
+            const eligibility = await this.compatibilityPosition.computeCatalogEligibility(productId);
+            if (!eligibility.eligible || !eligibility.catalogProductId) return [];
+
+            const catalogListing = {
+                enabled: true,
+                catalogProductId: eligibility.catalogProductId,
+                decidedAt: new Date(),
+            };
+
+            await Promise.all(
+                candidates.map((l) =>
+                    this.listingModel.updateOne({ _id: l._id, catalogListing: { $exists: false } }, { $set: { catalogListing } }),
+                ),
+            );
+
+            return candidates.map((l) => ({ _id: l._id, catalogListing }));
+        } catch (err: any) {
+            // Nunca derruba o endpoint de leitura — segue sem catalogListing (item comum).
+            return [];
+        }
     }
 
     @Get(':id/description/:marketplaceTag')

@@ -344,6 +344,29 @@ export class MercadoLivreCompatibilityAdapter {
         }
       }
 
+      /**
+       * Catalog matching de PEÇA por GTIN/EAN — usado no pré-cadastro de produto
+       * (busca por código de barras). Distinto de searchCatalogProductsByPartNumber
+       * (marca+part_number, usado na Fase 1 de posição): aqui a busca é por
+       * product_identifier, sem precisar já ter marca/part number/categoria.
+       */
+      async searchCatalogProductsByGtin(ean: string): Promise<any[]> {
+        try {
+          const res = await this.http.get<any>(
+            '/products/search',
+            CTX('searchCatalogProductsByGtin'),
+            { site_id: 'MLB', status: 'active', product_identifier: ean },
+          );
+          return Array.isArray(res?.results) ? res.results : [];
+        } catch (error: any) {
+          this.logger.error(
+            `Erro ao buscar catalog_product_id por EAN ${ean}:`,
+            error.response?.data || error.message,
+          );
+          return [];
+        }
+      }
+
       /** GET /products/{catalogProductId} — atributos completos do SKU de catálogo. */
       async getCatalogProduct(catalogProductId: string): Promise<any | null> {
         try {

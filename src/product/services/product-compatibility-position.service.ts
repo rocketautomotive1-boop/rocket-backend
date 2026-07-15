@@ -73,6 +73,35 @@ export class ProductCompatibilityPositionService {
     });
   }
 
+  /**
+   * Elegibilidade para publicar via catalog listing (Fase 2): elegível somente se o
+   * produto tiver ao menos 1 linha product_compatibilities sincronizada, TODAS convergindo
+   * para o mesmo mlCatalogProductId, e NENHUMA com positionNeedsReview pendente. Puro sobre
+   * as linhas — não sabe de domínio ML piloto nem de listing (responsabilidade do caller).
+   */
+  async computeCatalogEligibility(
+    productId: string,
+  ): Promise<{ eligible: boolean; catalogProductId: string | null }> {
+    const rows = await this.compatModel
+      .find({ productId, syncedWithMarketplace: true })
+      .select('mlCatalogProductId positionNeedsReview')
+      .lean()
+      .exec();
+
+    if (!rows.length) return { eligible: false, catalogProductId: null };
+    if (rows.some((r: any) => r.positionNeedsReview)) {
+      return { eligible: false, catalogProductId: null };
+    }
+
+    const catalogProductIds = new Set(rows.map((r: any) => r.mlCatalogProductId));
+    const allResolvedToSameId = catalogProductIds.size === 1 && !catalogProductIds.has(undefined) && !catalogProductIds.has(null);
+    if (!allResolvedToSameId) {
+      return { eligible: false, catalogProductId: null };
+    }
+
+    return { eligible: true, catalogProductId: [...catalogProductIds][0] as string };
+  }
+
   private async resolveMlCategoryId(categoryRef: any): Promise<string | null> {
     if (!categoryRef) return null;
     const id = String(categoryRef);

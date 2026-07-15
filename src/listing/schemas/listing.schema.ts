@@ -63,6 +63,18 @@ export class ListingModel {
     @Prop({ type: Date, default: null })
     publishingAt?: Date | null;
 
+    // Decisão de publicar via catalog listing do ML (catalog_product_id de peça) em vez de
+    // item comum. Gravado uma única vez, lazy, quando o listing ainda não tem externalId —
+    // ver InternalProductController.getListings. Imutável depois de gravado: nunca
+    // recalculado, mesmo que o produto perca elegibilidade depois (congelamento intencional,
+    // ver docs/superpowers/specs/2026-07-15-ml-catalog-listing-publish-design.md).
+    @Prop({ type: Object })
+    catalogListing?: {
+        enabled: boolean;
+        catalogProductId: string;
+        decidedAt: Date;
+    };
+
     createdAt: Date;
     updatedAt: Date;
 }
