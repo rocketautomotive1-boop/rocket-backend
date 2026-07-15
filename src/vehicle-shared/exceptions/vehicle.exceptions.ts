@@ -12,6 +12,12 @@ export class VehicleCompatibilityNotFoundException extends NotFoundException {
   }
 }
 
+export class VehicleCompatibilityGroupNotFoundException extends NotFoundException {
+  constructor(id: string) {
+    super(`Vehicle compatibility group not found: ${id}`);
+  }
+}
+
 export class VehicleDiscoveryDuplicateException extends ConflictException {
   constructor(lockKey: string) {
     super(`Duplicate pending/processing discovery for key: ${lockKey}`);
