@@ -57,6 +57,7 @@ import { ProductAllocationService } from './services/product-allocation.service'
 
 import { ProductCompatibilityController } from './controllers/product-compatibility.controller';
 import { ProductCompatibilityService } from './services/product-compatibility.service';
+import { ProductCompatibilityPositionService } from './services/product-compatibility-position.service';
 import { ProductCompatibilityManagementController } from './controllers/product-compatibility-management.controller';
 import { ProductVehicleSearchService } from './services/product-vehicle-search.service';
 import { SearchResultCacheService } from './services/search-result-cache.service';
@@ -210,6 +211,7 @@ import { PricingModule } from '../pricing/pricing.module';
     ProductTitleService,
     ProductFilterService,
     ProductCompatibilityService,
+    ProductCompatibilityPositionService,
     ProductVehicleSearchService,
     SearchResultCacheService,
     CategoryLookupService,
