@@ -4,9 +4,9 @@ import { BadRequestException } from '@nestjs/common';
 import { ProductCatalogImportService } from './product-catalog-import.service';
 import { MercadoLivreCompatibilityAdapter } from '../../marketplace/adapters/mercado-livre/mercado-livre-compatibility.adapter';
 import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
-import { VehicleCatalogUpsertService } from '../../vehicle-compatibility/services/vehicle-catalog-upsert.service';
 import { ProductModel } from '../../product/schemas/product.schema';
 import { CategoryModel } from '../../product/schemas/category.schema';
+import { BrandModel } from '../../product/schemas/brand.schema';
 import { ProductCompatibilityModel } from '../../product/schemas/product-compatibility.schema';
 import { VehicleCompatibilityModel } from '../../vehicle-compatibility/schemas/vehicle-compatibility.schema';
 
@@ -17,10 +17,10 @@ describe('ProductCatalogImportService', () => {
     getCatalogProduct: jest.Mock;
     searchProductCompatibilities: jest.Mock;
   };
-  let vehicleCatalogUpsert: { upsertFromCatalogProducts: jest.Mock };
   let configCache: { resolveId: jest.Mock };
   let productModel: any;
   let categoryModel: { findOne: jest.Mock };
+  let brandModel: { findById: jest.Mock; findOne: jest.Mock; create: jest.Mock };
   let compatibilityModel: { find: jest.Mock; insertMany: jest.Mock };
   let vehicleModel: { find: jest.Mock };
   let connection: { startSession: jest.Mock };
@@ -46,13 +46,13 @@ describe('ProductCatalogImportService', () => {
       getCatalogProduct: jest.fn(),
       searchProductCompatibilities: jest.fn(),
     };
-    vehicleCatalogUpsert = { upsertFromCatalogProducts: jest.fn() };
     configCache = { resolveId: jest.fn().mockResolvedValue('507f1f77bcf86cd799439011') };
     productModel = {
       create: jest.fn(),
       findById: jest.fn(),
     };
     categoryModel = { findOne: jest.fn() };
+    brandModel = { findById: jest.fn(), findOne: jest.fn(), create: jest.fn() };
     compatibilityModel = { find: jest.fn(), insertMany: jest.fn().mockResolvedValue([]) };
     vehicleModel = { find: jest.fn() };
 
@@ -68,10 +68,10 @@ describe('ProductCatalogImportService', () => {
       providers: [
         ProductCatalogImportService,
         { provide: MercadoLivreCompatibilityAdapter, useValue: mlCompatAdapter },
-        { provide: VehicleCatalogUpsertService, useValue: vehicleCatalogUpsert },
         { provide: MarketplaceConfigCacheService, useValue: configCache },
         { provide: getModelToken(ProductModel.name), useValue: productModel },
         { provide: getModelToken(CategoryModel.name), useValue: categoryModel },
+        { provide: getModelToken(BrandModel.name), useValue: brandModel },
         { provide: getModelToken(ProductCompatibilityModel.name), useValue: compatibilityModel },
         { provide: getModelToken(VehicleCompatibilityModel.name), useValue: vehicleModel },
         { provide: getConnectionToken(), useValue: connection },
@@ -124,7 +124,7 @@ describe('ProductCatalogImportService', () => {
       await expect(service.resolve('MLB999')).rejects.toThrow(BadRequestException);
     });
 
-    it('monta o rascunho completo com atributos extras, posição e veículos resolvidos', async () => {
+    it('monta o rascunho completo com atributos extras e posição (veículos desativados)', async () => {
       mlCompatAdapter.getCatalogProduct.mockResolvedValue({
         id: 'MLB1',
         name: 'Amortecedor Cofap GBL1252',
@@ -139,14 +139,12 @@ describe('ProductCatalogImportService', () => {
         ],
       });
       categoryModel.findOne.mockReturnValue(mockLean({ _id: 'cat-rocket-1' }));
-      mlCompatAdapter.searchProductCompatibilities.mockResolvedValue({ results: [{ id: 'veh1', attributes: [] }] });
-      vehicleCatalogUpsert.upsertFromCatalogProducts.mockResolvedValue({
-        upserted: [{ _id: 'v1' }],
-        skipped: 1,
-      });
 
       const draft = await service.resolve('MLB1');
 
+      // Resolução de veículos está desativada — nenhum endpoint ML confirmado para
+      // catalog_product_id de peça → lista de veículos compatíveis. Ver comentário em
+      // resolveVehicles() no service.
       expect(draft).toEqual({
         catalogProductId: 'MLB1',
         name: 'Amortecedor Cofap GBL1252',
@@ -161,8 +159,8 @@ describe('ProductCatalogImportService', () => {
           sidePosition: '364128',
           sidePositionName: 'Esquerdo',
         },
-        vehicleIds: ['v1'],
-        vehiclesSkipped: 1,
+        vehicleIds: [],
+        vehiclesSkipped: 0,
       });
     });
 
@@ -174,20 +172,20 @@ describe('ProductCatalogImportService', () => {
         attributes: [],
       });
       categoryModel.findOne.mockReturnValue(mockLean(null));
-      mlCompatAdapter.searchProductCompatibilities.mockResolvedValue({ results: [] });
-      vehicleCatalogUpsert.upsertFromCatalogProducts.mockResolvedValue({ upserted: [], skipped: 0 });
 
       const draft = await service.resolve('MLB1');
 
       expect(draft.suggestedCategoryId).toBeUndefined();
       expect(draft.position).toBeUndefined();
+      expect(draft.vehicleIds).toEqual([]);
     });
   });
 
   describe('confirm', () => {
-    it('cria produto novo + compatibilidades numa transação quando não há productId', async () => {
+    it('cria produto novo + compatibilidades numa transação quando brandId já é conhecido', async () => {
       const newProductId = '507f1f77bcf86cd799439055';
       productModel.create.mockResolvedValue([{ _id: newProductId }]);
+      brandModel.findById.mockReturnValue(mockSessionLean({ _id: 'brand1', name: 'Cofap' }));
       compatibilityModel.find.mockReturnValue(mockSelectSessionLean([]));
       vehicleModel.find.mockReturnValue(mockSessionLean([{ _id: 'v1', make: 'Fiat', model: 'Mobi', version: '1.0', mlVehicleId: 'veh1' }]));
 
@@ -213,7 +211,62 @@ describe('ProductCatalogImportService', () => {
       expect(session.abortTransaction).not.toHaveBeenCalled();
     });
 
-    it('lança BadRequestException ao criar produto novo sem brandId', async () => {
+    it('cria a marca automaticamente por nome quando brandId não é informado e a marca não existe', async () => {
+      const newProductId = '507f1f77bcf86cd799439055';
+      productModel.create.mockResolvedValue([{ _id: newProductId }]);
+      brandModel.findOne.mockReturnValue(mockSessionLean(null));
+      brandModel.create.mockResolvedValue([{ _id: 'newBrandId', name: 'Cofap' }]);
+      compatibilityModel.find.mockReturnValue(mockSelectSessionLean([]));
+      vehicleModel.find.mockReturnValue(mockSessionLean([]));
+
+      const result = await service.confirm({
+        catalogProductId: 'MLB1',
+        name: 'Amortecedor X',
+        brandName: 'Cofap',
+        partNumber: 'GBL1252',
+        attributes: [],
+        images: [],
+        vehicleIds: [],
+        vehiclesSkipped: 0,
+      } as any);
+
+      expect(result).toEqual({ productId: newProductId });
+      expect(brandModel.create).toHaveBeenCalledWith(
+        [{ name: 'Cofap', active: true, isGenuine: false }],
+        { session },
+      );
+      expect(productModel.create).toHaveBeenCalledWith(
+        [expect.objectContaining({ brand: { _id: 'newBrandId', name: 'Cofap' } })],
+        { session },
+      );
+    });
+
+    it('reaproveita marca existente por nome (case-insensitive) sem criar duplicata', async () => {
+      const newProductId = '507f1f77bcf86cd799439055';
+      productModel.create.mockResolvedValue([{ _id: newProductId }]);
+      brandModel.findOne.mockReturnValue(mockSessionLean({ _id: 'existingBrandId', name: 'Cofap' }));
+      compatibilityModel.find.mockReturnValue(mockSelectSessionLean([]));
+      vehicleModel.find.mockReturnValue(mockSessionLean([]));
+
+      await service.confirm({
+        catalogProductId: 'MLB1',
+        name: 'Amortecedor X',
+        brandName: 'cofap',
+        partNumber: 'GBL1252',
+        attributes: [],
+        images: [],
+        vehicleIds: [],
+        vehiclesSkipped: 0,
+      } as any);
+
+      expect(brandModel.create).not.toHaveBeenCalled();
+      expect(productModel.create).toHaveBeenCalledWith(
+        [expect.objectContaining({ brand: { _id: 'existingBrandId', name: 'Cofap' } })],
+        { session },
+      );
+    });
+
+    it('lança BadRequestException quando não há brandId nem brandName', async () => {
       await expect(
         service.confirm({
           catalogProductId: 'MLB1',
@@ -227,6 +280,23 @@ describe('ProductCatalogImportService', () => {
       ).rejects.toThrow(BadRequestException);
 
       expect(session.abortTransaction).toHaveBeenCalled();
+    });
+
+    it('lança BadRequestException quando brandId informado não existe', async () => {
+      brandModel.findById.mockReturnValue(mockSessionLean(null));
+
+      await expect(
+        service.confirm({
+          catalogProductId: 'MLB1',
+          name: 'X',
+          brandId: 'ghost',
+          partNumber: 'P1',
+          attributes: [],
+          images: [],
+          vehicleIds: [],
+          vehiclesSkipped: 0,
+        } as any),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('enriquece produto existente sem sobrescrever campos já preenchidos', async () => {
@@ -262,6 +332,7 @@ describe('ProductCatalogImportService', () => {
 
     it('não duplica compatibilidade já vinculada ao produto', async () => {
       productModel.create.mockResolvedValue([{ _id: '507f1f77bcf86cd799439066' }]);
+      brandModel.findById.mockReturnValue(mockSessionLean({ _id: 'brand1', name: 'Cofap' }));
       compatibilityModel.find.mockReturnValue(mockSelectSessionLean([{ vehicleId: 'v1' }]));
       vehicleModel.find.mockReturnValue(mockSessionLean([]));
 
@@ -281,6 +352,7 @@ describe('ProductCatalogImportService', () => {
     });
 
     it('faz rollback (abortTransaction) quando algo falha no meio do processo', async () => {
+      brandModel.findById.mockReturnValue(mockSessionLean({ _id: 'brand1', name: 'Cofap' }));
       productModel.create.mockRejectedValue(new Error('mongo down'));
 
       await expect(

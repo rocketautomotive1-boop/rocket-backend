@@ -3,9 +3,9 @@ import { InjectModel, InjectConnection } from '@nestjs/mongoose';
 import { Model, Connection, Types } from 'mongoose';
 import { MercadoLivreCompatibilityAdapter } from '../../marketplace/adapters/mercado-livre/mercado-livre-compatibility.adapter';
 import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
-import { VehicleCatalogUpsertService } from '../../vehicle-compatibility/services/vehicle-catalog-upsert.service';
 import { ProductModel } from '../../product/schemas/product.schema';
 import { CategoryModel } from '../../product/schemas/category.schema';
+import { BrandModel } from '../../product/schemas/brand.schema';
 import { ProductCompatibilityModel } from '../../product/schemas/product-compatibility.schema';
 import { VehicleCompatibilityModel } from '../../vehicle-compatibility/schemas/vehicle-compatibility.schema';
 import { buildProductCompatibilitySearchText } from '../../product/utils/product-compatibility-search.util';
@@ -15,6 +15,11 @@ import {
   CatalogImportSearchResultDto,
   ConfirmCatalogImportDto,
 } from '../dto/product-catalog-import.dto';
+
+/** Escapa caracteres especiais de regex — brandName vem de fora (catálogo ML), não confiar. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 interface MlCatalogAttribute {
   id: string;
@@ -48,10 +53,10 @@ export class ProductCatalogImportService {
 
   constructor(
     private readonly mlCompatAdapter: MercadoLivreCompatibilityAdapter,
-    private readonly vehicleCatalogUpsert: VehicleCatalogUpsertService,
     private readonly configCache: MarketplaceConfigCacheService,
     @InjectModel(ProductModel.name) private readonly productModel: Model<ProductModel>,
     @InjectModel(CategoryModel.name) private readonly categoryModel: Model<CategoryModel>,
+    @InjectModel(BrandModel.name) private readonly brandModel: Model<BrandModel>,
     @InjectModel(ProductCompatibilityModel.name) private readonly compatibilityModel: Model<ProductCompatibilityModel>,
     @InjectModel(VehicleCompatibilityModel.name) private readonly vehicleModel: Model<VehicleCompatibilityModel>,
     @InjectConnection() private readonly connection: Connection,
@@ -140,19 +145,18 @@ export class ProductCatalogImportService {
   }
 
   private async createNewProduct(dto: ConfirmCatalogImportDto, session: any): Promise<string> {
-    if (!dto.brandId) {
-      throw new BadRequestException('brandId é obrigatório para criar produto novo a partir do catálogo ML.');
-    }
     if (!dto.partNumber) {
       throw new BadRequestException('partNumber é obrigatório para criar produto novo a partir do catálogo ML.');
     }
+
+    const brand = await this.resolveOrCreateBrand(dto, session);
 
     const created = await this.productModel.create(
       [
         {
           name: dto.name,
           partNumber: dto.partNumber,
-          brand: { _id: dto.brandId, name: dto.brandName },
+          brand: { _id: String(brand._id), name: brand.name },
           category: dto.suggestedCategoryId ? new Types.ObjectId(dto.suggestedCategoryId) : undefined,
           images: dto.images.map((url, i) => ({ url, order: i, main: i === 0, status: 'active' })),
           attributes: dto.attributes.map((a) => ({ name: a.name, value: a.value, code: a.id })),
@@ -163,6 +167,36 @@ export class ProductCatalogImportService {
     );
 
     return String(created[0]._id);
+  }
+
+  /**
+   * Resolve a marca do produto: usa brandId se o vendedor escolheu uma marca existente no
+   * select; senão, busca por brandName (case-insensitive) e cria automaticamente se não
+   * existir — sem fricção, mesmo princípio já usado nos veículos (cache reutilizável em vez
+   * de bloquear o fluxo por falta de cadastro prévio). Ver
+   * docs/superpowers/specs/2026-07-15-product-catalog-import-design.md.
+   */
+  private async resolveOrCreateBrand(dto: ConfirmCatalogImportDto, session: any): Promise<{ _id: any; name: string }> {
+    if (dto.brandId) {
+      const existing = await this.brandModel.findById(dto.brandId).session(session).lean().exec();
+      if (!existing) throw new BadRequestException(`Marca ${dto.brandId} não encontrada.`);
+      return existing;
+    }
+
+    const brandName = dto.brandName?.trim();
+    if (!brandName) {
+      throw new BadRequestException('Informe brandId ou brandName para resolver a marca do produto.');
+    }
+
+    const existingByName = await this.brandModel
+      .findOne({ name: new RegExp(`^${escapeRegExp(brandName)}$`, 'i') })
+      .session(session)
+      .lean()
+      .exec();
+    if (existingByName) return existingByName;
+
+    const created = await this.brandModel.create([{ name: brandName, active: true, isGenuine: false }], { session });
+    return created[0];
   }
 
   private async enrichExistingProduct(dto: ConfirmCatalogImportDto, session: any): Promise<string> {
@@ -236,16 +270,21 @@ export class ProductCatalogImportService {
     await this.compatibilityModel.insertMany(rows, { session });
   }
 
-  private async resolveVehicles(catalogProductId: string) {
-    const response = await this.mlCompatAdapter.searchProductCompatibilities({
-      site_id: 'MLB',
-      domain_id: 'MLB-CARS_AND_VANS',
-      catalog_product_id: catalogProductId,
-      limit: 50,
-      offset: 0,
-    });
-    const products = response?.results ?? [];
-    return this.vehicleCatalogUpsert.upsertFromCatalogProducts(products);
+  /**
+   * DESATIVADO (2026-07-15): não existe endpoint confirmado do ML para resolver a lista de
+   * veículos compatíveis a partir de um catalog_product_id de PEÇA. Testado ao vivo:
+   * `catalog_product_id`/`product_id` no payload de POST /catalog_compatibilities/
+   * products_search/chunks é silenciosamente ignorado — a chamada sempre devolve a árvore
+   * inteira de MLB-CARS_AND_VANS (~36 mil resultados), independente do valor passado (mesmo
+   * um id inexistente produz o mesmo total). Também testados sem sucesso:
+   * known_attributes com CATALOG_PRODUCT_ID, GET /catalog_compatibilities/{id}, GET
+   * /products/{id}/items (sem vencedores), busca pública /sites/MLB/search (403, API
+   * bloqueada p/ não-donos). Fica desativado até um endpoint real ser confirmado — o vendedor
+   * continua vinculando compatibilidades manualmente pela tela normal depois de criado o
+   * produto. Ver docs/superpowers/specs/2026-07-15-product-catalog-import-design.md.
+   */
+  private async resolveVehicles(_catalogProductId: string): Promise<{ upserted: any[]; skipped: number }> {
+    return { upserted: [], skipped: 0 };
   }
 
   private async resolveSuggestedCategory(mlCategoryId?: string): Promise<string | undefined> {
