@@ -32,6 +32,34 @@ export class ProductCompatibilityModel {
     @Prop({ default: false })
     needsReview: boolean;
 
+    /** catalog_product_id de PEÇA do ML (não o de veículo) resolvido para esta linha. */
+    @Prop()
+    mlCatalogProductId?: string;
+
+    /** value_id do atributo POSITION do ML (ex: "13701105"), quando o domínio o define. */
+    @Prop()
+    position?: string;
+
+    /** value_name do atributo POSITION (ex: "Traseira"), para exibição sem round-trip. */
+    @Prop()
+    positionName?: string;
+
+    /** value_id do atributo SIDE_POSITION do ML (ex: "364128"). */
+    @Prop()
+    sidePosition?: string;
+
+    /** value_name do atributo SIDE_POSITION (ex: "Esquerdo"). */
+    @Prop()
+    sidePositionName?: string;
+
+    /**
+     * true quando a resolução automática de mlCatalogProductId não encontrou match
+     * exato único (0 ou 2+ candidatos com mesmo PART_NUMBER) — precisa de revisão
+     * manual antes de confiar na posição. Mesma semântica de `needsReview`.
+     */
+    @Prop({ default: false })
+    positionNeedsReview: boolean;
+
     /**
      * Texto de busca combinado (nome/oemCodes/EQUIVALENT_OEM do produto + marca/modelo/versão/
      * ano/aliases do veículo vinculado). Alimenta a busca única "palheta toro 2025" sem parsing
