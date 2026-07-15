@@ -316,4 +316,43 @@ export class MercadoLivreCompatibilityAdapter {
           );
         }
       }
+
+      /**
+       * Catalog matching de PEÇA (distinto do catalog de veículos MLB-CARS_AND_VANS
+       * usado no resto deste adapter). Busca candidatos de catalog_product_id por
+       * marca+part_number dentro de uma categoria — usado para resolver POSITION/
+       * SIDE_POSITION, que só existem herdados de um catalog_product_id de peça.
+       */
+      async searchCatalogProductsByPartNumber(
+        brand: string,
+        partNumber: string,
+        categoryId: string,
+      ): Promise<any[]> {
+        try {
+          const res = await this.http.get<any>(
+            '/products/search',
+            CTX('searchCatalogProductsByPartNumber'),
+            { site_id: 'MLB', q: `${brand} ${partNumber}`, category: categoryId },
+          );
+          return Array.isArray(res?.results) ? res.results : [];
+        } catch (error: any) {
+          this.logger.error(
+            `Erro ao buscar catalog_product_id por part_number ${partNumber}:`,
+            error.response?.data || error.message,
+          );
+          return [];
+        }
+      }
+
+      /** GET /products/{catalogProductId} — atributos completos do SKU de catálogo. */
+      async getCatalogProduct(catalogProductId: string): Promise<any | null> {
+        try {
+          return await this.http.get<any>(`/products/${catalogProductId}`, CTX('getCatalogProduct'));
+        } catch (error: any) {
+          this.logger.warn(
+            `Erro ao buscar catalog_product ${catalogProductId}: ${error.response?.data?.message || error.message}`,
+          );
+          return null;
+        }
+      }
 }
