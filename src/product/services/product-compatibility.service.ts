@@ -7,6 +7,7 @@ import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { buildProductCompatibilitySearchText } from '../utils/product-compatibility-search.util';
 import { VehicleCompatibilityService } from '../../vehicle-compatibility/services/vehicle-compatibility.service';
 import { VehicleCompatibilityDocument } from '../../vehicle-compatibility/schemas/vehicle-compatibility.schema';
+import { ProductCompatibilityPositionService } from './product-compatibility-position.service';
 
 @Injectable()
 export class ProductCompatibilityService {
@@ -16,6 +17,7 @@ export class ProductCompatibilityService {
     @InjectModel(ProductCompatibilityModel.name) private compatibilityModel: Model<ProductCompatibilityModel>,
     @InjectModel(ProductModel.name) private productModel: Model<ProductModel>,
     private vehicleCompatibilityService: VehicleCompatibilityService,
+    private positionService: ProductCompatibilityPositionService,
   ) { }
 
   /** Busca em lote os veículos referenciados por vehicleId, indexados por _id (string). */
@@ -354,7 +356,7 @@ export class ProductCompatibilityService {
 
   async markAsSynced(ids: Array<string | number>): Promise<void> {
     try {
-      const stringIds = ids.filter(id => typeof id === 'string' && Types.ObjectId.isValid(id));
+      const stringIds = ids.filter((id): id is string => typeof id === 'string' && Types.ObjectId.isValid(id));
       const numericIds = ids.filter(id => typeof id === 'number');
 
       const query: any = {};
@@ -376,6 +378,15 @@ export class ProductCompatibilityService {
         }
       ).exec();
       this.logger.log(`${ids.length} compatibilidades marcadas como sincronizadas`);
+
+      // Fire-and-forget: resolve posição de peça (POSITION/SIDE_POSITION) agora que a
+      // linha está confirmada como sincronizada com o ML. Nunca bloqueia nem derruba
+      // o markAsSynced — falha vira log, não exception (ver ProductCompatibilityPositionService).
+      for (const id of stringIds) {
+        this.positionService
+          .resolveForCompatibility(id)
+          .catch((err) => this.logger.warn(`Falha ao resolver posição da compatibilidade ${id}: ${err?.message}`));
+      }
     } catch (error) {
       this.logger.error('Erro ao marcar compatibilidades como sincronizadas:', error);
       throw new HttpException(
@@ -394,7 +405,7 @@ export class ProductCompatibilityService {
     if (!Types.ObjectId.isValid(productId)) return;
 
     const rows = await this.compatibilityModel
-      .find({ productId })
+      .find({ product: new Types.ObjectId(productId) } as any)
       .select('vehicleId')
       .lean()
       .exec();
