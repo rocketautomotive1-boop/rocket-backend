@@ -91,6 +91,8 @@ import { MigrationService } from './services/migration.service';
 import { MigrationController } from './controllers/migration.controller';
 import { CrossReferenceController } from './controllers/cross-reference.controller';
 import { CrossReferenceService } from './services/cross-reference.service';
+import { ImportCatalogController } from './controllers/import-catalog.controller';
+import { ImportCatalogService } from './services/import-catalog.service';
 import { SitemapController } from './controllers/sitemap.controller';
 import { CatalogMigrationService } from './services/catalog-migration.service';
 
@@ -194,6 +196,7 @@ import { PricingModule } from '../pricing/pricing.module';
     ProductPublicationLogController,
     MigrationController,
     CrossReferenceController,
+    ImportCatalogController,
     DisplayNameSynonymCandidateController
   ],
   providers: [
@@ -225,6 +228,7 @@ import { PricingModule } from '../pricing/pricing.module';
     OrderEventsListener, // Event listener for order sync
     MigrationService,
     CrossReferenceService,
+    ImportCatalogService,
     CatalogMigrationService,
 
     ProductMatcherService,

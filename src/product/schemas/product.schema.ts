@@ -306,6 +306,24 @@ export class ProductModel {
     @Prop({ type: [String], index: true })
     applicationSummary: string[]; // SEO Keywords: "Civic 2008", "Corolla 2010"
 
+    // Proveniência de import via tools/catalog-extractor (dump de catálogos desktop
+    // legados). `codigoOrigemCatalogo` é o código do fabricante no catálogo de origem —
+    // não confundir com `partNumber` (que é setado igual a ele na importação).
+    @Prop({ type: String })
+    origemCatalogo?: string;
+
+    @Prop({ type: String, index: true })
+    codigoOrigemCatalogo?: string;
+
+    @Prop({ type: String })
+    catalogTipoProduto?: string;
+
+    @Prop({ type: String })
+    catalogPosicao?: string;
+
+    @Prop({ type: String })
+    catalogMotorizacao?: string;
+
     /**
      * Resumo denormalizado de product_compatibilities — só para listagem/exibição rápida sem
      * buscar a lista completa de vínculos. Fonte de verdade continua em product_compatibilities;
