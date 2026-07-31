@@ -32,6 +32,7 @@ import { imageSlotsSchema, ImageSlot } from './dto/image-slots.dto';
 import { ProductVehicleSearchService } from './services/product-vehicle-search.service';
 import { TitleCategoryHintService } from './services/title-category-hint.service';
 import { ProductRailsService, ProductRailType, ProductRailItem } from './services/product-rails.service';
+import { SkipJwtAuth } from '../auth/decorators/skip-jwt-auth.decorator';
 
 @ApiTags('Products')
 @ApiBearerAuth()
@@ -617,6 +618,7 @@ export class ProductController {
 
 
 
+  @SkipJwtAuth()
   @Get('search')
   @ApiOperation({
     summary: 'Busca rápida de produtos',
@@ -690,6 +692,7 @@ export class ProductController {
     }
   }
 
+  @SkipJwtAuth()
   @Get('search/compatibility')
   @ApiOperation({
     summary: 'Buscar produtos por compatibilidade',
@@ -844,6 +847,7 @@ export class ProductController {
     }
   }
 
+  @SkipJwtAuth()
   @Get('autocomplete')
   @ApiOperation({
     summary: 'Sugestões de type-ahead conforme o usuário digita (nome/displayName/código do produto)',
@@ -868,6 +872,7 @@ export class ProductController {
     return this.productVehicleSearchService.autocomplete(q ?? '', limit ? Number(limit) : 8, vehicleId);
   }
 
+  @SkipJwtAuth()
   @Get('rails/:railType')
   @ApiOperation({
     summary: 'Buscar produtos de um rail de recomendação da home',
@@ -887,6 +892,7 @@ export class ProductController {
     });
   }
 
+  @SkipJwtAuth()
   @Get('by-vehicle')
   @ApiOperation({
     summary: 'Buscar produtos compatíveis com um veículo',
@@ -1609,6 +1615,7 @@ export class ProductController {
     return this.productService.getProductCompletion(id);
   }
 
+  @SkipJwtAuth()
   @Get(':id')
   @ApiOperation({ summary: 'Obter um produto pelo _id ou slug (storefront)' })
   @ApiQuery({

@@ -55,6 +55,7 @@ import { ReviewsModule } from './reviews/reviews.module';
 
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 
 @Module({
   imports: [
@@ -152,6 +153,10 @@ import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
     {
       provide: APP_GUARD,
       useClass: AppThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
     },
   ],
 })

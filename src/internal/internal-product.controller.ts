@@ -3,6 +3,7 @@ import { SkipThrottle } from '@nestjs/throttler';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { InternalKeyGuard } from './internal-key.guard';
+import { SkipJwtAuth } from '../auth/decorators/skip-jwt-auth.decorator';
 import { ProductModel } from '../product/schemas/product.schema';
 import { ListingModel } from '../listing/schemas/listing.schema';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
@@ -20,6 +21,7 @@ const CATALOG_LISTING_PILOT_ML_CATEGORY_IDS = new Set<string>([
     'MLB22709', // Amortecedores (Peças de Carros e Caminhonetes > Suspensão e Direção) — domain MLB-VEHICLE_SHOCK_ABSORBERS
 ]);
 
+@SkipJwtAuth()
 @UseGuards(InternalKeyGuard)
 @SkipThrottle()
 @Controller('internal/products')

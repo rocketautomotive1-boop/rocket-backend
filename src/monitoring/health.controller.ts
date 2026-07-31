@@ -11,7 +11,9 @@ import {
 import { Transport } from '@nestjs/microservices';
 import { ConfigService } from '@nestjs/config';
 import { S3HealthIndicator } from './indicators/s3.health';
+import { SkipJwtAuth } from '../auth/decorators/skip-jwt-auth.decorator';
 
+@SkipJwtAuth()
 @Controller('health')
 export class HealthController {
   constructor(

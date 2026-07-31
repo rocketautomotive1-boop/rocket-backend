@@ -3,6 +3,7 @@ import { SkipThrottle } from '@nestjs/throttler';
 import { MarketplaceAuthService } from '../marketplace/auth/services/marketplace-auth.service';
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
 import { InternalKeyGuard } from '../common/guards/internal-key.guard';
+import { SkipJwtAuth } from '../auth/decorators/skip-jwt-auth.decorator';
 
 /**
  * Token broker interno (microserviços) — protegido por x-internal-key.
@@ -11,6 +12,7 @@ import { InternalKeyGuard } from '../common/guards/internal-key.guard';
  * vocabulário "account" não vaza para o contrato.
  */
 @Controller('internal')
+@SkipJwtAuth()
 @UseGuards(InternalKeyGuard)
 @SkipThrottle()
 export class InternalTokenController {

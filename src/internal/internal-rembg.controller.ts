@@ -1,6 +1,7 @@
 import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { InternalKeyGuard } from './internal-key.guard';
+import { SkipJwtAuth } from '../auth/decorators/skip-jwt-auth.decorator';
 import { RembgCompletionService } from '../gateways/rembg-completion.service';
 
 interface RembgResultDto {
@@ -20,6 +21,7 @@ interface RembgResultDto {
  * fragile "await one WebSocket frame" RPC: the microservice has already persisted the
  * processed PNG to S3 before calling here, so the paid result can never be lost.
  */
+@SkipJwtAuth()
 @UseGuards(InternalKeyGuard)
 @SkipThrottle()
 @Controller('internal/rembg')

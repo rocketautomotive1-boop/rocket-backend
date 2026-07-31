@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Unauthori
 import { AuthGuard } from '@nestjs/passport';
 import { CustomerService } from './customer.service';
 import { OtpService } from './otp.service';
+import { SkipJwtAuth } from '../auth/decorators/skip-jwt-auth.decorator';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { LoginCustomerDto } from './dto/login-customer.dto';
@@ -10,7 +11,8 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { CheckEmailDto } from './dto/check-email.dto';
 import { GoogleTokenDto } from './dto/google-token.dto';
 
-// TODO: Add auth guards later. For now, open for testing or use simple Admin guard if needed.
+// create/findAll/findOne/update/remove exigem JWT (guard global) — só as rotas
+// de login/registro abaixo são públicas de propósito, marcadas com @SkipJwtAuth().
 @Controller('customers')
 export class CustomerController {
     constructor(
@@ -18,6 +20,7 @@ export class CustomerController {
         private readonly otpService: OtpService,
     ) { }
 
+    @SkipJwtAuth()
     @Post('login')
     async login(@Body() loginDto: LoginCustomerDto) {
         const result = await this.customerService.login(loginDto);
@@ -27,22 +30,26 @@ export class CustomerController {
         return result;
     }
 
+    @SkipJwtAuth()
     @Post('check-email')
     async checkEmail(@Body() dto: CheckEmailDto) {
         return this.customerService.checkEmail(dto.email);
     }
 
+    @SkipJwtAuth()
     @Post('auth/google/token')
     async googleToken(@Body() dto: GoogleTokenDto) {
         return this.customerService.loginWithGoogleIdToken(dto.idToken);
     }
 
+    @SkipJwtAuth()
     @Post('otp/send')
     async sendOtp(@Body() dto: SendOtpDto) {
         await this.otpService.send(dto.destination, dto.channel, dto.purpose);
         return { sent: true };
     }
 
+    @SkipJwtAuth()
     @Post('otp/verify')
     async verifyOtp(@Body() dto: VerifyOtpDto) {
         const isValid = await this.otpService.verify(dto.destination, dto.channel, dto.purpose, dto.code);
@@ -52,10 +59,12 @@ export class CustomerController {
         return this.customerService.loginOrRegisterViaOtp(dto.destination, dto.channel, dto.name);
     }
 
+    @SkipJwtAuth()
     @Get('auth/google')
     @UseGuards(AuthGuard('google'))
     async googleAuth(@Req() req) { }
 
+    @SkipJwtAuth()
     @Get('auth/google/callback')
     @UseGuards(AuthGuard('google'))
     async googleAuthRedirect(@Req() req, @Res() res) {

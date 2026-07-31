@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagg
 import { AuthService } from './auth.service';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { SkipJwtAuth } from './decorators/skip-jwt-auth.decorator';
 import { CreateUserDto } from './dto/create-user.dto';
 import { LoginDto } from './dto/login.dto';
 
@@ -11,6 +12,7 @@ import { LoginDto } from './dto/login.dto';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @SkipJwtAuth()
   @Post('register')
   @ApiOperation({ summary: 'Registrar novo usuário' })
   @ApiResponse({ status: 201, description: 'Usuário registrado com sucesso' })
@@ -20,6 +22,7 @@ export class AuthController {
     return result;
   }
 
+  @SkipJwtAuth()
   @UseGuards(LocalAuthGuard)
   @Post('login')
   @ApiOperation({ summary: 'Autenticar usuário' })

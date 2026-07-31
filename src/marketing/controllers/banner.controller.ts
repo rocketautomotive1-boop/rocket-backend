@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { BannerService } from '../services/banner.service';
 import { CreateBannerDto } from '../dto/create-banner.dto';
 import { UpdateBannerDto } from '../dto/update-banner.dto';
+import { SkipJwtAuth } from '../../auth/decorators/skip-jwt-auth.decorator';
 
 @ApiTags('marketing/banners')
 @Controller('banners')
@@ -21,6 +22,7 @@ export class BannerController {
         return this.bannerService.findAll();
     }
 
+    @SkipJwtAuth()
     @Get('active')
     @ApiOperation({ summary: 'List active banners (storefront)' })
     findActive() {

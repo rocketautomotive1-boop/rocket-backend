@@ -12,6 +12,7 @@ import { SellerReplyDto } from './dto/seller-reply.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { SkipJwtAuth } from '../auth/decorators/skip-jwt-auth.decorator';
 
 @ApiTags('Reviews')
 @Controller('reviews')
@@ -41,6 +42,7 @@ export class ReviewsController {
         );
     }
 
+    @SkipJwtAuth()
     @Get('product/:productId')
     @ApiOperation({ summary: 'Listar avaliações aprovadas de um produto' })
     async getProductReviews(

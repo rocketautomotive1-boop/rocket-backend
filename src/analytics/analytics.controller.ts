@@ -1,12 +1,14 @@
 
 import { Controller, Post, Get, Body, Delete, Query, Request, Ip, Req } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
+import { SkipJwtAuth } from '../auth/decorators/skip-jwt-auth.decorator';
 import * as requestIp from 'request-ip';
 
 @Controller('analytics')
 export class AnalyticsController {
     constructor(private readonly analyticsService: AnalyticsService) { }
 
+    @SkipJwtAuth()
     @Post('event')
     async trackEvent(
         @Body() body: any,

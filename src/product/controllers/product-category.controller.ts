@@ -7,6 +7,7 @@ import { CategoryModel } from '../schemas/category.schema';
 import { CreateProductCategoryDto } from '../dto/create-product-category.dto';
 import { UpdateProductCategoryDto } from '../dto/update-product-category.dto';
 import { UpdateCategoryTreeDto } from '../dto/update-category-tree.dto';
+import { SkipJwtAuth } from '../../auth/decorators/skip-jwt-auth.decorator';
 
 
 @ApiTags('categories')
@@ -132,6 +133,7 @@ export class ProductCategoryController {
 
 
 
+  @SkipJwtAuth()
   @Get('autocomplete')
   @ApiOperation({ summary: 'Buscar categorias (Autocomplete ES)' })
   async autocomplete(@Query('q') query: string) {
@@ -152,6 +154,7 @@ export class ProductCategoryController {
     return this.productCategoryService.uploadImage(id, file);
   }
 
+  @SkipJwtAuth()
   @Get('es-tree')
   @ApiOperation({ summary: 'Obter árvore de categorias (MongoDB Atlas Search)' })
   async getEsTree() {
@@ -165,6 +168,7 @@ export class ProductCategoryController {
     return this.productCategoryService.getTree();
   }
 
+  @SkipJwtAuth()
   @Get('slug/:slug')
   @ApiOperation({ summary: 'Obter uma categoria pelo Slug (SEO)' })
   @ApiResponse({ status: 200, description: 'Categoria encontrada com sucesso' })
