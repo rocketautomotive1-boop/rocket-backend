@@ -27,6 +27,16 @@ export class HealthController {
     private configService: ConfigService,
   ) {}
 
+  /** Checagem leve — só confirma que o processo está de pé e respondendo.
+   *  Não depende de Mongo/RabbitMQ/S3/APIs externas, então não reflete
+   *  degradação de integrações (isso é o que o check() completo faz).
+   *  Usado pelo boot do app mobile como "servidor alcançável", que não deve
+   *  falhar por causa de credenciais de marketplace ainda não configuradas. */
+  @Get('ping')
+  ping() {
+    return { status: 'ok' };
+  }
+
   @Get()
   @HealthCheck()
   check() {
