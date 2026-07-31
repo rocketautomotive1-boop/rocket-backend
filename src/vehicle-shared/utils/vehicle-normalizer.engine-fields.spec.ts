@@ -40,8 +40,8 @@ describe('normalizeFuelTags', () => {
     expect(normalizeFuelTags('Gasolina e álcool').sort()).toEqual(['ethanol', 'gasoline']);
   });
 
-  it('mapeia "Híbrido/Flex" -> hybrid + flex', () => {
-    expect(normalizeFuelTags('Híbrido/Flex').sort()).toEqual(['flex', 'hybrid']);
+  it('mapeia "Híbrido/Flex" -> hybrid + gasoline + ethanol (flex nunca é gravado como tag literal)', () => {
+    expect(normalizeFuelTags('Híbrido/Flex').sort()).toEqual(['ethanol', 'gasoline', 'hybrid']);
   });
 
   it('mapeia "Tetra-combustible" -> [] (não reconhecido)', () => {

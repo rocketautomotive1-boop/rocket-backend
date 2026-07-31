@@ -3,8 +3,7 @@
   "mappings": {
     "dynamic": false,
     "fields": {
-      "searchText": { "type": "string" },
-      "productId": { "type": "string" }
+      "searchText": { "type": "string" }
     }
   },
   "synonyms": [

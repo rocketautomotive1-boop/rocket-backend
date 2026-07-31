@@ -15,6 +15,7 @@ import { ProductPublicationLogModel, ProductPublicationLogSchema } from './schem
 import { BrandModel, BrandSchema } from './schemas/brand.schema';
 import { CategoryModel, CategorySchema } from './schemas/category.schema';
 import { CrossReferenceGroupModel, CrossReferenceGroupSchema } from './schemas/cross-reference-group.schema';
+import { CrossReferenceCodeModel, CrossReferenceCodeSchema } from './schemas/cross-reference-code.schema';
 import { QueueRecordModel, QueueRecordSchema } from '../queue/schemas/queue-record.schema';
 import { ProductDraftModel, ProductDraftSchema } from './schemas/product-draft.schema';
 import { ProductDiscoveryModel, ProductDiscoverySchema } from './schemas/product-discovery.schema';
@@ -58,9 +59,12 @@ import { ProductAllocationService } from './services/product-allocation.service'
 import { ProductCompatibilityController } from './controllers/product-compatibility.controller';
 import { ProductCompatibilityService } from './services/product-compatibility.service';
 import { ProductCompatibilityPositionService } from './services/product-compatibility-position.service';
+import { CompatibilityGroupPropagationService } from './services/compatibility-group-propagation.service';
 import { ProductCompatibilityManagementController } from './controllers/product-compatibility-management.controller';
 import { ProductVehicleSearchService } from './services/product-vehicle-search.service';
 import { SearchResultCacheService } from './services/search-result-cache.service';
+import { KnownBrandKeysCacheService } from './services/known-brand-keys-cache.service';
+import { ProductSearchRankingService } from './services/product-search-ranking.service';
 import { CategoryLookupService } from './services/category-lookup.service';
 import { ProductRailsService } from './services/product-rails.service';
 import { RelevanceScoreJob } from './jobs/relevance-score.job';
@@ -90,6 +94,8 @@ import { OrderEventsListener } from './listeners/order-events.listener';
 import { MigrationService } from './services/migration.service';
 import { MigrationController } from './controllers/migration.controller';
 import { CrossReferenceController } from './controllers/cross-reference.controller';
+import { KitRelationsController } from './controllers/kit-relations.controller';
+import { CrossReferenceConflictsController } from './controllers/cross-reference-conflicts.controller';
 import { CrossReferenceService } from './services/cross-reference.service';
 import { ImportCatalogController } from './controllers/import-catalog.controller';
 import { ImportCatalogService } from './services/import-catalog.service';
@@ -100,15 +106,12 @@ import { ProductDiscoveryService } from './services/product-discovery.service';
 import { CategoryResolutionService } from './services/category-resolution.service';
 
 import { ProductAliasModel, ProductAliasSchema } from './schemas/product-alias.schema';
-import { CategoryHintModel, CategoryHintSchema } from './schemas/category-hint.schema';
-import { CategoryHintService } from './services/category-hint.service';
-import {
-  DisplayNameSynonymCandidateModel,
-  DisplayNameSynonymCandidateSchema,
-} from './schemas/display-name-synonym-candidate.schema';
-import { DisplayNameSynonymModel, DisplayNameSynonymSchema } from './schemas/display-name-synonym.schema';
-import { DisplayNameSynonymCandidateService } from './services/display-name-synonym-candidate.service';
-import { DisplayNameSynonymCandidateController } from './controllers/display-name-synonym-candidate.controller';
+import { TitleCategoryHintModel, TitleCategoryHintSchema } from './schemas/title-category-hint.schema';
+import { TitleCategoryHintService } from './services/title-category-hint.service';
+import { ProductShortTitleModel, ProductShortTitleSchema } from './schemas/product-short-title.schema';
+import { ProductShortTitleService } from './services/product-short-title.service';
+import { ProductShortTitleController } from './controllers/product-short-title.controller';
+import { ProductShortTitleMigrationService } from './services/product-short-title-migration.service';
 import { ProductMatcherService } from './services/product-matcher.service';
 import { StockSyncConsumer } from './consumers/stock-sync.consumer';
 import { DiscoveryMsResponseConsumer } from './consumers/discovery-ms-response.consumer';
@@ -143,10 +146,10 @@ import { PricingModule } from '../pricing/pricing.module';
       { name: BrandModel.name, schema: BrandSchema },
       { name: CategoryModel.name, schema: CategorySchema },
       { name: CrossReferenceGroupModel.name, schema: CrossReferenceGroupSchema },
+      { name: CrossReferenceCodeModel.name, schema: CrossReferenceCodeSchema },
       { name: ProductAliasModel.name, schema: ProductAliasSchema },
-      { name: CategoryHintModel.name, schema: CategoryHintSchema },
-      { name: DisplayNameSynonymCandidateModel.name, schema: DisplayNameSynonymCandidateSchema },
-      { name: DisplayNameSynonymModel.name, schema: DisplayNameSynonymSchema },
+      { name: TitleCategoryHintModel.name, schema: TitleCategoryHintSchema },
+      { name: ProductShortTitleModel.name, schema: ProductShortTitleSchema },
       { name: QueueRecordModel.name, schema: QueueRecordSchema },
       { name: ProductDraftModel.name, schema: ProductDraftSchema },
       { name: ProductDiscoveryModel.name, schema: ProductDiscoverySchema },
@@ -196,16 +199,19 @@ import { PricingModule } from '../pricing/pricing.module';
     ProductPublicationLogController,
     MigrationController,
     CrossReferenceController,
+    KitRelationsController,
+    CrossReferenceConflictsController,
     ImportCatalogController,
-    DisplayNameSynonymCandidateController
+    ProductShortTitleController
   ],
   providers: [
     ProductService,
     ProductRepository,
     ProductBrandService,
     ProductCategoryService,
-    CategoryHintService,
-    DisplayNameSynonymCandidateService,
+    TitleCategoryHintService,
+    ProductShortTitleService,
+    ProductShortTitleMigrationService,
     ProductNCMService,
     ProductUnitService,
     ProductWarrantyService,
@@ -215,8 +221,11 @@ import { PricingModule } from '../pricing/pricing.module';
     ProductFilterService,
     ProductCompatibilityService,
     ProductCompatibilityPositionService,
+    CompatibilityGroupPropagationService,
     ProductVehicleSearchService,
     SearchResultCacheService,
+    KnownBrandKeysCacheService,
+    ProductSearchRankingService,
     CategoryLookupService,
     ProductRailsService,
     RelevanceScoreJob,
@@ -257,6 +266,7 @@ import { PricingModule } from '../pricing/pricing.module';
     ProductAllocationService,
     ProductImageService,
     ProductTitleService,
+    ProductShortTitleService,
     ProductCategoryService,
     ProductCompatibilityService,
     ProductCompatibilityPositionService,

@@ -20,12 +20,14 @@ import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 import { MarketplaceDocument } from '../marketplace/schemas/marketplace.schema';
 import { ValidateMongoId } from '../common/decorators/validate-mongo-id.decorator';
-import { buildUniqueProductSlug, shouldRegenerateSlugForDisplayName } from './utils/product-slug.util';
+import { buildUniqueProductSlug, shouldRegenerateSlugForTitle } from './utils/product-slug.util';
+import { normalizeCode } from './utils/code-key.util';
 import { PublicationLogService } from '../marketplace/services/publication-log.service';
 import { CategoryMappingService } from '../marketplace/services/category/category-mapping.service';
 import { ProductTitleService } from './services/product-title.service';
 import { ProductCategoryService } from './services/product-category.service';
-import { CategoryHintService } from './services/category-hint.service';
+import { TitleCategoryHintService } from './services/title-category-hint.service';
+import { ProductShortTitleService } from './services/product-short-title.service';
 import { UserProductivityService } from '../monitoring/user-productivity.service';
 import { ProductivityType } from '../monitoring/schemas/user-productivity.schema';
 import { MercadoLivreCompatibilityAdapter } from '../marketplace/adapters/mercado-livre/mercado-livre-compatibility.adapter';
@@ -79,7 +81,8 @@ export class ProductService {
     private readonly productTitleService: ProductTitleService,
     private readonly userProductivityService: UserProductivityService,
     private readonly productCategoryService: ProductCategoryService,
-    private readonly categoryHintService: CategoryHintService,
+    private readonly titleCategoryHintService: TitleCategoryHintService,
+    private readonly productShortTitleService: ProductShortTitleService,
     private readonly mercadoLivreCompatibilityAdapter: MercadoLivreCompatibilityAdapter,
     @InjectModel(BrandModel.name) private readonly brandModel: Model<BrandDocument>,
     @InjectModel(ProductDiscoveryModel.name) private readonly productDiscoveryModel: Model<ProductDiscoveryDocument>,
@@ -147,7 +150,7 @@ export class ProductService {
     }
 
     const doc = await this.productRepository.findOneRaw({
-      partNumber: { $regex: `^${partNumber.trim()}$`, $options: 'i' },
+      partNumberKey: normalizeCode(partNumber),
       $or: brandConditions,
     });
     if (!doc) return null;
@@ -224,7 +227,7 @@ export class ProductService {
 
     if (search) {
       const regex = new RegExp(search, 'i');
-      query.$or = [{ name: regex }, { partNumber: regex }];
+      query.$or = [{ name: regex }, { partNumberKey: normalizeCode(search) }, { oemCodesKeys: normalizeCode(search) }];
     }
 
     const total = await this.productRepository.count(query);
@@ -444,7 +447,7 @@ export class ProductService {
   }
 
   async checkPartNumberBrandUniqueness(partNumber: string, brandId: number | string, excludeProductId?: string): Promise<boolean> {
-    const query: any = { partNumber, 'brand._id': brandId };
+    const query: any = { partNumberKey: normalizeCode(partNumber), 'brand._id': brandId };
 
     if (excludeProductId) {
       if (Types.ObjectId.isValid(excludeProductId)) {
@@ -508,9 +511,14 @@ export class ProductService {
       }
 
       // Create New
+      const shortTitle = data.title
+        ? await this.productShortTitleService.createOrGet(data.title)
+        : null;
+
       const slugBase = await buildUniqueProductSlug(
         {
-          displayName: data.displayName,
+          titleText: shortTitle?.text,
+          subtitle: data.subtitle,
           name: data.name,
           brandShortName: data.brand?.shortName,
           partNumber: data.partNumber,
@@ -524,6 +532,10 @@ export class ProductService {
         createdByUserId: toOptionalObjectId(userId),
         slug: slugBase,
         description: data.description,
+        titleId: shortTitle ? new Types.ObjectId(shortTitle._id) : undefined,
+        subtitle: data.subtitle,
+        titleText: shortTitle?.text,
+        titleSynonyms: shortTitle?.synonyms,
         tax: {
           ncm: data.ncm,
           cfop: data.cfop,
@@ -596,7 +608,8 @@ export class ProductService {
           strategy: data.pricing?.strategy,
         });
       }
-      if (data.listPrice !== undefined && data.listPrice !== null) {
+      const createBasePrice = data.price !== undefined && data.price !== null ? Number(data.price) : 0;
+      if (data.listPrice !== undefined && data.listPrice !== null && Number(data.listPrice) > createBasePrice) {
         await this.pricing.setPromotion(createdProductId, {
           listPrice: Number(data.listPrice),
           startsAt: new Date(),
@@ -683,11 +696,31 @@ export class ProductService {
       }
 
       if (data.name) product.name = data.name;
-      if (data.displayName !== undefined) product.displayName = data.displayName;
+      let newShortTitle: { _id: unknown; text: string; synonyms: string[] } | null = null;
+      if (data.title) {
+        newShortTitle = await this.productShortTitleService.createOrGet(data.title);
+        product.titleId = new Types.ObjectId(String(newShortTitle._id));
+        product.titleText = newShortTitle.text;
+        product.titleSynonyms = newShortTitle.synonyms;
+      }
+      if (data.subtitle !== undefined) product.subtitle = data.subtitle;
       if (data.partNumber) product.partNumber = data.partNumber;
       if (data.description) product.description = data.description;
       if (data.details) product.details = data.details;
       if (data.active !== undefined) product.active = data.active;
+      if (data.isGenuine !== undefined) product.isGenuine = data.isGenuine;
+
+      // Produto universal é elegível em qualquer busca por veículo sem vínculo
+      // granular (ver ProductVehicleSearchService) — compatibilidades específicas
+      // salvas ficam redundantes/inconsistentes ao ativar, então são removidas
+      // junto (confirmação já ocorreu na UI antes de chegar aqui).
+      let removedCompatibilitiesCount: number | undefined;
+      if (data.isUniversalFit !== undefined) {
+        product.isUniversalFit = data.isUniversalFit;
+        if (data.isUniversalFit) {
+          removedCompatibilitiesCount = await this.productCompatibilityService.deleteAllForProduct(String(product._id));
+        }
+      }
 
       if (data.barcode !== undefined) product.barcode = data.barcode;
       if (data.oemCodes) product.oemCodes = data.oemCodes;
@@ -703,7 +736,10 @@ export class ProductService {
         });
       }
       if (data.listPrice !== undefined) {
-        if (data.listPrice === null) {
+        const currentBasePrice =
+          data.price !== undefined ? Number(data.price) : await this.pricing.getBasePrice(String(product._id));
+        if (data.listPrice === null || Number(data.listPrice) <= currentBasePrice) {
+          // App antigo envia listPrice <= preço base (ex: 0 ou igual ao price) para indicar "sem promoção".
           await this.pricing.clearPromotion(String(product._id));
         } else {
           await this.pricing.setPromotion(String(product._id), {
@@ -742,19 +778,20 @@ export class ProductService {
       }
 
       if (
-        data.displayName &&
-        shouldRegenerateSlugForDisplayName({
+        newShortTitle &&
+        shouldRegenerateSlugForTitle({
           currentSlug: product.slug,
           name: product.name,
           brandShortName: product.brand?.shortName,
           partNumber: product.partNumber,
           barcode: product.barcode,
-          newDisplayName: data.displayName,
+          newTitleText: newShortTitle.text,
         })
       ) {
         product.slug = await buildUniqueProductSlug(
           {
-            displayName: data.displayName,
+            titleText: newShortTitle.text,
+            subtitle: product.subtitle,
             name: product.name,
             brandShortName: product.brand?.shortName,
             partNumber: product.partNumber,
@@ -773,11 +810,11 @@ export class ProductService {
         this.productCategoryService.updateProductCounts().catch(e => this.logger.error(`Failed to update product counts on update: ${e.message}`));
       }
 
-      // Alimenta a base de aprendizado displayName -> categoria (ver
-      // docs/superpowers/specs/2026-07-13-product-display-name-category-hint-design.md)
-      if (data.displayName && data.category) {
+      // Alimenta a base de aprendizado titleId -> categoria (ver
+      // docs/superpowers/specs/2026-07-25-product-title-subtitle-design.md)
+      if (newShortTitle && data.category) {
         const categoryId = data.category.id || data.category;
-        this.categoryHintService.recordHint(data.displayName, String(categoryId))
+        this.titleCategoryHintService.recordHint(String(newShortTitle._id), String(categoryId))
           .catch(e => this.logger.error(`Failed to record category hint: ${e.message}`));
       }
 
@@ -807,6 +844,10 @@ export class ProductService {
       try {
         this.eventEmitter.emit(PRODUCT_SECTION_EVENTS.DATA_SAVED, new ProductDataSavedEvent(id));
       } catch {}
+
+      if (removedCompatibilitiesCount !== undefined) {
+        (clean as any).removedCompatibilitiesCount = removedCompatibilitiesCount;
+      }
 
       return clean;
     } catch (error) {
@@ -1056,6 +1097,13 @@ export class ProductService {
       const product = await this.findOne(productId);
       if (!product) throw new NotFoundException(`Produto com ID ${productId} não encontrado`);
 
+      // Adicionar um vínculo específico é sinal claro de que o produto não é mais
+      // universal (isUniversalFit) — desliga automaticamente em vez de deixar os
+      // dois estados coexistirem de forma inconsistente. Ver ProductService.update.
+      if ((product as any).isUniversalFit) {
+        await this.productRepository.update(String(product._id), { $set: { isUniversalFit: false } });
+      }
+
       const compatibilities = await this.productCompatibilityService.createMultipleCompatibilitiesBatch({
         productId: String(product._id),
         vehicleIds,
@@ -1118,7 +1166,16 @@ export class ProductService {
     }
   }
 
-  /** Núcleo de envio ao ML compartilhado entre o auto-sync e a sincronização direta manual. */
+  /**
+   * Núcleo de envio ao ML compartilhado entre o auto-sync e a sincronização direta manual.
+   * O endpoint é aditivo (confirmado ao vivo contra a API — chamadas separadas ou em lote
+   * só acrescentam, nunca substituem), mas tem um teto rígido de 200 produtos por
+   * requisição (confirmado ao vivo: 201 numa chamada só dá 400 "Maximum of 200 products
+   * for a single request was exceeded"). Chunka em blocos de até 200 — o mínimo de
+   * chamadas que respeita o limite real da API, não um chunking arbitrário.
+   */
+  private static readonly ML_COMPATIBILITY_CHUNK_SIZE = 200;
+
   private async pushCompatibilitiesToMercadoLivre(
     productTitles: any[],
     vehicleIds: string[],
@@ -1127,7 +1184,7 @@ export class ProductService {
     let successCount = 0;
     let errorCount = 0;
 
-    const chunkSize = 50;
+    const chunkSize = ProductService.ML_COMPATIBILITY_CHUNK_SIZE;
     const chunks: string[][] = [];
     for (let i = 0; i < vehicleIds.length; i += chunkSize) {
       chunks.push(vehicleIds.slice(i, i + chunkSize));
@@ -1149,7 +1206,7 @@ export class ProductService {
           results.push({ title: title.title, itemId: title.externalId, status: 'success', count: chunk.length, response: resp });
           successCount += chunk.length;
         } catch (err: any) {
-          this.logger.warn(`syncCompatibility falhou item=${title.externalId} chunk=${chunk.length}: ${err?.message}`);
+          this.logger.warn(`syncCompatibility falhou item=${title.externalId} count=${chunk.length}: ${err?.message}`);
           results.push({
             title: title.title,
             itemId: title.externalId,
@@ -1165,22 +1222,49 @@ export class ProductService {
     return { successCount, errorCount, results };
   }
 
+  /**
+   * Best-effort: remove do ML as compatibilidades (por mlVehicleId) já removidas
+   * localmente. Direto (sem fila) — mesma justificativa do auto-sync de adição:
+   * o dado de verdade é o local, e uma falha de rede aqui não deve bloquear a
+   * remoção que o usuário já pediu.
+   */
+  private async removeCompatibilitiesFromMercadoLivre(product: any, removed: any[]): Promise<void> {
+    const mlVehicleIds = [...new Set(removed.map((c: any) => c.mlVehicleId).filter(Boolean))] as string[];
+    if (mlVehicleIds.length === 0) return;
+
+    try {
+      const marketplace = await this.marketplaceRegistry.findByName('Mercado Livre');
+      if (!marketplace) return;
+
+      const resolvedMarketplaceId = String(marketplace._id);
+      const allTitles = await this.productTitleService.findByProductId(product._id);
+      const productTitles = allTitles.filter((title: any) => String(title.marketplaceId) === resolvedMarketplaceId);
+
+      for (const title of productTitles) {
+        if (!title.externalId) continue;
+        for (const mlVehicleId of mlVehicleIds) {
+          try {
+            await this.mercadoLivreCompatibilityAdapter.removeCompatibilityFromMarketplace(title.externalId, mlVehicleId);
+          } catch (err: any) {
+            this.logger.warn(
+              `removeCompatibilityFromMarketplace falhou item=${title.externalId} mlVehicleId=${mlVehicleId}: ${err?.message}`,
+            );
+          }
+        }
+      }
+    } catch (error: any) {
+      this.logger.warn(`Remoção de compatibilidades no Mercado Livre falhou (não bloqueante): ${error?.message}`);
+    }
+  }
+
   @ValidateMongoId(0) // Validate productId
   async removeProductCompatibility(productId: string, compatibilityId: string): Promise<void> {
     try {
       const product = await this.findOne(productId);
       if (!product) throw new NotFoundException(`Produto com ID ${productId} não encontrado`);
 
-      await this.productCompatibilityService.deleteCompatibility(compatibilityId);
-
-      await this.queueService.addToQueue({
-        type: 'product.sync_compatibilities',
-        productId: product._id,
-        metadata: {
-          action: 'remove_compatibility',
-          compatibilityId
-        }
-      });
+      const removed = await this.productCompatibilityService.deleteCompatibility(compatibilityId);
+      if (removed) await this.removeCompatibilitiesFromMercadoLivre(product, [removed]);
 
       this.logger.log(`Compatibilidade ${compatibilityId} removida do produto ${productId}`);
     } catch (error) {
@@ -1189,7 +1273,7 @@ export class ProductService {
     }
   }
 
-  /** Remove várias compatibilidades de uma vez (uma exclusão em lote + um único enfileiramento de sync). */
+  /** Remove várias compatibilidades de uma vez (uma exclusão em lote + remoção direta no ML). */
   @ValidateMongoId(0)
   async removeProductCompatibilities(productId: string, compatibilityIds: string[]): Promise<void> {
     if (!compatibilityIds?.length) return;
@@ -1197,16 +1281,8 @@ export class ProductService {
       const product = await this.findOne(productId);
       if (!product) throw new NotFoundException(`Produto com ID ${productId} não encontrado`);
 
-      await this.productCompatibilityService.deleteMultipleCompatibilities(compatibilityIds);
-
-      await this.queueService.addToQueue({
-        type: 'product.sync_compatibilities',
-        productId: product._id,
-        metadata: {
-          action: 'remove_compatibilities',
-          compatibilityIds,
-        }
-      });
+      const removed = await this.productCompatibilityService.deleteMultipleCompatibilities(compatibilityIds);
+      if (removed.length > 0) await this.removeCompatibilitiesFromMercadoLivre(product, removed);
 
       this.logger.log(`${compatibilityIds.length} compatibilidade(s) removida(s) do produto ${productId}`);
     } catch (error) {
@@ -1394,7 +1470,8 @@ export class ProductService {
       $or: [
         { barcode: query },
         { ean: query },
-        { partNumber: new RegExp(query, 'i') },
+        { partNumberKey: normalizeCode(query) },
+        { oemCodesKeys: normalizeCode(query) },
         { name: new RegExp(query, 'i') },
         { 'brand.name': new RegExp(query, 'i') }
       ],

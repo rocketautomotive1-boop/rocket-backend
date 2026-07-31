@@ -11,6 +11,7 @@ import { ProductRepository } from '../product.repository';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
 import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 import { ProductVehicleSearchService } from './product-vehicle-search.service';
+import { normalizeCode } from '../utils/code-key.util';
 import {
   ProductFilterDto,
   PaginatedResponseDto,
@@ -125,7 +126,7 @@ export class ProductFilterService {
       query.name = { $regex: filters.name, $options: 'i' };
     }
     if (filters.partNumber) {
-      query.partNumber = filters.partNumber;
+      query.partNumberKey = normalizeCode(filters.partNumber);
     }
     if (filters.gtin) {
       query.gtin = filters.gtin;
@@ -232,18 +233,29 @@ export class ProductFilterService {
 
   private async applySearchFilter(query: any, search?: string): Promise<void> {
     if (!search) return;
-    const regex = new RegExp(search, 'i');
+    const term = search.trim();
+    const regex = new RegExp(term, 'i');
 
     // Find matching categories
     const matchingCategories = await this.categoryModel.find({ name: regex }).select('_id');
     const categoryIds = matchingCategories.map(c => c._id);
 
     query.$or = [
-      { name: regex },
+      { titleText: regex },
+      { titleSynonyms: regex },
+      { subtitle: regex },
       { partNumber: regex },
+      { partNumberKey: normalizeCode(term) },
+      { oemCodesKeys: normalizeCode(term) },
+      { barcode: regex },
       { 'brand.name': regex },
       { category: { $in: categoryIds } },
     ];
+
+    // Admin pode colar o _id direto na busca (não é um caso do storefront)
+    if (Types.ObjectId.isValid(term)) {
+      query.$or.push({ _id: new Types.ObjectId(term) });
+    }
   }
 
   private applyNumericRangeFilter(query: any, field: string, range?: NumericRangeDto): void {
@@ -307,17 +319,25 @@ export class ProductFilterService {
   }
 
   async findProductsIntelligent(term: string, options: any): Promise<PaginatedResponseDto<ProductModel>> {
-    // Product search runs entirely on MongoDB (Elasticsearch was removed).
-    return this.findProducts({
-      search: term,
+    // Delega pro pipeline de ranking (Atlas Search + ProductSearchRankingService) já usado
+    // por /products/search/compatibility — ver docs/superpowers/specs/
+    // 2026-07-24-rocket-admin-product-search-and-detail-refactor-design.md. Antes caía direto
+    // em findProducts (regex $or), sem nenhuma relação com os índices Atlas Search criados
+    // no mesmo dia.
+    const result = await this.productVehicleSearchService.searchByText(term, {
       page: options.page,
       limit: options.limit,
-      includeBrand: options.includeBrand,
-      includeCategory: options.includeCategory,
-      includeImages: options.includeImages,
-      includeInventory: options.includeInventory,
-      includeTitles: options.includeTitles,
-    } as ProductFilterDto);
+    });
+
+    if (options.includeTitles !== false && result.data.length > 0) {
+      const productIds = result.data.map((p: any) => p._id);
+      const listings = await this.listingModel.find({ productId: { $in: productIds } }).lean().exec();
+      (result.data as any[]).forEach(p => {
+        p.titles = listings.filter(l => String(l.productId) === String(p._id));
+      });
+    }
+
+    return result;
   }
 
   async findProductsByAttributes(attributes: any): Promise<ProductModel[]> {

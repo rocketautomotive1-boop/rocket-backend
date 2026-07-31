@@ -1,6 +1,6 @@
 /**
- * Slug legível para SEO: nome curto (displayName, com fallback pra name) +
- * marca (brand.shortName, quando houver — termo comum de busca) + um
+ * Slug legível para SEO: nome curto (titleText + subtitle, com fallback pra
+ * name) + marca (brand.shortName, quando houver — termo comum de busca) + um
  * identificador estável (partNumber ou barcode) que garante unicidade sem
  * precisar de sufixo aleatório na maioria dos casos.
  */
@@ -14,7 +14,8 @@ function slugifyPart(value: string | undefined | null): string {
 }
 
 export interface SlugSourceFields {
-  displayName?: string | null;
+  titleText?: string | null;
+  subtitle?: string | null;
   name?: string | null;
   brandShortName?: string | null;
   partNumber?: string | null;
@@ -22,7 +23,8 @@ export interface SlugSourceFields {
 }
 
 export function buildProductSlug(fields: SlugSourceFields): string {
-  const namePart = slugifyPart(fields.displayName || fields.name);
+  const shortName = [fields.titleText, fields.subtitle].filter(Boolean).join(' ');
+  const namePart = slugifyPart(shortName || fields.name);
   const brandPart = slugifyPart(fields.brandShortName);
   const idPart = slugifyPart(fields.partNumber || fields.barcode);
 
@@ -36,22 +38,23 @@ export interface ShouldRegenerateSlugParams {
   brandShortName?: string | null;
   partNumber?: string | null;
   barcode?: string | null;
-  newDisplayName: string;
+  newTitleText: string;
 }
 
 /**
- * O slug só é construído com displayName na criação (quando ele já existe
- * naquele momento). Se o produto foi criado antes do displayName ser
- * aprendido, o slug ficou preso no fallback name/partNumber — este helper
- * detecta esse caso pra permitir "promover" o slug uma única vez. Se o slug
- * já reflete um displayName (mesmo que antigo), não regenera, pra não
- * quebrar URL já indexada a cada edição de displayName.
+ * O slug só é construído com titleText na criação (quando ele já existe
+ * naquele momento). Se o produto foi criado antes do title ser vinculado, o
+ * slug ficou preso no fallback name/partNumber — este helper detecta esse
+ * caso pra permitir "promover" o slug uma única vez. Se o slug já reflete um
+ * title (mesmo que antigo), não regenera, pra não quebrar URL já indexada a
+ * cada troca de title.
  */
-export function shouldRegenerateSlugForDisplayName(params: ShouldRegenerateSlugParams): boolean {
+export function shouldRegenerateSlugForTitle(params: ShouldRegenerateSlugParams): boolean {
   if (!params.currentSlug) return false;
 
   const fallbackSlug = buildProductSlug({
-    displayName: undefined,
+    titleText: undefined,
+    subtitle: undefined,
     name: params.name,
     brandShortName: params.brandShortName,
     partNumber: params.partNumber,

@@ -10,7 +10,8 @@ import { QueueController } from './queue.controller';
 import { QueueRecordModel, QueueRecordSchema } from './schemas/queue-record.schema';
 // ProductProcessor removed
 // OrderProcessor removed — orders-sync queue aposentada (ingest direto + OrderReconciler)
-import { CompatibilityProcessor } from './processors/compatibility.processor';
+// CompatibilityProcessor removed — pattern nunca batia com o evento emitido (dead consumer);
+// sync/remoção de compatibilidade agora é direta via ProductService (sem fila).
 
 
 import { MarketplaceModule } from '../marketplace/marketplace.module';
@@ -56,7 +57,7 @@ import { ProductModule } from '../product/product.module';
       },
     ]),
   ],
-  controllers: [QueueController, CompatibilityProcessor],
+  controllers: [QueueController],
   providers: [QueueService, QueueCleanupScheduler],
   exports: [QueueService, MongooseModule],
 })

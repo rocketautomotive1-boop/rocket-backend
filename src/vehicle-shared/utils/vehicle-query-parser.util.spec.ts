@@ -6,7 +6,7 @@ describe('parseVehicleQuery', () => {
     expect(result.freeText).toBe('Fiat Toro');
     expect(result.yearRange).toEqual({ from: 2016, to: 2021 });
     expect(result.fuelTags).toEqual(['diesel']);
-    expect(result.displacementCc).toBe(2000);
+    expect(result.engineDisplay).toBe('2.0');
   });
 
   it('é independente da ordem dos tokens', () => {
@@ -14,7 +14,7 @@ describe('parseVehicleQuery', () => {
     expect(result.freeText).toBe('Fiat Toro');
     expect(result.yearRange).toEqual({ from: 2016, to: 2021 });
     expect(result.fuelTags).toEqual(['diesel']);
-    expect(result.displacementCc).toBe(2000);
+    expect(result.engineDisplay).toBe('2.0');
   });
 
   it('normaliza faixa de ano digitada invertida ("2021-2016")', () => {
@@ -27,7 +27,13 @@ describe('parseVehicleQuery', () => {
     expect(result.freeText).toBe('Corolla');
     expect(result.yearRange).toBeUndefined();
     expect(result.fuelTags).toBeUndefined();
-    expect(result.displacementCc).toBeUndefined();
+    expect(result.engineDisplay).toBeUndefined();
+  });
+
+  it('extrai motor "l200 2.5" sem pegar veículos de 2.4', () => {
+    const result = parseVehicleQuery('l200 2.5');
+    expect(result.freeText).toBe('l200');
+    expect(result.engineDisplay).toBe('2.5');
   });
 
   it('query só com faixa de ano retorna freeText vazio', () => {

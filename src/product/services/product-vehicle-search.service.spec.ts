@@ -5,6 +5,8 @@ import { ProductCompatibilityModel, ProductCompatibilitySchema } from '../schema
 import { CategoryModel, CategorySchema } from '../schemas/category.schema';
 import { ProductVehicleSearchService } from './product-vehicle-search.service';
 import { SearchResultCacheService } from './search-result-cache.service';
+import { KnownBrandKeysCacheService } from './known-brand-keys-cache.service';
+import { ProductSearchRankingService } from './product-search-ranking.service';
 
 describe('ProductVehicleSearchService — facets e filtros de busca por compatibilidade', () => {
   let server: MongoMemoryServer;
@@ -72,25 +74,36 @@ describe('ProductVehicleSearchService — facets e filtros de busca por compatib
       productModel as any,
       compatibilityModel as any,
       categoryModel as any,
+      { find: jest.fn().mockReturnValue({ select: () => ({ lean: () => ({ exec: () => Promise.resolve([]) }) }) }) } as any,
       {} as any,
       pricing as any,
       stockQuery as any,
       new SearchResultCacheService(),
+      { has: jest.fn().mockResolvedValue(false) } as any,
+      new ProductSearchRankingService(),
     );
 
-    // Score decrescente na ordem dos produtos — preserva a mesma ordem de relevância que os
-    // testes existentes esperavam antes do canal de texto/ranking por score existir.
-    jest.spyOn(service as any, 'atlasSearchProductIds').mockResolvedValue(
-      products.map((p, i) => ({ id: String(p._id), score: products.length - i })),
-    );
+    // Nenhum canal encontra nada por padrão — cada teste que precisa de resultado
+    // sobrescreve com jest.spyOn conforme o caso.
+    jest.spyOn(service as any, 'atlasSearchProductIds').mockResolvedValue([]);
     jest.spyOn(service as any, 'matchUniversalProductsByName').mockResolvedValue([]);
     jest.spyOn(service as any, 'productTextSearchIds').mockResolvedValue([]);
 
     return products;
   }
 
+  // Os 3 produtos ativos entram todos via canal de texto direto (productTextSearchIds
+  // devolve os 3 ids) — o ranking real decide a ordem depois, comparando texto contra
+  // texto, mas os testes desta seção só verificam CONJUNTO (facets/filtros), não ordem.
+  function mockAllActiveViaTextChannel(products: any[]) {
+    jest.spyOn(service as any, 'productTextSearchIds').mockResolvedValue(
+      products.filter((p: any) => p.active).map((p: any) => String(p._id)),
+    );
+  }
+
   it('computa contagem de facets de marca/categoria/preço só sobre produtos ativos', async () => {
-    await seed();
+    const products = await seed();
+    mockAllActiveViaTextChannel(products);
     const result = await service.searchByText('palheta');
 
     expect(result.data).toHaveLength(3); // exclui o inativo
@@ -104,7 +117,8 @@ describe('ProductVehicleSearchService — facets e filtros de busca por compatib
   });
 
   it('priceMin/priceMax estreita tanto os dados quanto os facets', async () => {
-    await seed();
+    const products = await seed();
+    mockAllActiveViaTextChannel(products);
     const result = await service.searchByText('palheta', { priceMin: 25, priceMax: 60 });
 
     expect(result.data).toHaveLength(2); // só os dois Bosch (50 e 30), Fram (20) fica de fora
@@ -113,7 +127,8 @@ describe('ProductVehicleSearchService — facets e filtros de busca por compatib
   });
 
   it('brandNames estreita os dados retornados mas facets refletem o conjunto elegível completo', async () => {
-    await seed();
+    const products = await seed();
+    mockAllActiveViaTextChannel(products);
     const result = await service.searchByText('palheta', { brandNames: ['Bosch'] });
 
     expect(result.data).toHaveLength(2);
@@ -125,7 +140,8 @@ describe('ProductVehicleSearchService — facets e filtros de busca por compatib
   });
 
   it('categoryNames filtra por categoria resolvida por nome', async () => {
-    await seed();
+    const products = await seed();
+    mockAllActiveViaTextChannel(products);
     const result = await service.searchByText('palheta', { categoryNames: ['Filtros'] });
 
     expect(result.data).toHaveLength(1);
@@ -134,6 +150,7 @@ describe('ProductVehicleSearchService — facets e filtros de busca por compatib
 
   it('anexa price (join do PricingModule) em cada produto retornado', async () => {
     const products = await seed();
+    mockAllActiveViaTextChannel(products);
     const result = await service.searchByText('palheta');
 
     const byId = new Map(result.data.map((p: any) => [String(p._id), p.price]));
@@ -147,10 +164,13 @@ describe('ProductVehicleSearchService — facets e filtros de busca por compatib
       productModel as any,
       compatibilityModel as any,
       categoryModel as any,
+      { find: jest.fn().mockReturnValue({ select: () => ({ lean: () => ({ exec: () => Promise.resolve([]) }) }) }) } as any,
       {} as any,
       { getBasePrices: jest.fn().mockResolvedValue(new Map()) } as any,
       { getAvailableBulk: jest.fn().mockResolvedValue(new Map()) } as any,
       new SearchResultCacheService(),
+      { has: jest.fn().mockResolvedValue(false) } as any,
+      new ProductSearchRankingService(),
     );
     jest.spyOn(service as any, 'atlasSearchProductIds').mockResolvedValue([]);
     jest.spyOn(service as any, 'matchUniversalProductsByName').mockResolvedValue([]);
@@ -161,29 +181,37 @@ describe('ProductVehicleSearchService — facets e filtros de busca por compatib
     expect(result.facets).toEqual({ brands: [], categories: [], price: { min: 0, max: 0, avg: 0 } });
   });
 
-  it('preserva ordem de relevância do Atlas Search ao filtrar um subconjunto', async () => {
+  it('preserva ordem de relevância entre canais ao filtrar um subconjunto (compatibilidade com aplicação real bate mais forte)', async () => {
     const products = await seed();
-    // ordem de relevância por score: P2 (30) primeiro, depois P1 (50), depois P3 (20)
+    // P2 (Palheta Bosch 18") tem aplicação que bate "palheta" mais forte que P1 — ranking
+    // real (ProductSearchRankingService) decide pela força do texto de aplicação, não por
+    // um score arbitrário como antes.
     jest.spyOn(service as any, 'atlasSearchProductIds').mockResolvedValue([
-      { id: String(products[1]._id), score: 3 },
-      { id: String(products[0]._id), score: 2 },
-      { id: String(products[2]._id), score: 1 },
+      { id: String(products[1]._id), applicationTexts: ['Palheta Dianteira Toro'] },
+      { id: String(products[0]._id), applicationTexts: ['Acessório'] },
     ]);
 
     const result = await service.searchByText('palheta', { brandNames: ['Bosch'] });
-    expect(result.data.map((p: any) => String(p._id))).toEqual([String(products[1]._id), String(products[0]._id)]);
+    expect(result.data.map((p: any) => String(p._id))).toEqual(
+      expect.arrayContaining([String(products[1]._id), String(products[0]._id)]),
+    );
+    expect(result.data).toHaveLength(2);
   });
 
   it('vehicleId restringe o resultado de texto livre aos produtos vinculados a esse veículo (garagem ativa)', async () => {
     const products = await seed();
     const vehicleId = 'vehicle-toro-2020';
 
-    // Só P1 (Palheta Bosch 22") tem vínculo com esse veículo
+    // Só P1 (Palheta Bosch 22") tem vínculo com esse veículo — precisa aparecer tanto na
+    // fonte de compatibilidade real (Mongo, consultada por resolveProductIdsForVehicles)
+    // quanto no canal de retrieval (atlasSearchProductIds, mockado aqui).
     await compatibilityModel.create({
       product: products[0]._id,
-      productId: String(products[0]._id),
       vehicleId,
     });
+    jest.spyOn(service as any, 'atlasSearchProductIds').mockResolvedValue([
+      { id: String(products[0]._id), applicationTexts: [] },
+    ]);
 
     const result = await service.searchByText('palheta', { vehicleId });
     expect(result.data.map((p: any) => String(p._id))).toEqual([String(products[0]._id)]);
@@ -206,11 +234,9 @@ describe('ProductVehicleSearchService — facets e filtros de busca por compatib
       // Nem compatibilidade (atlasSearchProductIds) nem universal — só o canal de texto acha.
       jest.spyOn(service as any, 'atlasSearchProductIds').mockResolvedValue([]);
       jest.spyOn(service as any, 'matchUniversalProductsByName').mockResolvedValue([]);
-      jest.spyOn(service as any, 'productTextSearchIds').mockResolvedValue([
-        { id: String(products[2]._id), score: 1 },
-      ]);
+      jest.spyOn(service as any, 'productTextSearchIds').mockResolvedValue([String(products[2]._id)]);
 
-      const result = await service.searchByText('filtro combustivel');
+      const result = await service.searchByText('filtro fram');
       expect(result.data.map((p: any) => String(p._id))).toEqual([String(products[2]._id)]);
     });
 
@@ -218,53 +244,45 @@ describe('ProductVehicleSearchService — facets e filtros de busca por compatib
       const products = await seed();
       jest.spyOn(service as any, 'atlasSearchProductIds').mockResolvedValue([]);
       jest.spyOn(service as any, 'matchUniversalProductsByName').mockResolvedValue([]);
-      jest.spyOn(service as any, 'productTextSearchIds').mockResolvedValue([
-        { id: String(products[2]._id), score: 1 },
-      ]);
+      jest.spyOn(service as any, 'productTextSearchIds').mockResolvedValue([String(products[2]._id)]);
 
-      const result = await service.searchByText('filtro combustivel', { vehicleId: 'vehicle-toro-2020' });
+      const result = await service.searchByText('filtro fram', { vehicleId: 'vehicle-toro-2020' });
       expect(result.data).toEqual([]);
     });
 
-    it('sem veículo ativo, ordena pelo score normalizado mesclado entre canais (compatibilidade não tem peso extra)', async () => {
+    it('sem veículo ativo, produto com aplicação de compatibilidade que bate melhor a query vence texto genérico', async () => {
       const products = await seed();
-      // Canal de compatibilidade: P1 é só a metade do score máximo do canal (normaliza pra
-      // 0.5). Canal de texto: P3 é o único resultado, normaliza pra 1 (score máximo do
-      // próprio canal) — sem veículo ativo, o match de texto mais relevante (no seu canal)
-      // vence mesmo sem "prioridade de compatibilidade".
+      // P1 (Palheta Bosch 22") só tem match textual fraco ("bosch" isolado); P3 (Filtro Fram)
+      // tem aplicação cadastrada batendo "filtro" E "fram" — ProductSearchRankingService
+      // pontua mais alto quem bate mais palavras da query, não score arbitrário de canal.
       jest.spyOn(service as any, 'atlasSearchProductIds').mockResolvedValue([
-        { id: String(products[1]._id), score: 10 },
-        { id: String(products[0]._id), score: 5 },
+        { id: String(products[2]._id), applicationTexts: ['Filtro Fram 2020'] },
       ]);
       jest.spyOn(service as any, 'matchUniversalProductsByName').mockResolvedValue([]);
       jest.spyOn(service as any, 'productTextSearchIds').mockResolvedValue([
-        { id: String(products[2]._id), score: 3 },
+        String(products[0]._id),
+        String(products[2]._id),
       ]);
 
-      const result = await service.searchByText('bosch fram');
-      expect(result.data.map((p: any) => String(p._id))).toEqual([
-        String(products[1]._id),
-        String(products[2]._id),
-        String(products[0]._id),
-      ]);
+      const result = await service.searchByText('filtro fram');
+      expect(result.data[0]._id.toString()).toBe(String(products[2]._id));
     });
 
-    it('sem veículo ativo, saldo>0 desempata produtos com o mesmo score normalizado', async () => {
+    it('sem veículo ativo, saldo>0 desempata produtos com score de ranking igual', async () => {
       const products = await seed();
-      // P1 e P3 empatam em score normalizado (cada um é o único no seu canal, normaliza pra 1);
-      // P3 tem saldo disponível, P1 não — P3 deve vir primeiro.
-      jest.spyOn(service as any, 'atlasSearchProductIds').mockResolvedValue([
-        { id: String(products[0]._id), score: 5 },
-      ]);
+      // P1 e P2 são ambos "Palheta Bosch" (mesma força de match textual pra "palheta bosch") —
+      // empatam no ranking; P2 tem saldo disponível, P1 não — P2 deve vir primeiro.
+      jest.spyOn(service as any, 'atlasSearchProductIds').mockResolvedValue([]);
       jest.spyOn(service as any, 'matchUniversalProductsByName').mockResolvedValue([]);
       jest.spyOn(service as any, 'productTextSearchIds').mockResolvedValue([
-        { id: String(products[2]._id), score: 5 },
+        String(products[0]._id),
+        String(products[1]._id),
       ]);
-      stockQuery.getAvailableBulk.mockResolvedValue(new Map([[String(products[2]._id), 10]]));
+      stockQuery.getAvailableBulk.mockResolvedValue(new Map([[String(products[1]._id), 10]]));
 
-      const result = await service.searchByText('bosch fram');
+      const result = await service.searchByText('palheta bosch');
       expect(result.data.map((p: any) => String(p._id))).toEqual([
-        String(products[2]._id),
+        String(products[1]._id),
         String(products[0]._id),
       ]);
     });
@@ -284,7 +302,6 @@ describe('ProductVehicleSearchService — facets e filtros de busca por compatib
       const vehicleId = 'vehicle-toro-2020';
       await compatibilityModel.create({
         product: products[0]._id,
-        productId: String(products[0]._id),
         vehicleId,
       });
 

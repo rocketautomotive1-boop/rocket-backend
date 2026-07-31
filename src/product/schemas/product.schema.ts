@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types, HydratedDocument, SchemaTypes } from 'mongoose';
 import { Transform } from 'class-transformer';
+import { normalizeCode } from '../utils/code-key.util';
 
 export type ProductDocument = HydratedDocument<ProductModel>;
 
@@ -44,6 +45,46 @@ export class ProductAttribute {
 }
 
 
+
+@Schema()
+export class ProductCatalogApplication {
+    // Vehicle make as printed in the source catalog (e.g. "FIAT") — raw, not yet
+    // resolved against vehicle_compatibilities. Matching to a real vehicleId is a
+    // separate step; see docs/superpowers/specs/2026-07-09-product-vehicle-search-design.md.
+    @Prop() fabricante: string;
+    @Prop() modelo: string;
+    @Prop() complemento?: string;
+    // Free-text year range/version as printed (e.g. "1998...2008"), not parsed into numbers.
+    @Prop() periodo?: string;
+    @Prop() motorizacao?: string;
+    // Where on the vehicle the part mounts, as printed (e.g. Schaeffler's
+    // "DIANTEIRO - EXTERIOR"). Not every catalog provides this.
+    @Prop() posicaoMontagem?: string;
+}
+
+@Schema()
+class ProductCatalogKitComponent {
+    // partNumber of a component product sold separately (e.g. Schaeffler's
+    // CONJ_PRODS: a RepSet clutch kit lists the disc, pressure plate, and
+    // release bearing as its components). Raw partNumber, not resolved to an
+    // ObjectId — same rationale as catalogSimilarCodes.
+    @Prop() partNumber: string;
+    @Prop() quantidade?: number;
+}
+
+@Schema()
+class ProductCatalogAttribute {
+    // Stable source column (e.g. "CpoAuxProd2") — the source catalog's own UI
+    // labels these dynamically per product type (e.g. Schaeffler shows
+    // CpoAuxProd2 as "Diâmetro do Disco (mm)" for clutch discs but something
+    // else for other product families), and there's no fixed column->label
+    // table in the database. `name` carries a human label when one is known,
+    // otherwise falls back to `code` — see the catalog's own parser.ts for
+    // whichever labels have been identified so far.
+    @Prop() code: string;
+    @Prop() name: string;
+    @Prop() value: string;
+}
 
 @Schema()
 class ProductBrandSnapshot {
@@ -141,16 +182,40 @@ export class ProductModel {
     @Prop({ required: true, index: true })
     name: string;
 
-    // Nome curto/resumido (ex: "Disco de Embreagem"), separado do `name` completo
-    // usado para SEO/marketplace. Editável na tela de Categoria; ver
-    // docs/superpowers/specs/2026-07-13-product-display-name-category-hint-design.md.
+    // Título curto reutilizável entre produtos (ex: "Parafuso"), com sinônimos
+    // próprios — ver ProductShortTitleModel e
+    // docs/superpowers/specs/2026-07-25-product-title-subtitle-design.md.
+    // Substitui o antigo `displayName` (string solta, não reutilizável).
+    @Prop({ type: SchemaTypes.ObjectId, ref: 'ProductShortTitleModel', index: true })
+    titleId?: Types.ObjectId;
+
+    // Especialização do title, texto livre por produto, sem sinônimo próprio
+    // (ex: "Dianteiro do Virabrequim"). Editável na tela de Categoria.
     @Prop({ type: String, required: false })
-    displayName?: string;
+    subtitle?: string;
+
+    // Denormalizado de ProductShortTitleModel.text/synonyms (espelhado no save
+    // e via updateMany no fan-out de ProductShortTitleService.addSynonym) —
+    // evita $lookup no caminho de busca do Atlas Search.
+    @Prop({ type: String })
+    titleText?: string;
+
+    @Prop({ type: [String], index: true })
+    titleSynonyms?: string[];
 
     // Opcional: autopeças sempre preenchem; itens gerais (domain:'general') usam
     // `barcode` como identidade. unique+sparse permite ausência sem colidir.
     @Prop({ index: true, unique: true, sparse: true })
     partNumber: string;
+
+    // Chave normalizada de partNumber (ver code-key.util normalizeCode), usada
+    // em toda busca/match por código — não exposta para edição direta, apenas
+    // derivada de `partNumber` no pre-save hook. Unicidade é composta com
+    // brand._id (ver índice abaixo): marcas diferentes podem legitimamente
+    // compartilhar o mesmo código-base (ex: rolamentos com designação DIN/ISO
+    // padronizada, vendidos por FAG e SKF sob o mesmo código regionalizado).
+    @Prop({ index: true })
+    partNumberKey: string;
 
     // unique + sparse: autopeças geram slug; itens gerais (domain:'general') podem
     // não ter slug — sparse evita colisão de múltiplos null no índice unique.
@@ -277,7 +342,7 @@ export class ProductModel {
 
     // stockReserved removed — reservations live in StockBalance.reserved (StockModule).
 
-    @Prop({ type: Types.ObjectId, ref: 'CrossReferenceGroupModel' })
+    @Prop({ type: Types.ObjectId, ref: 'CrossReferenceGroupModel', index: true })
     crossReferenceGroupId: Types.ObjectId;
 
     @Prop({ default: 0 })
@@ -301,7 +366,12 @@ export class ProductModel {
     };
 
     @Prop({ type: [String], index: true })
-    oemCodes: string[]; // Denormalized Cache for Search
+    oemCodes: string[]; // Denormalized Cache for Search (raw codes, for display)
+
+    // Normalized counterpart of oemCodes (ver code-key.util normalizeCode) — this is
+    // what search actually queries against; oemCodes stays raw for display/auditing.
+    @Prop({ type: [String], index: true })
+    oemCodesKeys: string[];
 
     @Prop({ type: [String], index: true })
     applicationSummary: string[]; // SEO Keywords: "Civic 2008", "Corolla 2010"
@@ -323,6 +393,104 @@ export class ProductModel {
 
     @Prop({ type: String })
     catalogMotorizacao?: string;
+
+    // Free-text notes from the source catalog (e.g. Cofap's PRODUTO_OBS — "also
+    // available as SPA version, code SGP32477").
+    @Prop({ type: String })
+    catalogObservacao?: string;
+
+    // Source catalog's own "novidade"/promo/clearance flags and their validity
+    // window, as printed (e.g. Cofap's FlagLancamento + DataFlagLancamento/
+    // ValidFlagLancamento). Informational only — does not drive Rocket's own
+    // promotion/pricing logic.
+    @Prop({ type: Boolean })
+    catalogLancamento?: boolean;
+
+    @Prop({ type: Date })
+    catalogLancamentoData?: Date;
+
+    @Prop({ type: Date })
+    catalogLancamentoValidade?: Date;
+
+    @Prop({ type: Boolean })
+    catalogPromocao?: boolean;
+
+    @Prop({ type: Date })
+    catalogPromocaoData?: Date;
+
+    @Prop({ type: Date })
+    catalogPromocaoValidade?: Date;
+
+    @Prop({ type: Boolean })
+    catalogPontaEstoque?: boolean;
+
+    // Cofap's "cor de identificação" — paint-color coding printed on gas-spring
+    // parts to distinguish variants at a glance (e.g. "1 AZUL + 1 OU 2 BRANCAS").
+    // Free text, only meaningful for that product family.
+    @Prop({ type: String })
+    catalogCorIdentificacao?: string;
+
+    // Absolute paths to extra reference photos from the source catalog install
+    // (beyond `arquivoImagem`/the main product image). These are catalog
+    // reference images, not marketplace listing photos — kept separate from
+    // `images`, which is the curated set actually published to marketplaces.
+    @Prop({ type: [String] })
+    catalogImagensExtras?: string[];
+
+    // Raw per-vehicle application rows from the source catalog (e.g. Cofap's
+    // PRODUTO_APLICACAO/APLICACAO join) — one entry per make+model+period the
+    // catalog lists. NOT resolved against vehicle_compatibilities yet; feeds a
+    // separate matching step that creates real product_compatibilities records.
+    @Prop({ type: [SchemaFactory.createForClass(ProductCatalogApplication)] })
+    catalogApplications?: ProductCatalogApplication[];
+
+    // partNumbers of OTHER products in the SAME source catalog that it lists as
+    // "similar" (e.g. Delphi's SIMILAR table — often an obsolete product
+    // pointing at its replacement, not necessarily an interchangeable part).
+    // Raw partNumber references, not resolved to ObjectIds — the target
+    // product may not exist yet at import time, and re-resolving by
+    // partNumber on read keeps this from going stale if a product is re-imported.
+    @Prop({ type: [String] })
+    catalogSimilarCodes?: string[];
+
+    // partNumbers of OTHER products in the SAME catalog that share at least
+    // one vehicle application with this product (e.g. Schaeffler's "Relacionados
+    // à Aplicação" — an inner + outer clutch disc that both fit the same
+    // vehicle/engine). Different from catalogSimilarCodes: these are DISTINCT,
+    // complementary parts for the same fitment, not obsolete/replacement pairs.
+    // Computed by the source-catalog parser (products sharing a CodigoAplicacao),
+    // not a table in the source database itself. Raw partNumbers, same
+    // resolve-on-read rationale as catalogSimilarCodes.
+    @Prop({ type: [String] })
+    catalogRelatedByApplication?: string[];
+
+    // Country of manufacture, as printed by the source catalog (e.g. "Brasil",
+    // "China" — Schaeffler's CpoAuxProd33). Distinct from tax.origin (the NF
+    // ICMS-origin code, e.g. "0"/"1"/"2") — this is plain-text, catalog-provided
+    // provenance, not derived from any fiscal document.
+    @Prop({ type: String })
+    catalogPaisOrigem?: string;
+
+    // Free-text lifecycle status as printed by the source catalog (e.g.
+    // Schaeffler's "Ativo"/"Descontinuado", CpoAuxProd39) — informational only,
+    // does NOT drive Rocket's own `active` flag.
+    @Prop({ type: String })
+    catalogEstadoMaterial?: string;
+
+    // Raw per-product-type technical spec fields the source catalog exposes
+    // (e.g. Schaeffler's "Diâmetro do Disco", "Número de Estrias", "Amortecedor
+    // do Disco") that have no fixed meaning across the whole catalog — unlike
+    // the named catalog* fields above (which ARE stable catalog-wide), these
+    // vary by product family, so they're kept as raw code/value pairs instead
+    // of dedicated schema fields. See ProductCatalogAttribute.
+    @Prop({ type: [SchemaFactory.createForClass(ProductCatalogAttribute)] })
+    catalogAttributes?: ProductCatalogAttribute[];
+
+    // Component products that make up THIS product when it's a kit/set (e.g.
+    // Schaeffler's CONJ_PRODS — a "RepSet" clutch kit composed of separately
+    // sold disc/plate/bearing products). Empty for non-kit products.
+    @Prop({ type: [SchemaFactory.createForClass(ProductCatalogKitComponent)] })
+    catalogKitComponents?: ProductCatalogKitComponent[];
 
     /**
      * Resumo denormalizado de product_compatibilities — só para listagem/exibição rápida sem
@@ -390,6 +558,22 @@ export class ProductModel {
 
 export const ProductSchema = SchemaFactory.createForClass(ProductModel);
 
+// Unicidade de partNumberKey é por marca, não global — ver comentário do @Prop
+// acima. sparse: produtos sem partNumberKey (ex: domain:'general') não colidem.
+ProductSchema.index({ 'brand._id': 1, partNumberKey: 1 }, { unique: true, sparse: true });
+
+// Keeps partNumberKey/oemCodesKeys in sync with their raw counterparts on every
+// .save() (create/update paths use Mongoose documents). Bulk writes (e.g.
+// import-catalog's bulkWrite) bypass this hook and compute the keys explicitly.
+ProductSchema.pre('save', function (this: ProductDocument) {
+    if (this.isModified('partNumber')) {
+        this.partNumberKey = this.partNumber ? normalizeCode(this.partNumber) : undefined;
+    }
+    if (this.isModified('oemCodes')) {
+        this.oemCodesKeys = (this.oemCodes || []).map((c) => normalizeCode(c));
+    }
+});
+
 // Ensure Virtuals are included
 ProductSchema.set('toJSON', { virtuals: true });
 ProductSchema.set('toObject', { virtuals: true });
@@ -402,4 +586,15 @@ ProductSchema.index({ active: 1, 'category': 1 });
 ProductSchema.index({ partNumber: 1, 'brand.name': 1 });
 ProductSchema.index({ active: 1, ratingAverage: -1 }); // Sorting by best rated active products
 ProductSchema.index({ active: 1, isUniversalFit: 1, relevanceScore: -1 }); // Rails da home (universal/best-sellers)
+
+// active stopped being a highly selective filter after the July 2026 catalog
+// backfill (~147k products flipped active:false -> active:true — see
+// activateAllInactiveProducts). Queries that filter ONLY on active and sort
+// by a field with no supporting index fell back to in-memory sort over the
+// full active set. These cover that: best-sellers rail (active + relevanceScore,
+// without depending on isUniversalFit like the compound index above), and
+// findForStore/searchByBarcodeOrName's createdAt/updatedAt sorts.
+ProductSchema.index({ active: 1, relevanceScore: -1 });
+ProductSchema.index({ active: 1, createdAt: -1 });
+ProductSchema.index({ active: 1, updatedAt: -1 });
 

@@ -19,6 +19,7 @@ interface SyncResultMessage {
     errorMessage?: string;
     errorClassifier?: string;
     processedAt?: string;
+    metadata?: any;
 }
 
 @Injectable()
@@ -71,6 +72,24 @@ export class SyncResultConsumer {
                 externalId: msg.externalId,
                 marketplaceTag,
                 success: true,
+            });
+        } else if (msg.success && msg.metadata?.asyncPending && msg.metadata?.importToken) {
+            // OLX (e outros fluxos assíncronos): import aceito, list_id ainda não emitido.
+            // O reconciler (ex.: OLXReconciliationService) consulta o importToken depois.
+            await this.listingModel.findByIdAndUpdate(msg.listingId, {
+                $set: {
+                    status: 'pending_creation',
+                    synchronized: false,
+                    errorMessage: null,
+                    lastSyncAt: new Date(),
+                    publishingAt: null,
+                    'marketplaceData.syncMetadata': {
+                        asyncPending: true,
+                        importToken: msg.metadata.importToken,
+                        reconcileAttempts: 0,
+                        nextCheckAt: new Date().toISOString(),
+                    },
+                },
             });
         } else if (!msg.success) {
             await this.listingModel.findByIdAndUpdate(msg.listingId, {

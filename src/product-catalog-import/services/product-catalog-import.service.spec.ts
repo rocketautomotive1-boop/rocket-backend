@@ -203,10 +203,12 @@ describe('ProductCatalogImportService', () => {
 
       expect(result).toEqual({ productId: newProductId });
       expect(productModel.create).toHaveBeenCalled();
-      expect(compatibilityModel.insertMany).toHaveBeenCalledWith(
-        [expect.objectContaining({ vehicleId: 'v1', productId: newProductId })],
-        { session },
-      );
+      expect(compatibilityModel.insertMany).toHaveBeenCalledTimes(1);
+      const [rows, options] = compatibilityModel.insertMany.mock.calls[0];
+      expect(options).toEqual({ session });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ vehicleId: 'v1' });
+      expect(String(rows[0].product)).toBe(newProductId);
       expect(session.commitTransaction).toHaveBeenCalled();
       expect(session.abortTransaction).not.toHaveBeenCalled();
     });

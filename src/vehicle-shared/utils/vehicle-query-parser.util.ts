@@ -1,11 +1,11 @@
 import { collapseSpaces } from './string.util';
-import { normalizeDisplacementCc, normalizeFuelTags } from './vehicle-normalizer.util';
+import { normalizeFuelTags } from './vehicle-normalizer.util';
 
 export interface ParsedVehicleQuery {
   freeText: string;
   yearRange?: { from: number; to: number };
   fuelTags?: string[];
-  displacementCc?: number;
+  engineDisplay?: string;
 }
 
 const YEAR_RANGE_RE = /\b(\d{4})\s*-\s*(\d{4})\b/;
@@ -40,10 +40,10 @@ export function parseVehicleQuery(raw: string): ParsedVehicleQuery {
   }
   remaining = remainingTokens.join(' ');
 
-  let displacementCc: number | undefined;
+  let engineDisplay: string | undefined;
   const displacementMatch = remaining.match(DISPLACEMENT_RE);
   if (displacementMatch) {
-    displacementCc = normalizeDisplacementCc(displacementMatch[0]);
+    engineDisplay = displacementMatch[0];
     remaining = remaining.replace(DISPLACEMENT_RE, ' ');
   }
 
@@ -51,6 +51,6 @@ export function parseVehicleQuery(raw: string): ParsedVehicleQuery {
     freeText: collapseSpaces(remaining),
     yearRange,
     fuelTags: fuelTags.length > 0 ? [...new Set(fuelTags)] : undefined,
-    displacementCc,
+    engineDisplay,
   };
 }

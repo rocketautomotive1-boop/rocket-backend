@@ -18,6 +18,16 @@ export class VehicleCompatibilityGroupNotFoundException extends NotFoundExceptio
   }
 }
 
+export class VehicleCompatibilityInUseException extends ConflictException {
+  constructor(count: number, products: Array<{ id: string; name: string }>) {
+    super({
+      message: `Veículo vinculado a ${count} produto(s); remova a compatibilidade antes de excluir.`,
+      count,
+      products,
+    });
+  }
+}
+
 export class VehicleDiscoveryDuplicateException extends ConflictException {
   constructor(lockKey: string) {
     super(`Duplicate pending/processing discovery for key: ${lockKey}`);

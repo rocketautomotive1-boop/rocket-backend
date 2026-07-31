@@ -26,7 +26,7 @@ export class ProductCompatibilityPositionService {
     const compat = await this.compatModel.findById(compatibilityId).lean().exec();
     if (!compat) return;
 
-    const product = await this.productModel.findById(compat.productId).lean().exec();
+    const product = await this.productModel.findById(compat.product).lean().exec();
     const partNumber = product?.partNumber;
     const brandName = product?.brand?.name;
 

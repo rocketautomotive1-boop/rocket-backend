@@ -11,9 +11,6 @@ export class ProductCompatibilityModel {
     @Prop({ type: Types.ObjectId, ref: 'ProductModel', required: true, index: true })
     product: ProductModel;
 
-    @Prop({ index: true })
-    productId: string;
-
     /** _id do vehicle_compatibilities correspondente (base própria). */
     @Prop({ required: true, index: true })
     vehicleId: string;
@@ -67,12 +64,24 @@ export class ProductCompatibilityModel {
      */
     @Prop({ index: true })
     searchText?: string;
+
+    /**
+     * 'manual' (default): cadastrada diretamente para este produto. 'group-suggestion':
+     * gerada automaticamente porque um produto irmão do mesmo cross_reference_group
+     * (equivalência de código, ex. Tecfil PSL55 = Mann W940) ganhou esta compatibilidade —
+     * ver CompatibilityGroupPropagationService. Nunca sobrescreve uma linha 'manual' existente.
+     */
+    @Prop({ type: String, enum: ['manual', 'group-suggestion'], default: 'manual' })
+    origin?: 'manual' | 'group-suggestion';
+
+    /** groupId de cross_reference_groups que originou esta sugestão (só quando origin='group-suggestion'). */
+    @Prop({ type: Types.ObjectId, ref: 'CrossReferenceGroupModel' })
+    sourceGroupId?: Types.ObjectId;
 }
 
 export const ProductCompatibilitySchema = SchemaFactory.createForClass(ProductCompatibilityModel);
 
 // Compound index for fast lookup of a specific vehicle for a product
-ProductCompatibilitySchema.index({ productId: 1, vehicleId: 1 });
 ProductCompatibilitySchema.index({ product: 1, vehicleId: 1 });
 // Reverse lookup: dado um veículo, encontrar produtos compatíveis.
-ProductCompatibilitySchema.index({ vehicleId: 1, productId: 1 });
+ProductCompatibilitySchema.index({ vehicleId: 1, product: 1 });

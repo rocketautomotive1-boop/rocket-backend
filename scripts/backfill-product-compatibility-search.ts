@@ -7,8 +7,11 @@ dotenvConfig();
 /**
  * Backfill idempotente de searchText (por vínculo, product_compatibilities) e
  * compatibilitySummary (denormalizado no Product), preenchendo os dois campos na mesma
- * passada agrupada por productId. Ver docs/superpowers/specs/2026-07-09-product-vehicle-search-design.md,
- * "Migração de dados".
+ * passada agrupada por product (ObjectId, fonte de verdade — ver
+ * docs/superpowers/specs/2026-07-09-product-vehicle-search-design.md, "Migração de dados").
+ *
+ * Reescrito porque a versão anterior agrupava/consultava por `productId` (campo string
+ * removido do schema — órfão desde que a escrita passou a preencher só `product`).
  */
 async function main(): Promise<void> {
   const uri = process.env.MONGODB_URI || process.env.MONGO_URI;
@@ -22,25 +25,28 @@ async function main(): Promise<void> {
 
   console.log('[backfill-search] connected');
 
-  const productIds = await productCompatibilities.distinct('productId');
-  console.log(`[backfill-search] ${productIds.length} produtos com compatibilidades`);
+  const productObjectIds: mongoose.Types.ObjectId[] = await productCompatibilities.distinct('product');
+  console.log(`[backfill-search] ${productObjectIds.length} produtos com compatibilidades`);
 
   let productsProcessed = 0;
   let rowsUpdated = 0;
 
-  for (const productId of productIds) {
-    if (!productId) continue;
+  for (const productObjectId of productObjectIds) {
+    if (!productObjectId) continue;
 
-    const product = mongoose.Types.ObjectId.isValid(productId)
-      ? await products.findOne({ _id: new mongoose.Types.ObjectId(productId) }, { projection: { name: 1, oemCodes: 1, attributes: 1 } })
-      : null;
+    const product = await products.findOne(
+      { _id: productObjectId },
+      { projection: { name: 1, displayName: 1, partNumber: 1, oemCodes: 1, attributes: 1 } },
+    );
+
+    const productName = product?.displayName ?? product?.name;
 
     const equivalentOemCodes = (product?.attributes ?? [])
       .filter((a: any) => a.code === 'EQUIVALENT_OEM')
       .map((a: any) => a.valueName ?? a.value)
       .filter(Boolean);
 
-    const rows = await productCompatibilities.find({ productId }).toArray();
+    const rows = await productCompatibilities.find({ product: productObjectId }).toArray();
 
     const vehicleIds = [...new Set(rows.map((r) => r.vehicleId).filter(Boolean))]
       .filter((id) => mongoose.Types.ObjectId.isValid(id))
@@ -57,7 +63,8 @@ async function main(): Promise<void> {
       if (vehicle?.model) models.add(vehicle.model);
 
       const tokens = [
-        product?.name,
+        productName,
+        product?.partNumber,
         ...(product?.oemCodes ?? []),
         ...equivalentOemCodes,
         vehicle?.make,
@@ -75,21 +82,19 @@ async function main(): Promise<void> {
       rowsUpdated++;
     }
 
-    if (mongoose.Types.ObjectId.isValid(productId)) {
-      await products.updateOne(
-        { _id: new mongoose.Types.ObjectId(productId) },
-        {
-          $set: {
-            compatibilitySummary: {
-              makes: [...makes],
-              models: [...models],
-              vehicleCount: rows.length,
-              updatedAt: new Date(),
-            },
+    await products.updateOne(
+      { _id: productObjectId },
+      {
+        $set: {
+          compatibilitySummary: {
+            makes: [...makes],
+            models: [...models],
+            vehicleCount: rows.length,
+            updatedAt: new Date(),
           },
         },
-      );
-    }
+      },
+    );
 
     productsProcessed++;
   }

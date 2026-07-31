@@ -30,7 +30,7 @@ import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { RembgEnqueueService } from '../gateways/rembg-enqueue.service';
 import { imageSlotsSchema, ImageSlot } from './dto/image-slots.dto';
 import { ProductVehicleSearchService } from './services/product-vehicle-search.service';
-import { CategoryHintService } from './services/category-hint.service';
+import { TitleCategoryHintService } from './services/title-category-hint.service';
 import { ProductRailsService, ProductRailType, ProductRailItem } from './services/product-rails.service';
 
 @ApiTags('Products')
@@ -46,7 +46,7 @@ export class ProductController {
     private readonly s3Service: S3Service,
     private readonly productFilterService: ProductFilterService,
     private readonly productCategoryService: ProductCategoryService,
-    private readonly categoryHintService: CategoryHintService,
+    private readonly titleCategoryHintService: TitleCategoryHintService,
     private readonly productTitleService: ProductTitleService,
     private readonly boxItemService: BoxItemService,
     private readonly boxService: BoxService,
@@ -844,6 +844,30 @@ export class ProductController {
     }
   }
 
+  @Get('autocomplete')
+  @ApiOperation({
+    summary: 'Sugestões de type-ahead conforme o usuário digita (nome/displayName/código do produto)',
+    description: 'Índice dedicado (edgeGram), separado da busca completa — resposta leve (sem facets/preço/paginação), pensada pra dropdown de busca. vehicleId opcional adiciona selo de compatibilidade + resumo de aplicações por sugestão.',
+  })
+  @ApiQuery({ name: 'q', required: true, type: String, description: 'Termo parcial digitado (mínimo 2 caracteres)' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Máximo de sugestões (padrão: 8)' })
+  @ApiQuery({ name: 'vehicleId', required: false, type: String, description: 'Veículo ativo da garagem — habilita compatibleWithVehicle por sugestão' })
+  async autocomplete(
+    @Query('q') q: string,
+    @Query('limit') limit?: number,
+    @Query('vehicleId') vehicleId?: string,
+  ): Promise<Array<{
+    id: string;
+    slug?: string;
+    label: string;
+    partNumber: string;
+    brand?: string;
+    compatibleWithVehicle?: boolean;
+    applicationsSummary?: string[];
+  }>> {
+    return this.productVehicleSearchService.autocomplete(q ?? '', limit ? Number(limit) : 8, vehicleId);
+  }
+
   @Get('rails/:railType')
   @ApiOperation({
     summary: 'Buscar produtos de um rail de recomendação da home',
@@ -945,15 +969,15 @@ export class ProductController {
 
   @Get('category-hint')
   @ApiOperation({
-    summary: 'Sugerir categoria a partir do histórico de uso de um displayName',
-    description: 'Consulta display_name_category_hints e retorna a categoria mais usada para o nome curto informado, se houver.',
+    summary: 'Sugerir categoria a partir do histórico de uso de um título curto',
+    description: 'Consulta title_category_hints e retorna a categoria mais usada para o titleId informado, se houver.',
   })
-  @ApiQuery({ name: 'displayName', required: true, type: String })
+  @ApiQuery({ name: 'titleId', required: true, type: String })
   async getCategoryHint(
-    @Query('displayName') displayName: string,
+    @Query('titleId') titleId: string,
   ): Promise<{ categoryId: string; categoryName: string; count: number } | null> {
-    if (!displayName) return null;
-    return this.categoryHintService.suggestCategory(displayName);
+    if (!titleId) return null;
+    return this.titleCategoryHintService.suggestCategory(titleId);
   }
 
   @Get(':id/inventory')

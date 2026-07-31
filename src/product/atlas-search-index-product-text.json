@@ -1,0 +1,47 @@
+{
+  "name": "product_text_search",
+  "mappings": {
+    "dynamic": false,
+    "fields": {
+      "name": { "type": "string" },
+      "titleText": { "type": "string" },
+      "titleSynonyms": { "type": "string" },
+      "subtitle": { "type": "string" },
+      "partNumber": { "type": "string" },
+      "partNumberKey": {
+        "type": "string",
+        "analyzer": "partCodeAnalyzer",
+        "searchAnalyzer": "partCodeAnalyzer"
+      },
+      "oemCodesKeys": {
+        "type": "string",
+        "analyzer": "partCodeAnalyzer",
+        "searchAnalyzer": "partCodeAnalyzer"
+      }
+    }
+  },
+  "analyzers": [
+    {
+      "name": "partCodeAnalyzer",
+      "charFilters": [
+        {
+          "type": "mapping",
+          "mappings": {
+            "-": "",
+            ".": "",
+            " ": ""
+          }
+        }
+      ],
+      "tokenizer": { "type": "keyword" },
+      "tokenFilters": [{ "type": "lowercase" }]
+    }
+  ],
+  "synonyms": [
+    {
+      "name": "product_text_synonyms",
+      "source": { "collection": "search_synonyms" },
+      "analyzer": "lucene.standard"
+    }
+  ]
+}

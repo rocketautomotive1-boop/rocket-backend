@@ -53,6 +53,11 @@ export class VehicleCompatibilityController {
     return this.service.findById(id);
   }
 
+  @Get(':id/usage')
+  getUsage(@Param('id') id: string) {
+    return this.service.getUsage(id);
+  }
+
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateVehicleCompatibilityDto) {
     return this.service.update(id, dto);

@@ -2,13 +2,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { VehicleCompatibilityDocument, VehicleCompatibilityModel } from '../schemas/vehicle-compatibility.schema';
+import { ProductCompatibilityModel } from '../../product/schemas/product-compatibility.schema';
+import { ProductModel } from '../../product/schemas/product.schema';
 import { CreateVehicleCompatibilityDto } from '../dto/create-vehicle-compatibility.dto';
 import { UpdateVehicleCompatibilityDto } from '../dto/update-vehicle-compatibility.dto';
 import { SearchVehicleCompatibilitiesDto } from '../dto/search-vehicle-compatibilities.dto';
 import { UpsertVehicleCompatibilityDto } from '../dto/upsert-vehicle-compatibility.dto';
 import { ResolveVehicleDto } from '../dto/resolve-vehicle.dto';
 import { VehicleCompatibilityFacetsDto } from '../dto/vehicle-compatibility-facets.dto';
-import { VehicleCompatibilityNotFoundException } from '../../vehicle-shared/exceptions/vehicle.exceptions';
+import {
+  VehicleCompatibilityInUseException,
+  VehicleCompatibilityNotFoundException,
+} from '../../vehicle-shared/exceptions/vehicle.exceptions';
 import {
   buildSearchText,
   computeDataQualityScore,
@@ -29,8 +34,6 @@ import { parseVehicleQuery, ParsedVehicleQuery } from '../../vehicle-shared/util
 import { VehicleMarket, VehicleOrigin } from '../../vehicle-shared/types/vehicle.types';
 import { VEHICLE_CONSTANTS } from '../../vehicle-shared/constants/vehicle.constants';
 
-const DISPLACEMENT_TOLERANCE_CC = 100;
-
 @Injectable()
 export class VehicleCompatibilityService {
   private readonly logger = new Logger(VehicleCompatibilityService.name);
@@ -38,6 +41,10 @@ export class VehicleCompatibilityService {
   constructor(
     @InjectModel(VehicleCompatibilityModel.name)
     private readonly model: Model<VehicleCompatibilityDocument>,
+    @InjectModel(ProductCompatibilityModel.name)
+    private readonly productCompatibilityModel: Model<ProductCompatibilityModel>,
+    @InjectModel(ProductModel.name)
+    private readonly productModel: Model<ProductModel>,
   ) {}
 
   async create(dto: CreateVehicleCompatibilityDto): Promise<VehicleCompatibilityDocument> {
@@ -107,7 +114,39 @@ export class VehicleCompatibilityService {
     return doc;
   }
 
+  /**
+   * Uso do veículo em product_compatibilities — base para bloquear exclusão (ver
+   * docs/superpowers/specs/2026-07-15-admin-vehicle-crud-design.md). `products` é limitado para
+   * exibição na UI; `count` é o total real.
+   */
+  async getUsage(id: string, limit = 20): Promise<{ count: number; products: Array<{ id: string; name: string }> }> {
+    const count = await this.productCompatibilityModel.countDocuments({ vehicleId: id }).exec();
+    if (count === 0) return { count: 0, products: [] };
+
+    const rows = await this.productCompatibilityModel
+      .find({ vehicleId: id })
+      .select('product')
+      .limit(limit)
+      .lean()
+      .exec();
+
+    const productIds = [...new Set(rows.map((r: any) => String(r.product)).filter(Boolean))];
+    const products = await this.productModel
+      .find({ _id: { $in: productIds } })
+      .select('name')
+      .lean()
+      .exec();
+
+    return {
+      count,
+      products: products.map((p: any) => ({ id: String(p._id), name: p.name })),
+    };
+  }
+
   async deactivate(id: string): Promise<void> {
+    const usage = await this.getUsage(id);
+    if (usage.count > 0) throw new VehicleCompatibilityInUseException(usage.count, usage.products);
+
     const result = await this.model.updateOne({ _id: id }, { $set: { active: false } }).exec();
     if (result.matchedCount === 0) throw new VehicleCompatibilityNotFoundException(id);
   }
@@ -187,19 +226,33 @@ export class VehicleCompatibilityService {
     const limit = dto.limit ?? 20;
     const freeText = parsed?.freeText || dto.q;
 
+    const queryTokens = (freeText ?? '').split(/\s+/).filter(Boolean);
+
+    // Cada token da busca precisa aparecer em pelo menos um campo forte (make/model/version/
+    // searchText) — evita que "Grand Vitara" retorne veículos que só batem em "grand" OU
+    // "vitara" isoladamente via aliases/tags/fuzzy. Esses campos fracos só ajustam o ranking.
+    const tokenMustClauses = queryTokens.map((token) => ({
+      compound: {
+        should: [
+          { text: { query: token, path: 'makeKey', score: { boost: { value: 5 } } } },
+          { text: { query: token, path: 'modelKey', score: { boost: { value: 5 } } } },
+          { text: { query: token, path: 'versionKey', score: { boost: { value: 3 } } } },
+          { text: { query: token, path: 'searchText', score: { boost: { value: 1 } } } },
+        ],
+        minimumShouldMatch: 1,
+      },
+    }));
+
     const searchStage: any = {
       $search: {
         index: 'vehicle_compatibility_search',
         compound: {
+          must: tokenMustClauses,
           should: [
-            { text: { query: freeText, path: 'makeKey', score: { boost: { value: 5 } } } },
-            { text: { query: freeText, path: 'modelKey', score: { boost: { value: 5 } } } },
-            { text: { query: freeText, path: 'versionKey', score: { boost: { value: 3 } } } },
             { text: { query: freeText, path: 'aliases', score: { boost: { value: 2 } } } },
             { text: { query: freeText, path: 'tags', score: { boost: { value: 1 } } } },
             { text: { query: freeText, path: 'searchText', fuzzy: { maxEdits: 1 }, score: { boost: { value: 1 } } } },
           ],
-          minimumShouldMatch: 1,
           filter: [],
         },
       },
@@ -224,13 +277,9 @@ export class VehicleCompatibilityService {
         in: { path: 'fuelTags', value: parsed.fuelTags },
       });
     }
-    if (parsed?.displacementCc !== undefined) {
+    if (parsed?.engineDisplay !== undefined) {
       searchStage.$search.compound.filter.push({
-        range: {
-          path: 'displacementCc',
-          gte: parsed.displacementCc - DISPLACEMENT_TOLERANCE_CC,
-          lte: parsed.displacementCc + DISPLACEMENT_TOLERANCE_CC,
-        },
+        equals: { path: 'engineDisplay', value: parsed.engineDisplay },
       });
     }
 
@@ -260,11 +309,8 @@ export class VehicleCompatibilityService {
       if (parsed?.fuelTags?.length) {
         filter.fuelTags = { $in: parsed.fuelTags };
       }
-      if (parsed?.displacementCc !== undefined) {
-        filter.displacementCc = {
-          $gte: parsed.displacementCc - DISPLACEMENT_TOLERANCE_CC,
-          $lte: parsed.displacementCc + DISPLACEMENT_TOLERANCE_CC,
-        };
+      if (parsed?.engineDisplay !== undefined) {
+        filter.engineDisplay = parsed.engineDisplay;
       }
 
       const [data, total] = await Promise.all([

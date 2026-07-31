@@ -80,11 +80,19 @@ const FUEL_TAG_DICTIONARY: Array<{ tag: string; substrings: string[] }> = [
   { tag: 'diesel', substrings: ['diesel'] },
   { tag: 'gasoline', substrings: ['gasolina', 'gasol'] },
   { tag: 'ethanol', substrings: ['alcool', 'etanol'] },
-  { tag: 'flex', substrings: ['flex'] },
   { tag: 'hybrid', substrings: ['hibrid'] },
   { tag: 'electric', substrings: ['eletric'] },
   { tag: 'cng', substrings: ['gnv', 'gas natural', 'cng'] },
 ];
+
+/**
+ * "flex" no PT-BR significa "aceita gasolina e álcool" — os registros nunca são gravados com a
+ * tag literal 'flex' (o campo fuelType vem como "Gasolina e álcool" e normaliza para
+ * ['gasoline','ethanol']). Por isso o token de busca "flex" precisa expandir para as duas tags
+ * reais, senão o filtro fuelTags nunca casa com nenhum documento.
+ */
+const FLEX_SUBSTRINGS = ['flex'];
+const FLEX_EXPANSION = ['gasoline', 'ethanol'];
 
 /** Mapeia texto livre de combustível (PT-BR, incl. compostos "X e Y", "X/Y") pra tags do VehicleFuelType. */
 export function normalizeFuelTags(raw?: string): string[] {
@@ -94,6 +102,10 @@ export function normalizeFuelTags(raw?: string): string[] {
   const tags = FUEL_TAG_DICTIONARY.filter(({ substrings }) =>
     substrings.some((s) => str.includes(s)),
   ).map(({ tag }) => tag);
+
+  if (FLEX_SUBSTRINGS.some((s) => str.includes(s))) {
+    tags.push(...FLEX_EXPANSION);
+  }
 
   return [...new Set(tags)];
 }

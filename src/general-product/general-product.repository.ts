@@ -4,6 +4,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ProductModel, ProductDocument } from '../product/schemas/product.schema';
 import { buildUniqueProductSlug } from '../product/utils/product-slug.util';
+import { ProductShortTitleService } from '../product/services/product-short-title.service';
 
 /** Domínio dos itens gerais no ProductModel unificado. */
 const GENERAL_DOMAIN = 'general';
@@ -27,6 +28,7 @@ export class GeneralProductRepository {
   constructor(
     @InjectModel(ProductModel.name)
     private readonly model: Model<ProductDocument>,
+    private readonly shortTitleService: ProductShortTitleService,
   ) {}
 
   async create(data: Partial<ProductModel>): Promise<GeneralProductDto> {
@@ -82,18 +84,28 @@ export class GeneralProductRepository {
     patch: Partial<ProductModel>,
   ): Promise<GeneralProductDto | null> {
     // Defesa extra: jamais deixar draftData/barcode/domain entrar no $set.
-    const { draftData, barcode: _b, domain: _d, ...safe } = (patch ?? {}) as Record<string, any>;
+    const { draftData, barcode: _b, domain: _d, title, ...safe } = (patch ?? {}) as Record<string, any>;
+
+    // `title` (texto) resolve/cria um ProductShortTitle reutilizável, igual ao fluxo de
+    // autopeças (ProductService.update) — mesmo padrão de sinônimo/reuso entre domínios.
+    if (title) {
+      const shortTitle = await this.shortTitleService.createOrGet(title);
+      safe.titleId = shortTitle._id;
+      safe.titleText = shortTitle.text;
+      safe.titleSynonyms = shortTitle.synonyms;
+    }
 
     // Itens gerais nascem sem nome real (ensureByBarcode só sabe o barcode), então
-    // slug só ganha sentido quando displayName/name chega pela primeira vez aqui —
+    // slug só ganha sentido quando titleText/name chega pela primeira vez aqui —
     // regenerar sempre que um dos dois mudar mantém a URL alinhada ao nome atual.
-    if (safe.displayName !== undefined || safe.name !== undefined) {
+    if (safe.titleText !== undefined || safe.name !== undefined) {
       const existing = await this.model.findOne({ barcode, domain: GENERAL_DOMAIN }).lean().exec();
-      const nextDisplayName = safe.displayName !== undefined ? safe.displayName : existing?.displayName;
+      const nextTitleText = safe.titleText !== undefined ? safe.titleText : existing?.titleText;
+      const nextSubtitle = safe.subtitle !== undefined ? safe.subtitle : existing?.subtitle;
       const nextName = safe.name !== undefined ? safe.name : existing?.name;
-      if (nextDisplayName || nextName) {
+      if (nextTitleText || nextName) {
         safe.slug = await buildUniqueProductSlug(
-          { displayName: nextDisplayName, name: nextName, barcode },
+          { titleText: nextTitleText, subtitle: nextSubtitle, name: nextName, barcode },
           async (candidate) => !!(await this.model.findOne({ slug: candidate, barcode: { $ne: barcode } })),
         );
       }

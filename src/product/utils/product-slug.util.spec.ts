@@ -1,9 +1,9 @@
-import { buildProductSlug, shouldRegenerateSlugForDisplayName } from './product-slug.util';
+import { buildProductSlug, shouldRegenerateSlugForTitle } from './product-slug.util';
 
 describe('buildProductSlug', () => {
-  it('monta displayName + brand.shortName + partNumber', () => {
+  it('monta titleText + brand.shortName + partNumber', () => {
     const slug = buildProductSlug({
-      displayName: 'Filtro de combustível',
+      titleText: 'Filtro de combustível',
       brandShortName: 'Mitsubishi',
       partNumber: 'CAPA2936',
     });
@@ -11,7 +11,18 @@ describe('buildProductSlug', () => {
     expect(slug).toBe('filtro-de-combustivel-mitsubishi-capa2936');
   });
 
-  it('cai pra name quando não há displayName', () => {
+  it('inclui subtitle depois do titleText', () => {
+    const slug = buildProductSlug({
+      titleText: 'Parafuso',
+      subtitle: 'Dianteiro do Virabrequim',
+      brandShortName: 'Mitsubishi',
+      partNumber: 'CAPA2936',
+    });
+
+    expect(slug).toBe('parafuso-dianteiro-do-virabrequim-mitsubishi-capa2936');
+  });
+
+  it('cai pra name quando não há titleText', () => {
     const slug = buildProductSlug({
       name: 'CAPA2936',
       brandShortName: 'Mitsubishi',
@@ -23,7 +34,7 @@ describe('buildProductSlug', () => {
 
   it('omite a marca quando brandShortName não está presente', () => {
     const slug = buildProductSlug({
-      displayName: 'Filtro de combustível',
+      titleText: 'Filtro de combustível',
       partNumber: 'CAPA2936',
     });
 
@@ -32,7 +43,7 @@ describe('buildProductSlug', () => {
 
   it('cai pra barcode quando não há partNumber', () => {
     const slug = buildProductSlug({
-      displayName: 'Filtro de combustível',
+      titleText: 'Filtro de combustível',
       brandShortName: 'Mitsubishi',
       barcode: '7891234567890',
     });
@@ -41,38 +52,38 @@ describe('buildProductSlug', () => {
   });
 });
 
-describe('shouldRegenerateSlugForDisplayName', () => {
-  it('retorna true quando o slug atual foi construído a partir de name/partNumber (nunca promovido pra displayName)', () => {
-    const result = shouldRegenerateSlugForDisplayName({
+describe('shouldRegenerateSlugForTitle', () => {
+  it('retorna true quando o slug atual foi construído a partir de name/partNumber (nunca promovido pro title)', () => {
+    const result = shouldRegenerateSlugForTitle({
       currentSlug: 'capa2936-mitsubishi-capa2936',
       name: 'CAPA2936',
       brandShortName: 'Mitsubishi',
       partNumber: 'CAPA2936',
-      newDisplayName: 'Filtro de combustível',
+      newTitleText: 'Filtro de combustível',
     });
 
     expect(result).toBe(true);
   });
 
-  it('retorna false quando o slug atual já reflete um displayName anterior (não sobrescreve URL indexada)', () => {
-    const result = shouldRegenerateSlugForDisplayName({
+  it('retorna false quando o slug atual já reflete um title anterior (não sobrescreve URL indexada)', () => {
+    const result = shouldRegenerateSlugForTitle({
       currentSlug: 'filtro-de-oleo-mitsubishi-capa2936',
       name: 'CAPA2936',
       brandShortName: 'Mitsubishi',
       partNumber: 'CAPA2936',
-      newDisplayName: 'Filtro de combustível',
+      newTitleText: 'Filtro de combustível',
     });
 
     expect(result).toBe(false);
   });
 
   it('retorna false quando não há slug atual (produto sem slug ainda, ex domain general)', () => {
-    const result = shouldRegenerateSlugForDisplayName({
+    const result = shouldRegenerateSlugForTitle({
       currentSlug: undefined,
       name: 'CAPA2936',
       brandShortName: 'Mitsubishi',
       partNumber: 'CAPA2936',
-      newDisplayName: 'Filtro de combustível',
+      newTitleText: 'Filtro de combustível',
     });
 
     expect(result).toBe(false);

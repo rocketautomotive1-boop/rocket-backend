@@ -9,13 +9,14 @@ describe('GeneralProductRepository (unified ProductModel, domain:general)', () =
   let connection: Connection;
   let model: Model<any>;
   let repo: GeneralProductRepository;
+  const shortTitleServiceStub = { createOrGet: jest.fn() } as any;
 
   beforeAll(async () => {
     server = await MongoMemoryServer.create();
     const m = await connect(server.getUri());
     connection = m.connection;
     model = connection.model(ProductModel.name, ProductSchema);
-    repo = new GeneralProductRepository(model);
+    repo = new GeneralProductRepository(model, shortTitleServiceStub);
   });
 
   afterAll(async () => {

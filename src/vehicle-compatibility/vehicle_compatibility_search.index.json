@@ -1,0 +1,46 @@
+{
+  "name": "vehicle_compatibility_search",
+  "collectionName": "vehicle_compatibilities",
+  "database": "<preencher com o nome do database>",
+  "mappings": {
+    "dynamic": false,
+    "fields": {
+      "makeKey": {
+        "type": "string"
+      },
+      "modelKey": {
+        "type": "string"
+      },
+      "versionKey": {
+        "type": "string"
+      },
+      "aliases": {
+        "type": "string"
+      },
+      "tags": {
+        "type": "string"
+      },
+      "searchText": {
+        "type": "string"
+      },
+      "active": {
+        "type": "boolean"
+      },
+      "market": {
+        "type": "string"
+      },
+      "years": {
+        "type": "number"
+      },
+      "fuelTags": {
+        "type": "string"
+      },
+      "displacementCc": {
+        "type": "number"
+      },
+      "engineDisplay": {
+        "type": "token"
+      }
+    }
+  }
+}

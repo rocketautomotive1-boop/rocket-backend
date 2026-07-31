@@ -132,7 +132,7 @@ export class ProductCatalogImportService {
         productId = await this.createNewProduct(dto, session);
       }
 
-      await this.attachCompatibilities(productId, dto.name, dto.vehicleIds, session);
+      await this.attachCompatibilities(productId, dto.name, dto.partNumber, dto.vehicleIds, session);
 
       await session.commitTransaction();
       return { productId };
@@ -230,13 +230,15 @@ export class ProductCatalogImportService {
   private async attachCompatibilities(
     productId: string,
     productName: string,
+    partNumber: string | undefined,
     vehicleIds: string[],
     session: any,
   ): Promise<void> {
     if (!vehicleIds.length) return;
 
+    const productObjectId = new Types.ObjectId(productId);
     const existing = await this.compatibilityModel
-      .find({ productId, vehicleId: { $in: vehicleIds } })
+      .find({ product: productObjectId, vehicleId: { $in: vehicleIds } } as any)
       .select('vehicleId')
       .session(session)
       .lean()
@@ -253,17 +255,15 @@ export class ProductCatalogImportService {
       .exec();
     const vehicleById = new Map(vehicles.map((v: any) => [String(v._id), v]));
 
-    const productObjectId = new Types.ObjectId(productId);
     const rows = newVehicleIds.map((vehicleId) => {
       const vehicle = vehicleById.get(vehicleId);
       return {
         product: productObjectId,
-        productId,
         vehicleId,
         vehicleName: vehicle ? `${vehicle.make} ${vehicle.model} ${vehicle.versionDisplay ?? vehicle.version}` : undefined,
         mlVehicleId: vehicle?.mlVehicleId,
         syncedWithMarketplace: false,
-        searchText: buildProductCompatibilitySearchText({ name: productName }, vehicle as any),
+        searchText: buildProductCompatibilitySearchText({ name: productName, partNumber }, vehicle as any),
       };
     });
 

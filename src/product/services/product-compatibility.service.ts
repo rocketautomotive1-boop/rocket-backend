@@ -8,6 +8,7 @@ import { buildProductCompatibilitySearchText } from '../utils/product-compatibil
 import { VehicleCompatibilityService } from '../../vehicle-compatibility/services/vehicle-compatibility.service';
 import { VehicleCompatibilityDocument } from '../../vehicle-compatibility/schemas/vehicle-compatibility.schema';
 import { ProductCompatibilityPositionService } from './product-compatibility-position.service';
+import { CompatibilityGroupPropagationService } from './compatibility-group-propagation.service';
 
 @Injectable()
 export class ProductCompatibilityService {
@@ -18,6 +19,7 @@ export class ProductCompatibilityService {
     @InjectModel(ProductModel.name) private productModel: Model<ProductModel>,
     private vehicleCompatibilityService: VehicleCompatibilityService,
     private positionService: ProductCompatibilityPositionService,
+    private groupPropagationService: CompatibilityGroupPropagationService,
   ) { }
 
   /** Busca em lote os veículos referenciados por vehicleId, indexados por _id (string). */
@@ -51,8 +53,14 @@ export class ProductCompatibilityService {
 
       const compatibility = new this.compatibilityModel({
         vehicleId: createDto.vehicleId,
-        mlVehicleId: createDto.mlVehicleId,
-        vehicleName: createDto.vehicleName,
+        mlVehicleId: createDto.mlVehicleId ?? (vehicle as any)?.mlVehicleId,
+        vehicleName:
+          createDto.vehicleName ??
+          (vehicle
+            ? [(vehicle as any).make, (vehicle as any).model, (vehicle as any).versionDisplay ?? (vehicle as any).version]
+                .filter(Boolean)
+                .join(' ')
+            : undefined),
         status: createDto.status,
         syncedWithMarketplace: createDto.syncedWithMarketplace,
         product: createDto.productId,
@@ -63,11 +71,14 @@ export class ProductCompatibilityService {
       this.logger.log(`Compatibilidade criada com sucesso: ${savedCompatibility.id}`);
       this.logger.log(` Detalhes da compatibilidade criada:`, {
         id: savedCompatibility.id,
-        productId: savedCompatibility.product,
+        product: savedCompatibility.product,
         vehicleId: savedCompatibility.vehicleId
       });
 
-      if (createDto.productId) await this.recomputeCompatibilitySummary(createDto.productId);
+      if (createDto.productId) {
+        await this.recomputeCompatibilitySummary(createDto.productId);
+        this.groupPropagationService.propagate(createDto.productId, createDto.vehicleId).catch(() => undefined);
+      }
 
       return savedCompatibility;
     } catch (error) {
@@ -136,7 +147,9 @@ export class ProductCompatibilityService {
       this.logger.log(`🆕 Compatibilidades novas a serem criadas: ${newVehicleIds.length}`);
 
       // 3. Buscar nome do produto e dados dos veículos (usados em todos os searchText do batch)
-      const productName = createDto.productId ? await this.getProductName(createDto.productId) : undefined;
+      const productSearchFields = createDto.productId
+        ? await this.getProductSearchFields(createDto.productId)
+        : undefined;
       const vehiclesById = await this.resolveVehiclesByIds(newVehicleIds);
 
       // 4. Preparar dados para inserção em batch (apenas productId)
@@ -147,12 +160,16 @@ export class ProductCompatibilityService {
         return {
           product: createDto.productId ? new Types.ObjectId(createDto.productId) : undefined, // Map to product field
           vehicleId,
-          mlVehicleId: vehicleDetails?.mlVehicleId,
-          vehicleName: vehicleDetails?.name,
+          mlVehicleId: vehicleDetails?.mlVehicleId ?? (vehicle as any)?.mlVehicleId,
+          // vehicleDetails é opcional (preenchido pela tela de busca manual) — quando o caller
+          // não passa (ex.: backfill em lote), cai pro nome já resolvido em vehiclesById, senão
+          // vehicleName fica undefined e o autocomplete (que lê esse campo, não
+          // compatibilitySummary) nunca mostra a aplicação pra essas linhas.
+          vehicleName: vehicleDetails?.name ?? (vehicle ? [(vehicle as any).make, (vehicle as any).model, (vehicle as any).versionDisplay ?? (vehicle as any).version].filter(Boolean).join(' ') : undefined),
           status: 'active',
           syncedWithMarketplace: false,
           searchText: buildProductCompatibilitySearchText(
-            { name: productName },
+            productSearchFields ?? {},
             vehicle
               ? {
                   make: vehicle.make,
@@ -179,7 +196,12 @@ export class ProductCompatibilityService {
       // 6. Buscar todas as compatibilidades (existentes + novas) em uma única query
       const allCompatibilities = await this.getAllCompatibilities(createDto);
 
-      if (createDto.productId) await this.recomputeCompatibilitySummary(createDto.productId);
+      if (createDto.productId) {
+        await this.recomputeCompatibilitySummary(createDto.productId);
+        for (const vehicleId of newVehicleIds) {
+          this.groupPropagationService.propagate(createDto.productId, vehicleId).catch(() => undefined);
+        }
+      }
 
       const endTime = Date.now();
       const duration = endTime - startTime;
@@ -313,15 +335,17 @@ export class ProductCompatibilityService {
     }
   }
 
-  async deleteCompatibility(id: string | number): Promise<void> {
+  /** Devolve o documento removido (null se não existia) — usado pelo caller para desfazer no ML por mlVehicleId. */
+  async deleteCompatibility(id: string | number): Promise<ProductCompatibilityModel | null> {
     try {
       const query = { _id: id };
       const existing = await this.compatibilityModel.findOne(query).exec();
       await this.compatibilityModel.deleteOne(query).exec();
       this.logger.log(`Compatibilidade ${id} deletada com sucesso`);
 
-      const productId = existing?.productId ?? (existing?.product ? String(existing.product) : undefined);
+      const productId = existing?.product ? String(existing.product) : undefined;
       if (productId) await this.recomputeCompatibilitySummary(productId);
+      return existing;
     } catch (error) {
       this.logger.error('Erro ao deletar compatibilidade:', error);
       throw new HttpException(
@@ -331,9 +355,9 @@ export class ProductCompatibilityService {
     }
   }
 
-  /** Remove várias compatibilidades de uma vez, recomputando o summary do produto UMA única vez. */
-  async deleteMultipleCompatibilities(ids: Array<string | number>): Promise<void> {
-    if (!ids.length) return;
+  /** Remove várias compatibilidades de uma vez, recomputando o summary do produto UMA única vez. Devolve os documentos removidos. */
+  async deleteMultipleCompatibilities(ids: Array<string | number>): Promise<ProductCompatibilityModel[]> {
+    if (!ids.length) return [];
     try {
       const existing = await this.compatibilityModel.find({ _id: { $in: ids } }).exec();
       await this.compatibilityModel.deleteMany({ _id: { $in: ids } }).exec();
@@ -341,10 +365,11 @@ export class ProductCompatibilityService {
 
       const productIds = [...new Set(
         existing
-          .map((c) => c.productId ?? (c.product ? String(c.product) : undefined))
+          .map((c) => (c.product ? String(c.product) : undefined))
           .filter((id): id is string => !!id),
       )];
       await Promise.all(productIds.map((productId) => this.recomputeCompatibilitySummary(productId)));
+      return existing;
     } catch (error) {
       this.logger.error('Erro ao deletar compatibilidades em lote:', error);
       throw new HttpException(
@@ -352,6 +377,22 @@ export class ProductCompatibilityService {
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
+  }
+
+  /**
+   * Remove TODAS as compatibilidades de um produto — usado ao marcar o produto
+   * como isUniversalFit (ver ProductService.update): universal é elegível em
+   * qualquer busca por veículo sem vínculo granular, então compatibilidades
+   * específicas salvas ficam redundantes/inconsistentes. Devolve a contagem
+   * removida (para feedback na UI).
+   */
+  async deleteAllForProduct(productId: string): Promise<number> {
+    if (!Types.ObjectId.isValid(productId)) return 0;
+    const result = await this.compatibilityModel.deleteMany({ product: new Types.ObjectId(productId) } as any).exec();
+    if (result.deletedCount > 0) {
+      await this.recomputeCompatibilitySummary(productId);
+    }
+    return result.deletedCount;
   }
 
   async markAsSynced(ids: Array<string | number>): Promise<void> {
@@ -429,19 +470,36 @@ export class ProductCompatibilityService {
     ).exec();
   }
 
-  private async getProductName(productId: string): Promise<string | undefined> {
+  /**
+   * `titleText`/`subtitle` são o nome comercial buscável (ex: "Filtro" + "de Combustível");
+   * `name` costuma ser o código/SKU técnico bruto (ex: "1643096080") sem significado textual —
+   * ver mesmo raciocínio em ProductVehicleSearchService.buildProductTextClauses. searchText
+   * precisa dos dois: título curto pra achar por termo comercial, partNumber pra achar por código.
+   */
+  private async getProductSearchFields(
+    productId: string,
+  ): Promise<{ name?: string; partNumber?: string } | undefined> {
     if (!Types.ObjectId.isValid(productId)) return undefined;
-    const product = await this.productModel.findById(productId).select('name').lean().exec();
-    return (product as any)?.name;
+    const product = await this.productModel
+      .findById(productId)
+      .select('name titleText subtitle partNumber')
+      .lean()
+      .exec();
+    if (!product) return undefined;
+    const shortName = [(product as any).titleText, (product as any).subtitle].filter(Boolean).join(' ');
+    return {
+      name: shortName || (product as any).name,
+      partNumber: (product as any).partNumber,
+    };
   }
 
   private async buildSearchText(
     dto: CreateCompatibilityDto,
     vehicle?: VehicleCompatibilityDocument,
   ): Promise<string> {
-    const productName = dto.productId ? await this.getProductName(dto.productId) : undefined;
+    const productSearchFields = dto.productId ? await this.getProductSearchFields(dto.productId) : undefined;
     return buildProductCompatibilitySearchText(
-      { name: productName },
+      productSearchFields ?? {},
       vehicle
         ? {
             make: (vehicle as any).make,

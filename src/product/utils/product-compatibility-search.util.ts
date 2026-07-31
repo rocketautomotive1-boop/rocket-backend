@@ -2,6 +2,7 @@ import { toLowerClean } from '../../vehicle-shared/utils/string.util';
 
 interface ProductSearchInput {
   name?: string;
+  partNumber?: string;
   oemCodes?: string[];
   attributes?: Array<{ code?: string; value?: string; valueName?: string }>;
 }
@@ -35,6 +36,7 @@ export function buildProductCompatibilitySearchText(
 
   const tokens = [
     product.name,
+    product.partNumber,
     ...(product.oemCodes ?? []),
     ...equivalentOemCodes,
     vehicle?.make,

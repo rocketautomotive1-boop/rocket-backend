@@ -16,18 +16,6 @@ export class MercadoLivreCompatibilityAdapter {
         return res.data;
     }
 
-    /** Itens no modelo User Product exigem compatibilidades em `/user-products/{id}/compatibilities`. */
-    private extractUserProductId(item: any): string | undefined {
-        if (!item || typeof item !== 'object') return undefined;
-        const v = item.user_product_id ?? item.user_product?.id;
-        if (v == null || v === '') return undefined;
-        return String(v);
-    }
-
-    private async fetchMlItem(itemId: string): Promise<any> {
-        return this.http.get<any>(`/items/${itemId}`, CTX('compat.fetchItem'));
-    }
-
       async getCatalogDomain(domainId: string): Promise<any> {
         try {
           this.logger.log(`Buscando domínio do catálogo ${domainId}.`);
@@ -210,6 +198,15 @@ export class MercadoLivreCompatibilityAdapter {
         }
       }
 
+      /**
+       * POST /items/{id}/compatibilities é ADITIVO (confirmado ao vivo contra a API:
+       * chamadas sucessivas ou um único payload com N produtos apenas acrescentam,
+       * nunca substituem a lista existente) e funciona tanto para itens normais
+       * quanto para itens no modelo User Product — não há necessidade de rotear
+       * para `/user-products/{id}/compatibilities` (esse endpoint aceita o mesmo
+       * payload mas responde 200 com created_compatibilities_count:0, um "sucesso"
+       * que na verdade não grava nada).
+       */
       async syncCompatibility(itemId: string, compatibilityData: any): Promise<any> {
         const body: Record<string, any> = {
           ...compatibilityData,
@@ -220,49 +217,19 @@ export class MercadoLivreCompatibilityAdapter {
           body.products = compatibilityData.vehicle_ids.map((id: string) => ({ id }));
         }
 
-        let userProductId: string | undefined;
-        try {
-          const itemData = await this.fetchMlItem(itemId);
-          userProductId = this.extractUserProductId(itemData);
-          if (userProductId) {
-            this.logger.log(`Item ${itemId} usa User Product user_product_id=${userProductId}`);
-          }
-        } catch (e: any) {
-          this.logger.warn(`GET /items/${itemId} antes do sync de compat falhou: ${e?.message}`);
-        }
-
-        const postCompat = async (path: string, label: string) => {
-          this.logger.log(`Sincronizando compatibilidade (${label}) item=${itemId}: ${path}`);
-          this.logger.log(`Payload: ${JSON.stringify(body)}`);
-          return this.http.post<any>(path, CTX(`syncCompat.${label}`), body);
-        };
+        this.logger.log(`Sincronizando compatibilidade item=${itemId}`);
+        this.logger.log(`Payload: ${JSON.stringify(body)}`);
 
         try {
-          if (userProductId) {
-            return await postCompat(`/user-products/${userProductId}/compatibilities`, 'user-products/.../compatibilities');
+          const result = await this.http.post<any>(`/items/${itemId}/compatibilities`, CTX('syncCompat'), body);
+          if (result?.created_compatibilities_count === 0 && Array.isArray(body.products) && body.products.length > 0) {
+            throw new InternalServerErrorException(
+              `ML aceitou a requisição mas não criou nenhuma compatibilidade (item=${itemId}).`,
+            );
           }
-          return await postCompat(`/items/${itemId}/compatibilities`, 'items/.../compatibilities');
+          return result;
         } catch (error: any) {
-          const msg = String(error.response?.data?.message || '');
-          const isUserProductMigrationError =
-            error.response?.status === 400 &&
-            (msg.includes('User Product') || msg.includes('user product'));
-
-          if (isUserProductMigrationError && !userProductId) {
-            try {
-              const itemData = await this.fetchMlItem(itemId);
-              const up = this.extractUserProductId(itemData);
-              if (up) {
-                this.logger.warn(
-                  `Retry: ML recusou /items/.../compat; usando User Product user_product_id=${up}`,
-                );
-                return await postCompat(`/user-products/${up}/compatibilities`, 'user-products/.../compatibilities(retry)');
-              }
-            } catch (retryErr: any) {
-              this.logger.error(`Retry User Product falhou: ${retryErr?.message}`);
-            }
-          }
-
+          if (error instanceof InternalServerErrorException) throw error;
           this.logger.error(`Erro ao sincronizar compatibilidade para o item ${itemId}:`, error.response?.data || error.message);
           if (error.response?.status) {
             this.logger.error(`Status code: ${error.response.status}`);
@@ -274,43 +241,38 @@ export class MercadoLivreCompatibilityAdapter {
         }
       }
 
-      async removeCompatibilityFromMarketplace(itemId: string, compatibilityId: string): Promise<any> {
-        let userProductId: string | undefined;
+      /** GET /items/{id}/compatibilities — lista atual registrada no ML. */
+      async getCompatibilities(itemId: string): Promise<any[]> {
         try {
-          const itemData = await this.fetchMlItem(itemId);
-          userProductId = this.extractUserProductId(itemData);
-        } catch {
-          // fallback para URL legacy
+          const res = await this.http.get<any>(`/items/${itemId}/compatibilities`, CTX('getCompatibilities'));
+          return Array.isArray(res?.products) ? res.products : [];
+        } catch (error: any) {
+          this.logger.error(`Erro ao buscar compatibilidades do item ${itemId}:`, error.response?.data || error.message);
+          throw new InternalServerErrorException('Erro ao buscar compatibilidades da API do Mercado Livre.');
+        }
+      }
+
+      /**
+       * Remove UMA compatibilidade pelo catalog_product_id (nosso `mlVehicleId`).
+       * O DELETE do ML exige o id INTERNO do registro de compatibilidade (ex.
+       * "18102892218"), diferente do catalog_product_id do veículo (ex.
+       * "MLB22578636") — por isso primeiro busca a lista atual para resolver o id.
+       * No-op silencioso se o veículo já não está mais compatível no ML.
+       */
+      async removeCompatibilityFromMarketplace(itemId: string, catalogProductId: string): Promise<any> {
+        const current = await this.getCompatibilities(itemId);
+        const match = current.find((p: any) => p?.catalog_product_id === catalogProductId);
+        if (!match?.id) {
+          this.logger.warn(`Compatibilidade ${catalogProductId} não encontrada no ML para item ${itemId}; nada a remover.`);
+          return { removed: false };
         }
 
-        const doDelete = async (path: string, label: string) => {
-          this.logger.log(`Removendo compatibilidade ${compatibilityId} (${label}) ${path}`);
-          return this.del(path, `removeCompat.${label}`);
-        };
-
         try {
-          if (userProductId) {
-            return await doDelete(`/user-products/${userProductId}/compatibilities/${compatibilityId}`, 'user-products');
-          }
-          return await doDelete(`/items/${itemId}/compatibilities/${compatibilityId}`, 'items');
+          this.logger.log(`Removendo compatibilidade ${catalogProductId} (ml id=${match.id}) do item ${itemId}`);
+          await this.del(`/items/${itemId}/compatibilities/${match.id}`, 'removeCompat');
+          return { removed: true };
         } catch (error: any) {
-          const msg = String(error.response?.data?.message || '');
-          const retryUp =
-            error.response?.status === 400 &&
-            (msg.includes('User Product') || msg.includes('user product')) &&
-            !userProductId;
-          if (retryUp) {
-            try {
-              const itemData = await this.fetchMlItem(itemId);
-              const up = this.extractUserProductId(itemData);
-              if (up) {
-                return await doDelete(`/user-products/${up}/compatibilities/${compatibilityId}`, 'user-products(retry)');
-              }
-            } catch {
-              /* fall through */
-            }
-          }
-          this.logger.error(`Erro ao remover compatibilidade ${compatibilityId} do item ${itemId}:`, error.response?.data || error.message);
+          this.logger.error(`Erro ao remover compatibilidade ${catalogProductId} do item ${itemId}:`, error.response?.data || error.message);
           throw new InternalServerErrorException(
             error.response?.data?.message || 'Erro ao remover compatibilidade da API do Mercado Livre.',
           );

@@ -1,10 +1,12 @@
 import { Test } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
+import { Types } from 'mongoose';
 import { ProductCompatibilityService } from './product-compatibility.service';
 import { ProductCompatibilityModel } from '../schemas/product-compatibility.schema';
 import { ProductModel } from '../schemas/product.schema';
 import { VehicleCompatibilityService } from '../../vehicle-compatibility/services/vehicle-compatibility.service';
 import { ProductCompatibilityPositionService } from './product-compatibility-position.service';
+import { CompatibilityGroupPropagationService } from './compatibility-group-propagation.service';
 
 describe('ProductCompatibilityService — disparo de resolução de posição', () => {
   let service: ProductCompatibilityService;
@@ -22,6 +24,7 @@ describe('ProductCompatibilityService — disparo de resolução de posição', 
         { provide: getModelToken(ProductModel.name), useValue: {} },
         { provide: VehicleCompatibilityService, useValue: {} },
         { provide: ProductCompatibilityPositionService, useValue: positionService },
+        { provide: CompatibilityGroupPropagationService, useValue: {} },
       ],
     }).compile();
 
@@ -52,5 +55,62 @@ describe('ProductCompatibilityService — disparo de resolução de posição', 
     await new Promise((resolve) => process.nextTick(resolve));
 
     expect(positionService.resolveForCompatibility).not.toHaveBeenCalled();
+  });
+});
+
+describe('ProductCompatibilityService — deleteAllForProduct (isUniversalFit)', () => {
+  let service: ProductCompatibilityService;
+  let compatModel: { deleteMany: jest.Mock; find: jest.Mock };
+  let productModel: { updateOne: jest.Mock };
+
+  beforeEach(async () => {
+    compatModel = {
+      deleteMany: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ deletedCount: 3 }) }),
+      find: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([]),
+      }),
+    };
+    productModel = { updateOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({}) }) };
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        ProductCompatibilityService,
+        { provide: getModelToken(ProductCompatibilityModel.name), useValue: compatModel },
+        { provide: getModelToken(ProductModel.name), useValue: productModel },
+        { provide: VehicleCompatibilityService, useValue: { findManyByIds: jest.fn().mockResolvedValue([]) } },
+        { provide: ProductCompatibilityPositionService, useValue: {} },
+        { provide: CompatibilityGroupPropagationService, useValue: {} },
+      ],
+    }).compile();
+
+    service = moduleRef.get(ProductCompatibilityService);
+  });
+
+  const productId = new Types.ObjectId().toString();
+
+  it('remove todas as compatibilidades do produto e recomputa o summary', async () => {
+    const count = await service.deleteAllForProduct(productId);
+
+    expect(compatModel.deleteMany).toHaveBeenCalledWith({ product: new Types.ObjectId(productId) });
+    expect(count).toBe(3);
+    expect(productModel.updateOne).toHaveBeenCalled(); // recomputeCompatibilitySummary disparado
+  });
+
+  it('não recomputa summary quando nada foi removido', async () => {
+    compatModel.deleteMany.mockReturnValue({ exec: jest.fn().mockResolvedValue({ deletedCount: 0 }) });
+
+    const count = await service.deleteAllForProduct(productId);
+
+    expect(count).toBe(0);
+    expect(productModel.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('retorna 0 sem tocar no banco quando productId é inválido', async () => {
+    const count = await service.deleteAllForProduct('not-an-object-id');
+
+    expect(count).toBe(0);
+    expect(compatModel.deleteMany).not.toHaveBeenCalled();
   });
 });
