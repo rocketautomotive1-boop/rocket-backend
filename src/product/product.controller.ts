@@ -310,6 +310,7 @@ export class ProductController {
     }
   }
 
+  @SkipJwtAuth()
   @Get()
   @ApiOperation({
     summary: 'Listar produtos com filtros avançados',

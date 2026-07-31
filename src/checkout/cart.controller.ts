@@ -3,9 +3,13 @@ import { CartService } from './cart.service';
 import { CheckoutService } from './checkout.service';
 import { AddToCartDto } from './dto/add-to-cart.dto';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
+import { SkipJwtAuth } from '../auth/decorators/skip-jwt-auth.decorator';
 
 // Carrinho serve tanto convidado (session_id) quanto cliente logado (Bearer token).
-// OptionalJwtAuthGuard popula req.user quando há token válido, sem nunca bloquear.
+// OptionalJwtAuthGuard popula req.user quando há token válido, sem nunca bloquear —
+// por isso @SkipJwtAuth() a nível de classe, senão o JwtAuthGuard global exigiria
+// token obrigatório antes mesmo do OptionalJwtAuthGuard rodar.
+@SkipJwtAuth()
 @UseGuards(OptionalJwtAuthGuard)
 @Controller('cart')
 export class CartController {
