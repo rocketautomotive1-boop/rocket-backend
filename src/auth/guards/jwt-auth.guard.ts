@@ -11,6 +11,13 @@ export class JwtAuthGuard implements CanActivate {
   ) { }
 
   canActivate(context: ExecutionContext): boolean {
+    // Guard global (APP_GUARD) roda em todo ExecutionContext, incluindo handlers
+    // RPC (@RabbitSubscribe) — que não têm request HTTP nenhum. Autenticação de
+    // fila é responsabilidade do broker/rede interna, não deste guard.
+    if (context.getType() !== 'http') {
+      return true;
+    }
+
     // Verificar se a rota está marcada para pular autenticação JWT
     const skipAuth = this.reflector.getAllAndOverride<boolean>(
       SKIP_JWT_AUTH_KEY,
