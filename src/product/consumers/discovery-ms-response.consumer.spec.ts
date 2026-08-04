@@ -90,4 +90,26 @@ describe('DiscoveryMsResponseConsumer — sources.menorPreco', () => {
         expect(result).not.toHaveProperty('preferredSource');
         expect(result).not.toHaveProperty('breadcrumb');
     });
+
+    it('persiste no Mongo mas NÃO emite queue.job.update quando lateArrival=true', async () => {
+        const { consumer, setCalls, eventEmitter } = makeConsumer();
+        await consumer.handleResponse({
+            jobId: 'job4',
+            status: 'completed',
+            scrapedAt: new Date().toISOString(),
+            lateArrival: true,
+            results: {
+                titles: ['Filtro X (real ML)'],
+                mercadolivre: { items: [{ id: 'MLB1', images: [] }] },
+                serp: { items: [] },
+            },
+        });
+
+        const persisted = setCalls.find((s) => s.sources)?.sources;
+        expect(persisted?.mercadolivre.items).toHaveLength(1);
+        expect(eventEmitter.emit).not.toHaveBeenCalledWith(
+            'queue.job.update',
+            expect.objectContaining({ jobId: 'job4' }),
+        );
+    });
 });

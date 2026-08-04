@@ -27,8 +27,8 @@ export class DiscoveryMsResponseConsumer {
         queueOptions: { durable: true },
     })
     async handleResponse(msg: any) {
-        const { jobId, status, results, error, scrapedAt } = msg;
-        this.logger.log(`Received discovery response: jobId=${jobId} status=${status}`);
+        const { jobId, status, results, error, scrapedAt, lateArrival } = msg;
+        this.logger.log(`Received discovery response: jobId=${jobId} status=${status}${lateArrival ? ' (late arrival)' : ''}`);
 
         const discoveryDoc = await this.discoveryModel
             .findOne({ batchId: jobId })
@@ -167,6 +167,14 @@ export class DiscoveryMsResponseConsumer {
             { batchId: jobId, isActiveIntent: true, status: { $ne: 'superseded' } },
             { $set: updateData },
         ).exec();
+
+        if (lateArrival) {
+            // Real ML data arrived after the original job already timed out and completed —
+            // the Mongo update above corrects sources.mercadolivre for future reads, but the
+            // user already moved on with the SERP-fallback result, so don't reopen their UI.
+            this.logger.log(`Discovery job ${jobId} late arrival merged (ml=${results?.mercadolivre?.items?.length ?? 0}) — skipping realtime notification`);
+            return;
+        }
 
         const realtimeStatus: DiscoveryRealtimeStatus = status === 'completed' ? 'COMPLETED' : 'FAILED';
 
