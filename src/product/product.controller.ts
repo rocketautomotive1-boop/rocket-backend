@@ -28,6 +28,7 @@ import { BoxItemService } from './services/box-item.service';
 import { BoxService } from './services/box.service';
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { RembgEnqueueService } from '../gateways/rembg-enqueue.service';
+import { rembgOptionsSchema } from '../gateways/rembg-options.schema';
 import { imageSlotsSchema, ImageSlot } from './dto/image-slots.dto';
 import { ProductVehicleSearchService } from './services/product-vehicle-search.service';
 import { TitleCategoryHintService } from './services/title-category-hint.service';
@@ -1145,6 +1146,20 @@ export class ProductController {
       throw new BadRequestException('Nenhuma imagem enviada');
     }
 
+    // rembgOptions is optional — omitted/empty falls back to the schema's per-field
+    // defaults (same values that used to be hardcoded below), so old clients that
+    // never send this field keep working unchanged.
+    let rembgOptions: ReturnType<typeof rembgOptionsSchema.parse>;
+    try {
+      const rawOptions = typeof body.rembgOptions === 'string' ? JSON.parse(body.rembgOptions) : body.rembgOptions;
+      rembgOptions = rembgOptionsSchema.parse(rawOptions ?? {});
+    } catch (e: any) {
+      if (e instanceof ZodError) {
+        throw new BadRequestException(`Opções de rembg inválidas: ${e.issues.map(i => i.message).join('; ')}`);
+      }
+      throw new BadRequestException('Opções de rembg malformadas');
+    }
+
     const product = await this.productService.findOne(id);
     if (!product) {
       throw new BadRequestException(`Produto com ID ${id} não encontrado`);
@@ -1250,17 +1265,6 @@ export class ProductController {
     // slot 'failed' so the UI can surface it and the user can retry, never silently.
     if (rembgToEnqueue.length > 0) {
       const batchCode = `RB-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-      // Canonical processing options for the microservice (was hardcoded in the old WS
-      // consumer). Persisted on the job so retries/reconciliation reprocess identically.
-      const rembgOptions = {
-        crop: true,
-        shadow: true,
-        padding: 10,
-        target_size: 1000,
-        alpha_matting: true,
-        clahe: false,
-        model: 'isnet-general-use',
-      };
       for (const { slotId, file } of rembgToEnqueue) {
         try {
           await this.rembgEnqueueService.enqueue({
