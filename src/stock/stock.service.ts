@@ -18,6 +18,22 @@ export class StockService {
   constructor(private readonly repo: StockRepository) {}
 
   async move(input: StockMoveInput, externalSession?: ClientSession): Promise<{ movementId: string; lotId: string }> {
+    if (externalSession) return this.moveOnce(input, externalSession);
+
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await this.moveOnce(input);
+      } catch (err: any) {
+        const isTransient = err?.errorLabels?.includes('TransientTransactionError');
+        if (!isTransient || attempt === maxAttempts) throw err;
+        this.logger.warn(`[Stock] transient write conflict on move() — retry ${attempt}/${maxAttempts}`);
+      }
+    }
+    throw new Error('unreachable');
+  }
+
+  private async moveOnce(input: StockMoveInput, externalSession?: ClientSession): Promise<{ movementId: string; lotId: string }> {
     const dto = StockMoveSchema.parse(input);
     const productId = new Types.ObjectId(dto.productId);
 
@@ -110,6 +126,7 @@ export class StockService {
       condition?: 'new' | 'damaged' | 'used' | 'refurbished';
       reason?: string;
       reference?: string;
+      toBoxId?: string;
     },
     session?: ClientSession,
   ): Promise<{ movementId: string; lotId: string }> {
@@ -121,6 +138,7 @@ export class StockService {
         condition: input.condition ?? 'new',
         reason: input.reason,
         reference: input.reference,
+        toBoxId: input.toBoxId,
       },
       session,
     );
@@ -134,12 +152,14 @@ export class StockService {
     const original = await this.repo.movementModel.findById(movementId).lean().exec();
     if (!original) throw new BadRequestException(`Movement ${movementId} not found`);
     const delta = computeBalanceDelta((original as any).type, (original as any).quantity);
-    // Compensate the net onHand effect with an adjustment of the opposite sign.
+    const originalBoxId = (original as any).toBoxId ?? (original as any).fromBoxId;
+    // Compensate the net onHand effect with an adjustment of the opposite sign, in the same box.
     return this.adjust({
       productId: String((original as any).productId),
       quantity: -delta.onHand,
       condition: (original as any).condition ?? 'new',
       reason: `Estorno do movimento ${movementId}`,
+      toBoxId: originalBoxId ? String(originalBoxId) : undefined,
     });
   }
 
@@ -153,11 +173,13 @@ export class StockService {
     const oldDelta = computeBalanceDelta((original as any).type, (original as any).quantity);
     const newDelta = computeBalanceDelta((original as any).type, newQuantity);
     const diff = newDelta.onHand - oldDelta.onHand;
+    const originalBoxId = (original as any).toBoxId ?? (original as any).fromBoxId;
     return this.adjust({
       productId: String((original as any).productId),
       quantity: diff,
       condition: (original as any).condition ?? 'new',
       reason: `Correção do movimento ${movementId} (qtd ${(original as any).quantity} → ${newQuantity})`,
+      toBoxId: originalBoxId ? String(originalBoxId) : undefined,
     });
   }
 }

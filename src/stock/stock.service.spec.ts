@@ -126,4 +126,58 @@ describe('StockService (integration)', () => {
     const cost = await query.getProductCost(P2);
     expect(cost).toBeCloseTo(3, 2);
   });
+
+  it('editMovementViaAdjustment on a boxed movement corrects that box balance, not a phantom unlocated one', async () => {
+    const P3 = '650000000000000000000bcd';
+    const BOX = '650000000000000000009999';
+    const created = await svc.move({
+      productId: P3, type: StockMovementType.INBOUND, quantity: 10, condition: 'new', unitCost: 5, toBoxId: BOX, reference: 'box-edit-seed',
+    });
+
+    await svc.editMovementViaAdjustment(created.movementId, 6);
+
+    const byLocation = await query.getByLocation(P3);
+    const boxRow = byLocation.find((r: any) => String(r.boxId) === BOX);
+    const unlocatedRow = byLocation.find((r: any) => r.boxId == null);
+    expect(boxRow?.onHand).toBe(6);
+    expect(unlocatedRow).toBeUndefined();
+  });
+
+  it('reverseMovement on a boxed movement reverses that box balance, not a phantom unlocated one', async () => {
+    const P4 = '650000000000000000000cde';
+    const BOX = '650000000000000000009999';
+    const created = await svc.move({
+      productId: P4, type: StockMovementType.INBOUND, quantity: 8, condition: 'new', unitCost: 5, toBoxId: BOX, reference: 'box-delete-seed',
+    });
+
+    await svc.reverseMovement(created.movementId);
+
+    const byLocation = await query.getByLocation(P4);
+    const boxRow = byLocation.find((r: any) => String(r.boxId) === BOX);
+    const unlocatedRow = byLocation.find((r: any) => r.boxId == null);
+    expect(boxRow?.onHand ?? 0).toBe(0);
+    expect(unlocatedRow).toBeUndefined();
+  });
+
+  it('two adjustments without a reference for the same product do not collide on the idempotency index', async () => {
+    const P6 = '650000000000000000000eff';
+    await svc.adjust({ productId: P6, quantity: 5, condition: 'new', reason: 'first correction' });
+    await expect(
+      svc.adjust({ productId: P6, quantity: 3, condition: 'new', reason: 'second correction' }),
+    ).resolves.toBeDefined();
+  });
+
+  it('concurrent edits of the same movement (double-tap) do not throw a write-conflict error', async () => {
+    const P5 = '650000000000000000000def';
+    const created = await svc.move({
+      productId: P5, type: StockMovementType.INBOUND, quantity: 10, condition: 'new', unitCost: 5, reference: 'race-seed',
+    });
+
+    await expect(
+      Promise.all([
+        svc.editMovementViaAdjustment(created.movementId, 4),
+        svc.editMovementViaAdjustment(created.movementId, 4),
+      ]),
+    ).resolves.toBeDefined();
+  });
 });

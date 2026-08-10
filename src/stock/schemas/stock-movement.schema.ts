@@ -55,8 +55,10 @@ export class StockMovementModel {
 export const StockMovementSchema = SchemaFactory.createForClass(StockMovementModel);
 StockMovementSchema.index({ productId: 1, date: -1 });
 StockMovementSchema.index({ lotId: 1, date: -1 });
-// Idempotency (preserved from the legacy product schema)
+// Idempotency (preserved from the legacy product schema). `sparse` alone does NOT skip this
+// compound index when productId/type are present but externalReference is absent — only a
+// partial index correctly excludes documents that never set externalReference.
 StockMovementSchema.index(
   { 'metadata.externalReference': 1, productId: 1, type: 1 },
-  { unique: true, sparse: true },
+  { unique: true, partialFilterExpression: { 'metadata.externalReference': { $exists: true } } },
 );
