@@ -5,6 +5,7 @@ import { ProductModule } from './product/product.module';
 import { MarketplaceModule } from './marketplace/marketplace.module';
 import { MarketplaceCredentialsModule } from './marketplace/credentials/marketplace-credentials.module';
 import { MarketplaceConfigCacheModule } from './marketplace/services/marketplace-config-cache.module';
+import { GroupModule } from './group/group.module';
 
 import { QueueModule } from './queue/queue.module';
 import { RabbitMqModule } from './common/rabbitmq/rabbitmq.module';
@@ -63,6 +64,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     ScheduleModule.forRoot(),
     MarketplaceConfigCacheModule,
     MarketplaceCredentialsModule,
+    GroupModule,
     ConfigModule.forRoot({
       isGlobal: true,
     }),

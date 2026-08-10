@@ -23,6 +23,11 @@ export class UserModel {
     @Prop([String])
     permissions: string[];
 
+    /** Loja/grupo do operador — dono da conta de publicação por marketplace dos
+     *  produtos que ele criar. Ver GroupModel. */
+    @Prop({ type: String, default: null })
+    groupId: string | null;
+
     @Prop([String])
     pushTokens: string[];
 

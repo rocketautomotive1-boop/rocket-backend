@@ -15,6 +15,7 @@ import { PricingModule } from '../pricing/pricing.module';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
 import { ListingModel, ListingSchema } from '../listing/schemas/listing.schema';
 import { MarketplaceModel, MarketplaceSchema } from '../marketplace/schemas/marketplace.schema';
+import { UserModel, UserSchema } from '../auth/schemas/user.schema';
 
 @Module({
     imports: [
@@ -29,6 +30,7 @@ import { MarketplaceModel, MarketplaceSchema } from '../marketplace/schemas/mark
             { name: ProductModel.name, schema: ProductSchema },
             { name: ListingModel.name, schema: ListingSchema },
             { name: MarketplaceModel.name, schema: MarketplaceSchema },
+            { name: UserModel.name, schema: UserSchema },
         ]),
     ],
     controllers: [InternalTokenController, InternalSignController, InternalProductController, InternalListingController, InternalRembgController],

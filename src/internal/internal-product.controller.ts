@@ -6,6 +6,7 @@ import { InternalKeyGuard } from './internal-key.guard';
 import { SkipJwtAuth } from '../auth/decorators/skip-jwt-auth.decorator';
 import { ProductModel } from '../product/schemas/product.schema';
 import { ListingModel } from '../listing/schemas/listing.schema';
+import { UserModel } from '../auth/schemas/user.schema';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 import { MarketplaceConfigCacheService } from '../marketplace/services/marketplace-config-cache.service';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
@@ -13,6 +14,7 @@ import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { CategorySnapshotService } from '../product/services/category-snapshot.service';
 import { ProductService } from '../product/product.service';
 import { ProductCompatibilityPositionService } from '../product/services/product-compatibility-position.service';
+import { GroupService } from '../group/services/group.service';
 
 // Piloto Fase 2 (catalog listing): só category_id do ML já validados ao vivo como
 // portadores de POSITION/SIDE_POSITION no catálogo de peças (GET /categories/{id}/attributes).
@@ -29,6 +31,7 @@ export class InternalProductController {
     constructor(
         @InjectModel(ProductModel.name) private readonly productModel: Model<ProductModel>,
         @InjectModel(ListingModel.name) private readonly listingModel: Model<ListingModel>,
+        @InjectModel(UserModel.name) private readonly userModel: Model<UserModel>,
         private readonly configCache: MarketplaceConfigCacheService,
         private readonly descriptionService: MarketplaceDescriptionService,
         @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
@@ -36,6 +39,7 @@ export class InternalProductController {
         private readonly categorySnapshot: CategorySnapshotService,
         @Inject(forwardRef(() => ProductService)) private readonly productService: ProductService,
         private readonly compatibilityPosition: ProductCompatibilityPositionService,
+        private readonly groupService: GroupService,
     ) {}
 
     @Get(':id')
@@ -146,13 +150,30 @@ export class InternalProductController {
             );
         }
 
-        return listings.map((l) => ({
-            ...l,
-            marketplaceTag: tagMap.get(String(l.marketplaceId)) ?? '',
-            // Conta DONA (string) para o orchestrator rotear o token no UPDATE/DELETE.
-            // Ausente até o backfill carimbar — o worker cai na conta ativa nesse caso.
-            accountId: (l as any).accountId ? String((l as any).accountId) : null,
-        }));
+        // Grupo do dono do produto — resolve a conta de publicação por marketplace
+        // quando o listing ainda não tem accountId carimbado (CREATE, ou UPDATE de
+        // listing pré-backfill). Ver GroupService/GroupModel.
+        const groupId = await this.resolveProductGroupId(id);
+
+        const listingsWithAccount = await Promise.all(
+            listings.map(async (l) => {
+                const tag = tagMap.get(String(l.marketplaceId)) ?? '';
+                const stampedAccountId = (l as any).accountId ? String((l as any).accountId) : null;
+                const accountId = stampedAccountId ?? (await this.groupService.resolveAccountId(groupId, tag));
+                return { ...l, marketplaceTag: tag, accountId };
+            }),
+        );
+
+        return listingsWithAccount;
+    }
+
+    /** groupId do dono do produto (product.createdByUserId → user.groupId). */
+    private async resolveProductGroupId(productId: string): Promise<string | null> {
+        const product = await this.productModel.findById(productId).select('createdByUserId').lean().exec();
+        const creatorId = (product as any)?.createdByUserId;
+        if (!creatorId) return null;
+        const user = await this.userModel.findById(creatorId).select('groupId').lean().exec();
+        return (user as any)?.groupId ?? null;
     }
 
     /**
