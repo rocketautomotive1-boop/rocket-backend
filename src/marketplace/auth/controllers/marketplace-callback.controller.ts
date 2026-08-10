@@ -4,6 +4,7 @@ import { MarketplaceAuthService } from '../services/marketplace-auth.service';
 import { MarketplaceTokenBrokerService } from '../services/marketplace-token-broker.service';
 import { MarketplaceService } from '../../services/marketplace.service';
 import { ConfigService } from '@nestjs/config';
+import { SkipJwtAuth } from '../../../auth/decorators/skip-jwt-auth.decorator';
 
 @ApiTags('auth')
 @Controller()
@@ -25,6 +26,7 @@ export class MarketplaceCallbackController {
      * responde neutro (não interfere em health/probe na raiz).
      */
     @Get()
+    @SkipJwtAuth()
     @ApiOperation({ summary: 'Callback OAuth de conta na raiz (redirect_uri = raiz, match exato do ML)' })
     async handleRootAccountCallback(
         @Query('code') code: string,
@@ -55,6 +57,7 @@ export class MarketplaceCallbackController {
 
     /** Generic OAuth callback: GET /auth/:tag/callback */
     @Get('auth/:tag/callback')
+    @SkipJwtAuth()
     @ApiOperation({ summary: 'Callback de autenticação do marketplace' })
     @ApiResponse({ status: 200, description: 'Autenticação realizada com sucesso' })
     @ApiResponse({ status: 400, description: 'Código de autorização não fornecido' })
@@ -107,6 +110,7 @@ export class MarketplaceCallbackController {
      * and cannot be changed without updating the OLX app registration.
      */
     @Get('olx/callback')
+    @SkipJwtAuth()
     @ApiOperation({ summary: 'Callback OAuth da OLX (alias para /auth/olx/callback)' })
     async handleOLXCallback(
         @Query('code') code: string,
