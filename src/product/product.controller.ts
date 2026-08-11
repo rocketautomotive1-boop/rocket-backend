@@ -83,7 +83,7 @@ export class ProductController {
         partNumber: body.partNumber.trim(),
         brand: { id: String((brand as any).id ?? (brand as any)._id), name: (brand as any).name, isGenuine: false },
       },
-      req?.user?.sub,
+      req?.user?.id ?? req?.user?.sub,
     );
 
     const productId = String((product as any).id ?? (product as any)._id);
