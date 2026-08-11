@@ -5,6 +5,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
+import { UserAdminController } from './controllers/user-admin.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
@@ -33,7 +34,7 @@ import { RefreshTokenModel, RefreshTokenSchema } from './schemas/refresh-token.s
     ]),
     ConfigModule,
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, UserAdminController],
   providers: [
     AuthService,
     JwtStrategy,
