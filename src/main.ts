@@ -6,6 +6,7 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { AppModule } from './app.module';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 
 interface RequestWithRawBody extends Request {
@@ -43,9 +44,16 @@ async function bootstrap() {
   // Configurar Helmet (Headers de Segurança)
   app.use(helmet());
 
+  app.use(cookieParser());
+
   // Configurar CORS
+  const allowedOrigins = (
+    process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:19006'
+  ).split(',').map((origin) => origin.trim());
+
   app.enableCors({
-    origin: '*', // TODO: Restrict to frontend domain in production
+    origin: allowedOrigins,
+    credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     preflightContinue: false,
     optionsSuccessStatus: 204,

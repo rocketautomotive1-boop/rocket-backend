@@ -12,6 +12,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from './guards/optional-jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { UserModel, UserSchema } from './schemas/user.schema';
+import { RefreshTokenModel, RefreshTokenSchema } from './schemas/refresh-token.schema';
 
 @Module({
   imports: [
@@ -22,12 +23,13 @@ import { UserModel, UserSchema } from './schemas/user.schema';
       useFactory: (configService: ConfigService) => ({
         secret: configService.get('JWT_SECRET', 'marketplace_integration_secret'),
         signOptions: {
-          expiresIn: configService.get('JWT_EXPIRES_IN', '1d'),
+          expiresIn: configService.get('JWT_EXPIRES_IN', '15m'),
         },
       }),
     }),
     MongooseModule.forFeature([
-      { name: UserModel.name, schema: UserSchema }
+      { name: UserModel.name, schema: UserSchema },
+      { name: RefreshTokenModel.name, schema: RefreshTokenSchema },
     ]),
     ConfigModule,
   ],
