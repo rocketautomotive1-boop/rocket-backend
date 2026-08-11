@@ -159,6 +159,45 @@ describe('StockService (integration)', () => {
     expect(unlocatedRow).toBeUndefined();
   });
 
+  it('correctTo brings onHand to the target quantity regardless of current value', async () => {
+    const P7 = '650000000000000000001111';
+    await svc.move({ productId: P7, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'ct-seed' });
+
+    await svc.correctTo({ productId: P7, condition: 'new', targetQuantity: 12 });
+    let stock = await query.getProductStock(P7);
+    expect(stock.onHand).toBe(12);
+
+    await svc.correctTo({ productId: P7, condition: 'new', targetQuantity: 3 });
+    stock = await query.getProductStock(P7);
+    expect(stock.onHand).toBe(3);
+  });
+
+  it('correctTo is a no-op when target equals current (no movement created)', async () => {
+    const P8 = '650000000000000000002222';
+    await svc.move({ productId: P8, type: StockMovementType.INBOUND, quantity: 7, condition: 'new', reference: 'ct-noop-seed' });
+    const before = await repo.movementModel.countDocuments({ productId: new Types.ObjectId(P8) });
+
+    const result = await svc.correctTo({ productId: P8, condition: 'new', targetQuantity: 7 });
+    const after = await repo.movementModel.countDocuments({ productId: new Types.ObjectId(P8) });
+
+    expect(result).toBeNull();
+    expect(after).toBe(before);
+  });
+
+  it('correctTo defaults to condition "new" and only affects that condition\'s balance', async () => {
+    const P9 = '650000000000000000003333';
+    await svc.move({ productId: P9, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'ct-cond-new' });
+    await svc.move({ productId: P9, type: StockMovementType.INBOUND, quantity: 9, condition: 'used', reference: 'ct-cond-used' });
+
+    await svc.correctTo({ productId: P9, targetQuantity: 1 });
+
+    const byCondition = await query.getByCondition(P9);
+    const newRow = byCondition.find((r: any) => r.condition === 'new');
+    const usedRow = byCondition.find((r: any) => r.condition === 'used');
+    expect(newRow?.onHand).toBe(1);
+    expect(usedRow?.onHand).toBe(9);
+  });
+
   it('two adjustments without a reference for the same product do not collide on the idempotency index', async () => {
     const P6 = '650000000000000000000eff';
     await svc.adjust({ productId: P6, quantity: 5, condition: 'new', reason: 'first correction' });

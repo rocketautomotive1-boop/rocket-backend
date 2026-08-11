@@ -51,6 +51,14 @@ export class StockRepository {
     );
   }
 
+  async getConditionOnHand(productId: Types.ObjectId, condition: StockCondition): Promise<number> {
+    const rows = await this.balanceModel.aggregate([
+      { $match: { productId, condition } },
+      { $group: { _id: null, onHand: { $sum: '$onHand' } } },
+    ]);
+    return rows[0]?.onHand ?? 0;
+  }
+
   async referenceExists(reference: string, session?: ClientSession): Promise<boolean> {
     const c = await this.movementModel
       .countDocuments({ 'metadata.externalReference': reference })

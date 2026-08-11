@@ -164,6 +164,29 @@ export class StockService {
   }
 
   /**
+   * Correct total on-hand for a (product, condition) to an absolute target — the UI-facing
+   * "o estoque real é X" flow. Computes the diff against the current materialized balance and
+   * posts a single signed adjustment; a no-op (target === current) creates nothing.
+   */
+  async correctTo(input: {
+    productId: string;
+    targetQuantity: number;
+    condition?: 'new' | 'damaged' | 'used' | 'refurbished';
+  }): Promise<{ movementId: string; lotId: string } | null> {
+    const condition = input.condition ?? 'new';
+    const productId = new Types.ObjectId(input.productId);
+    const current = await this.repo.getConditionOnHand(productId, condition);
+    const diff = input.targetQuantity - current;
+    if (diff === 0) return null;
+    return this.adjust({
+      productId: input.productId,
+      quantity: diff,
+      condition,
+      reason: `Correção de estoque: ${current} → ${input.targetQuantity}`,
+    });
+  }
+
+  /**
    * "Edit" a movement's quantity → append an adjustment for the difference (no destructive edit).
    * `newQuantity` is the intended absolute quantity of the original movement.
    */
