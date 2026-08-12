@@ -2,12 +2,19 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { StoreListingModel, StoreListingDocument } from './schemas/store-listing.schema';
+import {
+  MarketplaceListingModel,
+  MarketplaceListingDocument,
+  MarketplaceListingStatus,
+} from './schemas/marketplace-listing.schema';
 
 @Injectable()
 export class StoreListingService {
   constructor(
     @InjectModel(StoreListingModel.name)
     private readonly storeListingModel: Model<StoreListingDocument>,
+    @InjectModel(MarketplaceListingModel.name)
+    private readonly marketplaceListingModel: Model<MarketplaceListingDocument>,
   ) {}
 
   async create(productId: string, storeId: string): Promise<StoreListingModel & { id: string }> {
@@ -35,5 +42,33 @@ export class StoreListingService {
     const doc = await this.storeListingModel.findById(storeListingId).exec();
     if (!doc) return null;
     return { ...((doc as any).toObject?.() ?? doc), id: String((doc as any)._id) };
+  }
+
+  async createMarketplaceListing(
+    storeListingId: string,
+    marketplaceTag: string,
+    accountId: string,
+  ): Promise<MarketplaceListingModel & { id: string }> {
+    const existing = await this.marketplaceListingModel.findOne({ storeListingId, marketplaceTag }).exec();
+    if (existing) {
+      throw new BadRequestException(
+        `Já existe uma publicação em ${marketplaceTag} para este StoreListing.`,
+      );
+    }
+    const doc = await this.marketplaceListingModel.create({
+      storeListingId,
+      marketplaceTag,
+      accountId,
+      externalId: null,
+      status: 'pending_creation' as MarketplaceListingStatus,
+    });
+    return { ...doc.toObject(), id: String(doc._id) };
+  }
+
+  async getMarketplaceListings(
+    storeListingId: string,
+  ): Promise<Array<MarketplaceListingModel & { id: string }>> {
+    const docs = await this.marketplaceListingModel.find({ storeListingId }).exec();
+    return docs.map((doc: any) => ({ ...(doc.toObject?.() ?? doc), id: String(doc._id) }));
   }
 }
