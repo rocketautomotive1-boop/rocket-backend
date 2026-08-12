@@ -14,7 +14,7 @@ import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { CategorySnapshotService } from '../product/services/category-snapshot.service';
 import { ProductService } from '../product/product.service';
 import { ProductCompatibilityPositionService } from '../product/services/product-compatibility-position.service';
-import { GroupService } from '../group/services/group.service';
+import { StoreService } from '../store/services/store.service';
 
 // Piloto Fase 2 (catalog listing): só category_id do ML já validados ao vivo como
 // portadores de POSITION/SIDE_POSITION no catálogo de peças (GET /categories/{id}/attributes).
@@ -39,7 +39,7 @@ export class InternalProductController {
         private readonly categorySnapshot: CategorySnapshotService,
         @Inject(forwardRef(() => ProductService)) private readonly productService: ProductService,
         private readonly compatibilityPosition: ProductCompatibilityPositionService,
-        private readonly groupService: GroupService,
+        private readonly storeService: StoreService,
     ) {}
 
     @Get(':id')
@@ -150,30 +150,36 @@ export class InternalProductController {
             );
         }
 
-        // Grupo do dono do produto — resolve a conta de publicação por marketplace
-        // quando o listing ainda não tem accountId carimbado (CREATE, ou UPDATE de
-        // listing pré-backfill). Ver GroupService/GroupModel.
-        const groupId = await this.resolveProductGroupId(id);
+        // storeId é a IDENTIDADE do listing (snapshot gravado na criação — ver
+        // ProductTitleService.updateTitles). Fallback só cobre listings
+        // pré-backfill sem storeId gravado ainda: resolve ao vivo a partir do
+        // criador do produto, sem persistir (o backfill é quem grava de vez).
+        const fallbackStoreId = await this.resolveFallbackStoreId(id, listings);
 
         const listingsWithAccount = await Promise.all(
             listings.map(async (l) => {
                 const tag = tagMap.get(String(l.marketplaceId)) ?? '';
-                const stampedAccountId = (l as any).accountId ? String((l as any).accountId) : null;
-                const accountId = stampedAccountId ?? (await this.groupService.resolveAccountId(groupId, tag));
-                return { ...l, marketplaceTag: tag, accountId };
+                const storeId = (l as any).storeId ? String((l as any).storeId) : fallbackStoreId;
+                const accountId = await this.storeService.resolveAccountId(storeId, tag);
+                return { ...l, marketplaceTag: tag, storeId, accountId };
             }),
         );
 
         return listingsWithAccount;
     }
 
-    /** groupId do dono do produto (product.createdByUserId → user.groupId). */
-    private async resolveProductGroupId(productId: string): Promise<string | null> {
+    /**
+     * storeId do criador do produto (product.createdByUserId → user.storeId) —
+     * usado só quando algum listing ainda não tem storeId gravado (pré-backfill).
+     * Evita a consulta quando todos os listings já têm storeId carimbado.
+     */
+    private async resolveFallbackStoreId(productId: string, listings: any[]): Promise<string | null> {
+        if (listings.every((l) => !!(l as any).storeId)) return null;
         const product = await this.productModel.findById(productId).select('createdByUserId').lean().exec();
         const creatorId = (product as any)?.createdByUserId;
         if (!creatorId) return null;
-        const user = await this.userModel.findById(creatorId).select('groupId').lean().exec();
-        return (user as any)?.groupId ?? null;
+        const user = await this.userModel.findById(creatorId).select('storeId').lean().exec();
+        return (user as any)?.storeId ?? null;
     }
 
     /**

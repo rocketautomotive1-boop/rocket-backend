@@ -28,11 +28,11 @@ describe('UserAdminController', () => {
     controller = moduleRef.get(UserAdminController);
   });
 
-  it('list: projeta só os campos necessários e normaliza _id/groupId', async () => {
+  it('list: projeta só os campos necessários e normaliza _id/storeId', async () => {
     modelMock.find.mockReturnValue({
       lean: () => ({
         exec: async () => [
-          { _id: 'U1', name: 'Djalma Junior', email: 'd@x.com', roles: ['user'], groupId: 'G1' },
+          { _id: 'U1', name: 'Djalma Junior', email: 'd@x.com', roles: ['user'], storeId: 'S1' },
           { _id: 'U2', name: 'Gustavo', email: 'g@x.com', roles: ['admin'] },
         ],
       }),
@@ -41,32 +41,32 @@ describe('UserAdminController', () => {
     const result = await controller.list();
 
     expect(result).toEqual([
-      { id: 'U1', name: 'Djalma Junior', email: 'd@x.com', roles: ['user'], groupId: 'G1' },
-      { id: 'U2', name: 'Gustavo', email: 'g@x.com', roles: ['admin'], groupId: null },
+      { id: 'U1', name: 'Djalma Junior', email: 'd@x.com', roles: ['user'], storeId: 'S1' },
+      { id: 'U2', name: 'Gustavo', email: 'g@x.com', roles: ['admin'], storeId: null },
     ]);
   });
 
-  it('setGroup: grava groupId e retorna updated:true', async () => {
+  it('setStore: grava storeId e retorna updated:true', async () => {
     modelMock.updateOne.mockReturnValue({ exec: async () => ({ matchedCount: 1 }) });
 
-    const result = await controller.setGroup('U1', { groupId: 'G1' });
+    const result = await controller.setStore('U1', { storeId: 'S1' });
 
-    expect(modelMock.updateOne).toHaveBeenCalledWith({ _id: 'U1' }, { $set: { groupId: 'G1' } });
+    expect(modelMock.updateOne).toHaveBeenCalledWith({ _id: 'U1' }, { $set: { storeId: 'S1' } });
     expect(result).toEqual({ updated: true });
   });
 
-  it('setGroup: aceita groupId null para desatribuir', async () => {
+  it('setStore: aceita storeId null para desatribuir', async () => {
     modelMock.updateOne.mockReturnValue({ exec: async () => ({ matchedCount: 1 }) });
 
-    await controller.setGroup('U1', { groupId: null });
+    await controller.setStore('U1', { storeId: null });
 
-    expect(modelMock.updateOne).toHaveBeenCalledWith({ _id: 'U1' }, { $set: { groupId: null } });
+    expect(modelMock.updateOne).toHaveBeenCalledWith({ _id: 'U1' }, { $set: { storeId: null } });
   });
 
-  it('setGroup: usuário inexistente lança BadRequestException', async () => {
+  it('setStore: usuário inexistente lança BadRequestException', async () => {
     modelMock.updateOne.mockReturnValue({ exec: async () => ({ matchedCount: 0 }) });
 
-    await expect(controller.setGroup('U_MISSING', { groupId: 'G1' })).rejects.toThrow(
+    await expect(controller.setStore('U_MISSING', { storeId: 'S1' })).rejects.toThrow(
       'Usuário U_MISSING não encontrado.',
     );
   });

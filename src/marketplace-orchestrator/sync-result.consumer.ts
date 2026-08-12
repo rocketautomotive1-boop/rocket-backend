@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RabbitSubscribe } from '@golevelup/nestjs-rabbitmq';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model } from 'mongoose';
 import { ListingModel } from '../listing/schemas/listing.schema';
 import { SyncGateway } from '../gateways/sync.gateway';
 import { ModerationRepository } from '../moderation/moderation.repository';
@@ -14,8 +14,6 @@ interface SyncResultMessage {
     marketplaceTag?: string;
     success: boolean;
     externalId?: string;
-    /** Conta (multi-client) sob a qual o worker publicou — carimbada no listing no CREATE. */
-    accountId?: string;
     errorMessage?: string;
     errorClassifier?: string;
     processedAt?: string;
@@ -55,11 +53,8 @@ export class SyncResultConsumer {
                 publishingAt: null,
                 'marketplaceData.syncIssue': null,
             };
-            // Carimba a conta DONA quando o worker a resolveu (CREATE, e re-afirma no
-            // UPDATE). Só grava ObjectId válido — evita corromper o campo com lixo.
-            if (msg.accountId && Types.ObjectId.isValid(msg.accountId)) {
-                set.accountId = new Types.ObjectId(msg.accountId);
-            }
+            // storeId já é gravado como snapshot na criação do listing (ver
+            // ProductTitleService.updateTitles) — não é re-carimbado aqui.
             await this.listingModel.findByIdAndUpdate(msg.listingId, { $set: set });
 
             // A successful (re)publish clears any open moderation on this listing — the listing was

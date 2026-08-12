@@ -13,14 +13,16 @@ export class ListingModel {
     @Prop({ type: Types.ObjectId, ref: 'MarketplaceModel', required: true, index: true })
     marketplaceId: Types.ObjectId;
 
-    // Conta (multi-client) DONA deste anúncio: a credencial sob a qual ele foi
-    // criado no marketplace. Identidade do listing — não é derivada de domínio nem
-    // reinferida a cada sync. UPDATE/DELETE/operacional roteiam o token por ela;
-    // só o CREATE usa a conta ativa da tela (que então é carimbada aqui).
-    // Opcional durante a migração: listings pré-backfill ficam sem accountId até
-    // o backfill resolver o dono via /items/{externalId}.
-    @Prop({ type: Types.ObjectId, ref: 'MarketplaceModel', index: true })
-    accountId?: Types.ObjectId;
+    // Loja DONA deste anúncio — parte da IDENTIDADE do listing (não decoração):
+    // o mesmo produto pode ter um listing por loja no mesmo marketplace,
+    // simultaneamente (ver unicidade {productId, marketplaceId, storeId} abaixo).
+    // Resolvida uma única vez, no momento da criação do listing (usuário logado
+    // → user.storeId), e gravada como snapshot imutável — nunca reinferida a
+    // cada sync. Trocar a loja de um usuário depois não reroteia listings já
+    // criados. Opcional durante a migração: listings pré-backfill ficam sem
+    // storeId até o script de backfill resolver o dono.
+    @Prop({ type: Types.ObjectId, ref: 'StoreModel', index: true })
+    storeId?: Types.ObjectId;
 
     @Prop({ type: String, sparse: true })
     externalId?: string; // ID do anúncio no marketplace
@@ -81,14 +83,22 @@ export class ListingModel {
 
 export const ListingSchema = SchemaFactory.createForClass(ListingModel);
 
-// Índice composto para buscar anúncios de um produto rapidamente
+// Índice composto para buscar todos os anúncios de um produto (todas as lojas) rapidamente.
 ListingSchema.index({ productId: 1, marketplaceId: 1 });
 
+// Identidade real do listing: um produto pode ter no máximo um listing ATIVO por
+// (marketplace, loja) — a mesma peça pode ter um listing na Loja A e outro na Loja B
+// no mesmo marketplace, simultaneamente. Parcial: só aplica quando storeId existe
+// (listings pré-backfill, sem storeId, não colidem entre si nesta constraint).
+ListingSchema.index(
+    { productId: 1, marketplaceId: 1, storeId: 1 },
+    { unique: true, partialFilterExpression: { storeId: { $exists: true } } },
+);
+
 // Índice único parcial: garante unicidade do externalId APENAS se ele existir e for
-// string (exclui null/pendentes). Mantido inalterado — um externalId do ML pertence a
-// exatamente UMA conta, então (marketplaceId, externalId) continua sendo chave única
-// global (não há colisão entre contas). O accountId é IDENTIDADE do listing (dono),
-// não parte da chave de unicidade.
+// string (exclui null/pendentes). Um externalId do ML pertence a exatamente UMA conta
+// (⇒ uma loja), então (marketplaceId, externalId) continua sendo chave única global —
+// duas lojas nunca colidem no mesmo externalId.
 ListingSchema.index(
     { marketplaceId: 1, externalId: 1 },
     {
@@ -97,9 +107,10 @@ ListingSchema.index(
     }
 );
 
-// Roteamento de saída por conta dona: UPDATE/DELETE/operacional resolvem o token
-// pela conta deste índice (não pela conta ativa da tela).
+// Roteamento de saída por loja dona: UPDATE/DELETE/operacional resolvem a conta de
+// publicação a partir de storeId → store.accounts[marketplaceTag] (não pela conta
+// ativa da tela).
 ListingSchema.index(
-    { marketplaceId: 1, accountId: 1 },
-    { partialFilterExpression: { accountId: { $exists: true } } },
+    { marketplaceId: 1, storeId: 1 },
+    { partialFilterExpression: { storeId: { $exists: true } } },
 );

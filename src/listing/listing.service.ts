@@ -26,6 +26,17 @@ export class ListingService {
         return this.listingModel.find({ marketplaceId }).exec();
     }
 
+    /** O listing de um produto num marketplace, para uma loja específica (identidade real pós storeId). */
+    async findByProductMarketplaceAndStore(
+        productId: string | Types.ObjectId,
+        marketplaceId: string | Types.ObjectId,
+        storeId: string | Types.ObjectId,
+    ): Promise<ListingDocument | null> {
+        const pId = typeof productId === 'string' ? new Types.ObjectId(productId) : productId;
+        const sId = typeof storeId === 'string' ? new Types.ObjectId(storeId) : storeId;
+        return this.listingModel.findOne({ productId: pId, marketplaceId, storeId: sId }).exec();
+    }
+
     async findById(id: string): Promise<ListingDocument> {
         return this.listingModel.findById(id).exec();
     }
