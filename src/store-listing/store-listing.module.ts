@@ -2,6 +2,9 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { StoreListingModel, StoreListingSchema } from './schemas/store-listing.schema';
 import { MarketplaceListingModel, MarketplaceListingSchema } from './schemas/marketplace-listing.schema';
+import { StoreListingStockLotModel, StoreListingStockLotSchema } from './schemas/store-listing-stock-lot.schema';
+import { StoreListingStockBalanceModel, StoreListingStockBalanceSchema } from './schemas/store-listing-stock-balance.schema';
+import { StoreListingStockMovementModel, StoreListingStockMovementSchema } from './schemas/store-listing-stock-movement.schema';
 import { StoreListingService } from './store-listing.service';
 import { STORE_LISTING_PORT } from './ports/store-listing.port';
 
@@ -21,6 +24,9 @@ import { STORE_LISTING_PORT } from './ports/store-listing.port';
     MongooseModule.forFeature([
       { name: StoreListingModel.name, schema: StoreListingSchema },
       { name: MarketplaceListingModel.name, schema: MarketplaceListingSchema },
+      { name: StoreListingStockLotModel.name, schema: StoreListingStockLotSchema },
+      { name: StoreListingStockBalanceModel.name, schema: StoreListingStockBalanceSchema },
+      { name: StoreListingStockMovementModel.name, schema: StoreListingStockMovementSchema },
     ]),
   ],
   providers: [StoreListingService, { provide: STORE_LISTING_PORT, useExisting: StoreListingService }],
