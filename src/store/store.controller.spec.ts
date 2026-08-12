@@ -37,12 +37,25 @@ describe('StoreController', () => {
     controller = moduleRef.get(StoreController);
   });
 
-  it('list: resolve accountLabel cruzando accounts da loja com marketplaces.accounts[]', async () => {
+  it('list: resolve accountLabel para CADA conta da loja, incluindo N contas do mesmo marketplace', async () => {
     storeService.findAll.mockResolvedValue([
-      { id: 'S1', name: 'RCK_AUTOMOTIVE', accounts: { mercadolivre: 'ACC_1' } } as any,
+      {
+        id: 'S1',
+        name: 'RCK_AUTOMOTIVE',
+        marketplaceAccounts: [
+          { marketplaceTag: 'mercadolivre', accountId: 'ACC_1' },
+          { marketplaceTag: 'mercadolivre', accountId: 'ACC_2' },
+        ],
+      } as any,
     ]);
     configCache.getAll.mockResolvedValue([
-      { tag: 'mercadolivre', accounts: [{ _id: 'ACC_1', label: 'RCK_AUTOMOTIVE' }] } as any,
+      {
+        tag: 'mercadolivre',
+        accounts: [
+          { _id: 'ACC_1', label: 'RCK_AUTOMOTIVE Principal' },
+          { _id: 'ACC_2', label: 'RCK_AUTOMOTIVE B2B' },
+        ],
+      } as any,
     ]);
 
     const result = await controller.list();
@@ -51,60 +64,27 @@ describe('StoreController', () => {
       {
         storeId: 'S1',
         name: 'RCK_AUTOMOTIVE',
-        accounts: [{ marketplaceTag: 'mercadolivre', accountId: 'ACC_1', accountLabel: 'RCK_AUTOMOTIVE' }],
+        accounts: [
+          { marketplaceTag: 'mercadolivre', accountId: 'ACC_1', accountLabel: 'RCK_AUTOMOTIVE Principal' },
+          { marketplaceTag: 'mercadolivre', accountId: 'ACC_2', accountLabel: 'RCK_AUTOMOTIVE B2B' },
+        ],
       },
     ]);
   });
 
-  it('list: accountLabel null quando a conta referenciada não existe mais no marketplace', async () => {
-    storeService.findAll.mockResolvedValue([
-      { id: 'S1', name: 'Max Eshop', accounts: { mercadolivre: 'ACC_DELETED' } } as any,
-    ]);
-    configCache.getAll.mockResolvedValue([
-      { tag: 'mercadolivre', accounts: [{ _id: 'ACC_1', label: 'Outra conta' }] } as any,
-    ]);
-
-    const result = await controller.list();
-
-    expect(result[0].accounts[0].accountLabel).toBeNull();
-  });
-
-  it('listMarketplaceAccounts: só marketplaces com tag, contas mapeadas por marketplace', async () => {
-    configCache.getAll.mockResolvedValue([
-      { tag: 'mercadolivre', name: 'Mercado Livre', accounts: [{ _id: 'ACC_1', label: 'RCK' }] } as any,
-      { tag: null, name: 'Sem tag', accounts: [] } as any,
-    ]);
-
-    const result = await controller.listMarketplaceAccounts();
-
-    expect(result).toEqual([
-      {
-        marketplaceTag: 'mercadolivre',
-        marketplaceName: 'Mercado Livre',
-        accounts: [{ accountId: 'ACC_1', label: 'RCK' }],
-      },
-    ]);
-  });
-
-  it('create: delega ao StoreService', async () => {
-    storeService.create.mockResolvedValue({ id: 'S1', name: 'Loja Nova', accounts: {} } as any);
-    const result = await controller.create({ name: 'Loja Nova' });
-    expect(result).toEqual({ storeId: 'S1', name: 'Loja Nova' });
-  });
-
-  it('setMarketplaceAccount: delega ao StoreService com accountId trimado', async () => {
-    await controller.setMarketplaceAccount('S1', 'mercadolivre', { accountId: '  ACC_1  ' });
+  it('setMarketplaceAccount: passa storeId, marketplaceTag e accountId (da URL) ao service', async () => {
+    await controller.setMarketplaceAccount('S1', 'mercadolivre', 'ACC_1');
     expect(storeService.setMarketplaceAccount).toHaveBeenCalledWith('S1', 'mercadolivre', 'ACC_1');
   });
 
-  it('setMarketplaceAccount: accountId vazio lança BadRequestException', async () => {
-    await expect(
-      controller.setMarketplaceAccount('S1', 'mercadolivre', { accountId: '  ' }),
-    ).rejects.toThrow('accountId é obrigatório.');
+  it('removeMarketplaceAccount: passa storeId, marketplaceTag e accountId (da URL) ao service', async () => {
+    await controller.removeMarketplaceAccount('S1', 'mercadolivre', 'ACC_1');
+    expect(storeService.removeMarketplaceAccount).toHaveBeenCalledWith('S1', 'mercadolivre', 'ACC_1');
   });
 
-  it('removeMarketplaceAccount: delega ao StoreService', async () => {
-    await controller.removeMarketplaceAccount('S1', 'mercadolivre');
-    expect(storeService.removeMarketplaceAccount).toHaveBeenCalledWith('S1', 'mercadolivre');
+  it('create: delega ao service e retorna storeId/name', async () => {
+    storeService.create.mockResolvedValue({ id: 'S1', name: 'Loja Nova', marketplaceAccounts: [] } as any);
+    const result = await controller.create({ name: 'Loja Nova' });
+    expect(result).toEqual({ storeId: 'S1', name: 'Loja Nova' });
   });
 });

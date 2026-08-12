@@ -5,17 +5,14 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 
-interface SetStoreAccountBody {
-  accountId: string;
-}
-
 interface CreateStoreBody {
   name: string;
 }
 
 /**
  * CRUD de lojas — painel de administração (admin/). Admin-only: decide o
- * roteamento de publicação por loja.
+ * roteamento de publicação por loja. Uma loja pode ter N contas do mesmo
+ * marketplace, então accountId identifica a entrada — não basta a tag.
  */
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('admin')
@@ -47,7 +44,7 @@ export class StoreController {
     return stores.map((s) => ({
       storeId: s.id,
       name: s.name,
-      accounts: Object.entries(s.accounts ?? {}).map(([marketplaceTag, accountId]) => ({
+      accounts: (s.marketplaceAccounts ?? []).map(({ marketplaceTag, accountId }) => ({
         marketplaceTag,
         accountId,
         accountLabel: accountLabelByTagAndId.get(`${marketplaceTag}:${accountId}`) ?? null,
@@ -79,23 +76,24 @@ export class StoreController {
     return { storeId: store.id, name: store.name };
   }
 
-  @Put(':storeId/accounts/:marketplaceTag')
+  @Put(':storeId/accounts/:marketplaceTag/:accountId')
   async setMarketplaceAccount(
     @Param('storeId') storeId: string,
     @Param('marketplaceTag') marketplaceTag: string,
-    @Body() body: SetStoreAccountBody,
+    @Param('accountId') accountId: string,
   ) {
-    if (!body?.accountId?.trim()) throw new BadRequestException('accountId é obrigatório.');
-    await this.storeService.setMarketplaceAccount(storeId, marketplaceTag, body.accountId.trim());
+    if (!accountId?.trim()) throw new BadRequestException('accountId é obrigatório.');
+    await this.storeService.setMarketplaceAccount(storeId, marketplaceTag, accountId.trim());
     return { updated: true };
   }
 
-  @Delete(':storeId/accounts/:marketplaceTag')
+  @Delete(':storeId/accounts/:marketplaceTag/:accountId')
   async removeMarketplaceAccount(
     @Param('storeId') storeId: string,
     @Param('marketplaceTag') marketplaceTag: string,
+    @Param('accountId') accountId: string,
   ) {
-    await this.storeService.removeMarketplaceAccount(storeId, marketplaceTag);
+    await this.storeService.removeMarketplaceAccount(storeId, marketplaceTag, accountId);
     return { updated: true };
   }
 }
