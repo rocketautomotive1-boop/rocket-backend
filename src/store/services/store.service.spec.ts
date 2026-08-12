@@ -158,4 +158,24 @@ describe('StoreService', () => {
     expect(store.name).toBe('Loja Centro');
     expect(modelMock.create).toHaveBeenCalledWith({ name: 'Loja Centro', marketplaceAccounts: [] });
   });
+
+  it('findByName: retorna a loja pelo nome exato', async () => {
+    modelMock.find.mockReturnValue({
+      lean: () => ({
+        exec: async () => [
+          { _id: STORE_ID, name: 'Rocket Automotive', marketplaceAccounts: [] },
+          { _id: '6955b688dfe7143a30376c99', name: 'Max Eshop', marketplaceAccounts: [] },
+        ],
+      }),
+    });
+
+    const store = await service.findByName('Max Eshop');
+    expect(store?.id).toBe('6955b688dfe7143a30376c99');
+  });
+
+  it('findByName: retorna null quando o nome não existe', async () => {
+    modelMock.find.mockReturnValue({ lean: () => ({ exec: async () => [] }) });
+    const store = await service.findByName('Loja Inexistente');
+    expect(store).toBeNull();
+  });
 });

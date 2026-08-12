@@ -34,6 +34,14 @@ export class StoreService implements StorePort {
     return map.get(String(storeId)) ?? null;
   }
 
+  async findByName(name: string): Promise<(StoreModel & { id: string }) | null> {
+    const map = await this.ensureHydrated();
+    for (const store of map.values()) {
+      if (store.name === name) return store;
+    }
+    return null;
+  }
+
   /** Todas as contas mapeadas para `marketplaceTag` na loja. [] se loja/mapeamento ausente. */
   async resolveAccountIds(storeId: string | null | undefined, marketplaceTag: string): Promise<string[]> {
     if (!storeId) return [];
