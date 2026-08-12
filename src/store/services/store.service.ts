@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { StoreModel, StoreDocument } from '../schemas/store.schema';
+import { StoreModel, StoreDocument, MarketplaceAccountEntry } from '../schemas/store.schema';
+import { StorePort } from '../ports/store.port';
 
 /**
  * Cache in-process (write-through) das lojas — mesmo padrão do
@@ -9,7 +10,7 @@ import { StoreModel, StoreDocument } from '../schemas/store.schema';
  * publish; invalidação explícita em toda escrita.
  */
 @Injectable()
-export class StoreService {
+export class StoreService implements StorePort {
   private readonly logger = new Logger(StoreService.name);
   private byId: Map<string, StoreModel & { id: string }> | null = null;
 
@@ -33,17 +34,25 @@ export class StoreService {
     return map.get(String(storeId)) ?? null;
   }
 
-  /** accountId mapeado para `marketplaceTag` na loja. null se loja/mapeamento ausente. */
-  async resolveAccountId(storeId: string | null | undefined, marketplaceTag: string): Promise<string | null> {
-    if (!storeId) return null;
+  /** Todas as contas mapeadas para `marketplaceTag` na loja. [] se loja/mapeamento ausente. */
+  async resolveAccountIds(storeId: string | null | undefined, marketplaceTag: string): Promise<string[]> {
+    if (!storeId) return [];
     const store = await this.findById(storeId);
-    if (!store) return null;
-    return store.accounts?.[marketplaceTag] ?? null;
+    if (!store) return [];
+    return (store.marketplaceAccounts ?? [])
+      .filter((entry) => entry.marketplaceTag === marketplaceTag)
+      .map((entry) => entry.accountId);
+  }
+
+  /** Primeira conta mapeada para `marketplaceTag` na loja, ou null. Para chamadores que só precisam de uma. */
+  async resolveAccountId(storeId: string | null | undefined, marketplaceTag: string): Promise<string | null> {
+    const accounts = await this.resolveAccountIds(storeId, marketplaceTag);
+    return accounts[0] ?? null;
   }
 
   async create(name: string): Promise<StoreModel & { id: string }> {
     if (!name?.trim()) throw new BadRequestException('name é obrigatório.');
-    const doc = await this.storeModel.create({ name: name.trim(), accounts: {} });
+    const doc = await this.storeModel.create({ name: name.trim(), marketplaceAccounts: [] });
     this.invalidate();
     return { ...doc.toObject(), id: String(doc._id) };
   }
@@ -52,20 +61,24 @@ export class StoreService {
     if (!Types.ObjectId.isValid(storeId)) throw new BadRequestException(`Loja inválida: ${storeId}`);
     const store = await this.storeModel.findById(storeId).exec();
     if (!store) throw new NotFoundException(`Loja ${storeId} não encontrada.`);
-    store.accounts = { ...(store.accounts ?? {}), [marketplaceTag]: accountId };
-    store.markModified('accounts');
+    const existing: MarketplaceAccountEntry[] = store.marketplaceAccounts ?? [];
+    const alreadyPresent = existing.some(
+      (entry) => entry.marketplaceTag === marketplaceTag && entry.accountId === accountId,
+    );
+    store.marketplaceAccounts = alreadyPresent ? existing : [...existing, { marketplaceTag, accountId }];
+    store.markModified('marketplaceAccounts');
     await store.save();
     this.invalidate();
   }
 
-  async removeMarketplaceAccount(storeId: string, marketplaceTag: string): Promise<void> {
+  async removeMarketplaceAccount(storeId: string, marketplaceTag: string, accountId: string): Promise<void> {
     if (!Types.ObjectId.isValid(storeId)) throw new BadRequestException(`Loja inválida: ${storeId}`);
     const store = await this.storeModel.findById(storeId).exec();
     if (!store) throw new NotFoundException(`Loja ${storeId} não encontrada.`);
-    const accounts = { ...(store.accounts ?? {}) };
-    delete accounts[marketplaceTag];
-    store.accounts = accounts;
-    store.markModified('accounts');
+    store.marketplaceAccounts = (store.marketplaceAccounts ?? []).filter(
+      (entry) => !(entry.marketplaceTag === marketplaceTag && entry.accountId === accountId),
+    );
+    store.markModified('marketplaceAccounts');
     await store.save();
     this.invalidate();
   }

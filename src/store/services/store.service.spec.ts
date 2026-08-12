@@ -10,10 +10,10 @@ describe('StoreService', () => {
   let service: StoreService;
   let modelMock: any;
 
-  const storeDoc = (accounts: Record<string, string> = {}) => ({
+  const storeDoc = (marketplaceAccounts: Array<{ marketplaceTag: string; accountId: string }> = []) => ({
     _id: STORE_ID,
     name: 'Loja Centro',
-    accounts,
+    marketplaceAccounts,
   });
 
   beforeEach(async () => {
@@ -30,31 +30,48 @@ describe('StoreService', () => {
     service = moduleRef.get(StoreService);
   });
 
-  it('resolveAccountId: sem storeId retorna null sem consultar o Mongo', async () => {
-    const acc = await service.resolveAccountId(null, 'mercadolivre');
-    expect(acc).toBeNull();
+  it('resolveAccountIds: sem storeId retorna [] sem consultar o Mongo', async () => {
+    const accs = await service.resolveAccountIds(null, 'mercadolivre');
+    expect(accs).toEqual([]);
     expect(modelMock.find).not.toHaveBeenCalled();
   });
 
-  it('resolveAccountId: loja existe e tem a tag mapeada', async () => {
+  it('resolveAccountIds: retorna TODAS as contas mapeadas para a tag (N contas)', async () => {
     modelMock.find.mockReturnValue({
-      lean: () => ({ exec: async () => [storeDoc({ mercadolivre: 'ACC_A' })] }),
+      lean: () => ({
+        exec: async () => [
+          storeDoc([
+            { marketplaceTag: 'mercadolivre', accountId: 'ACC_A' },
+            { marketplaceTag: 'mercadolivre', accountId: 'ACC_B' },
+            { marketplaceTag: 'shopee', accountId: 'ACC_C' },
+          ]),
+        ],
+      }),
+    });
+
+    const accs = await service.resolveAccountIds(STORE_ID, 'mercadolivre');
+    expect(accs).toEqual(['ACC_A', 'ACC_B']);
+  });
+
+  it('resolveAccountId: retorna a primeira conta mapeada (compat de chamador single-account)', async () => {
+    modelMock.find.mockReturnValue({
+      lean: () => ({ exec: async () => [storeDoc([{ marketplaceTag: 'mercadolivre', accountId: 'ACC_A' }])] }),
     });
 
     const acc = await service.resolveAccountId(STORE_ID, 'mercadolivre');
     expect(acc).toBe('ACC_A');
   });
 
-  it('resolveAccountId: loja existe mas sem mapeamento para o marketplace', async () => {
+  it('resolveAccountId: loja existe mas sem mapeamento para o marketplace retorna null', async () => {
     modelMock.find.mockReturnValue({
-      lean: () => ({ exec: async () => [storeDoc({ shopee: 'ACC_B' })] }),
+      lean: () => ({ exec: async () => [storeDoc([{ marketplaceTag: 'shopee', accountId: 'ACC_B' }])] }),
     });
 
     const acc = await service.resolveAccountId(STORE_ID, 'mercadolivre');
     expect(acc).toBeNull();
   });
 
-  it('resolveAccountId: loja não existe', async () => {
+  it('resolveAccountId: loja não existe retorna null', async () => {
     modelMock.find.mockReturnValue({ lean: () => ({ exec: async () => [] }) });
 
     const acc = await service.resolveAccountId(STORE_ID, 'mercadolivre');
@@ -63,7 +80,7 @@ describe('StoreService', () => {
 
   it('cache: uma segunda leitura não re-consulta o Mongo até invalidate()', async () => {
     modelMock.find.mockReturnValue({
-      lean: () => ({ exec: async () => [storeDoc({ mercadolivre: 'ACC_A' })] }),
+      lean: () => ({ exec: async () => [storeDoc([{ marketplaceTag: 'mercadolivre', accountId: 'ACC_A' }])] }),
     });
 
     await service.resolveAccountId(STORE_ID, 'mercadolivre');
@@ -82,39 +99,50 @@ describe('StoreService', () => {
     );
   });
 
-  it('setMarketplaceAccount: grava e invalida o cache', async () => {
-    const saved = { ...storeDoc(), accounts: {}, markModified: jest.fn(), save: jest.fn() };
+  it('setMarketplaceAccount: adiciona uma nova entrada sem remover as existentes da mesma tag', async () => {
+    const saved = { ...storeDoc([{ marketplaceTag: 'mercadolivre', accountId: 'ACC_A' }]), markModified: jest.fn(), save: jest.fn() };
     modelMock.findById.mockReturnValue({ exec: async () => saved });
-    modelMock.find.mockReturnValue({
-      lean: () => ({ exec: async () => [storeDoc({ mercadolivre: 'ACC_A' })] }),
-    });
+    modelMock.find.mockReturnValue({ lean: () => ({ exec: async () => [saved] }) });
 
-    // Popula o cache antes da escrita.
-    await service.resolveAccountId(STORE_ID, 'mercadolivre');
-    expect(modelMock.find).toHaveBeenCalledTimes(1);
+    await service.setMarketplaceAccount(STORE_ID, 'mercadolivre', 'ACC_B');
+
+    expect(saved.marketplaceAccounts).toEqual([
+      { marketplaceTag: 'mercadolivre', accountId: 'ACC_A' },
+      { marketplaceTag: 'mercadolivre', accountId: 'ACC_B' },
+    ]);
+    expect(saved.save).toHaveBeenCalled();
+  });
+
+  it('setMarketplaceAccount: é idempotente (adicionar a mesma conta duas vezes não duplica)', async () => {
+    const saved = { ...storeDoc([{ marketplaceTag: 'mercadolivre', accountId: 'ACC_A' }]), markModified: jest.fn(), save: jest.fn() };
+    modelMock.findById.mockReturnValue({ exec: async () => saved });
 
     await service.setMarketplaceAccount(STORE_ID, 'mercadolivre', 'ACC_A');
-    expect(saved.accounts).toEqual({ mercadolivre: 'ACC_A' });
-    expect(saved.save).toHaveBeenCalled();
 
-    // Cache foi invalidado — próxima leitura re-consulta.
-    await service.resolveAccountId(STORE_ID, 'mercadolivre');
-    expect(modelMock.find).toHaveBeenCalledTimes(2);
+    expect(saved.marketplaceAccounts).toEqual([{ marketplaceTag: 'mercadolivre', accountId: 'ACC_A' }]);
   });
 
   it('removeMarketplaceAccount: loja inexistente lança NotFoundException', async () => {
     modelMock.findById.mockReturnValue({ exec: async () => null });
-    await expect(service.removeMarketplaceAccount(STORE_ID, 'mercadolivre')).rejects.toThrow(
+    await expect(service.removeMarketplaceAccount(STORE_ID, 'mercadolivre', 'ACC_A')).rejects.toThrow(
       NotFoundException,
     );
   });
 
-  it('removeMarketplaceAccount: remove a tag e invalida o cache', async () => {
-    const saved = { ...storeDoc({ mercadolivre: 'ACC_A', shopee: 'ACC_B' }), markModified: jest.fn(), save: jest.fn() };
+  it('removeMarketplaceAccount: remove só a entrada (tag,accountId) exata', async () => {
+    const saved = {
+      ...storeDoc([
+        { marketplaceTag: 'mercadolivre', accountId: 'ACC_A' },
+        { marketplaceTag: 'mercadolivre', accountId: 'ACC_B' },
+      ]),
+      markModified: jest.fn(),
+      save: jest.fn(),
+    };
     modelMock.findById.mockReturnValue({ exec: async () => saved });
 
-    await service.removeMarketplaceAccount(STORE_ID, 'mercadolivre');
-    expect(saved.accounts).toEqual({ shopee: 'ACC_B' });
+    await service.removeMarketplaceAccount(STORE_ID, 'mercadolivre', 'ACC_A');
+
+    expect(saved.marketplaceAccounts).toEqual([{ marketplaceTag: 'mercadolivre', accountId: 'ACC_B' }]);
     expect(saved.save).toHaveBeenCalled();
   });
 
@@ -122,12 +150,12 @@ describe('StoreService', () => {
     await expect(service.create('')).rejects.toThrow('name é obrigatório.');
   });
 
-  it('create: cria a loja e invalida o cache', async () => {
+  it('create: cria a loja com marketplaceAccounts vazio e invalida o cache', async () => {
     const created = { ...storeDoc(), toObject: () => storeDoc() };
     modelMock.create.mockResolvedValue(created);
 
     const store = await service.create('Loja Centro');
     expect(store.name).toBe('Loja Centro');
-    expect(modelMock.create).toHaveBeenCalledWith({ name: 'Loja Centro', accounts: {} });
+    expect(modelMock.create).toHaveBeenCalledWith({ name: 'Loja Centro', marketplaceAccounts: [] });
   });
 });
