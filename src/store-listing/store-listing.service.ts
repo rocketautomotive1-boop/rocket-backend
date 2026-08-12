@@ -7,9 +7,10 @@ import {
   MarketplaceListingDocument,
   MarketplaceListingStatus,
 } from './schemas/marketplace-listing.schema';
+import { StoreListingPort } from './ports/store-listing.port';
 
 @Injectable()
-export class StoreListingService {
+export class StoreListingService implements StoreListingPort {
   constructor(
     @InjectModel(StoreListingModel.name)
     private readonly storeListingModel: Model<StoreListingDocument>,
