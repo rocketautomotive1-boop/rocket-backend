@@ -24,8 +24,9 @@ export class StoreController {
   ) {}
 
   /**
-   * Lista as lojas com o mapeamento marketplaceTag→conta já resolvido para
-   * label legível (busca nome real da conta em MarketplaceModel.accounts[]).
+   * Lista as lojas com o mapeamento marketplaceTag→contas (N por tag) já
+   * resolvido para label legível (busca nome real da conta em
+   * MarketplaceModel.accounts[]).
    */
   @Get()
   async list() {

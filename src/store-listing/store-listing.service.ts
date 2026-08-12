@@ -25,8 +25,17 @@ export class StoreListingService implements StoreListingPort {
         `Já existe um StoreListing para o produto ${productId} na loja ${storeId}.`,
       );
     }
-    const doc = await this.storeListingModel.create({ productId, storeId });
-    return { ...doc.toObject(), id: String(doc._id) };
+    try {
+      const doc = await this.storeListingModel.create({ productId, storeId });
+      return { ...doc.toObject(), id: String(doc._id) };
+    } catch (err: any) {
+      if (err?.code === 11000) {
+        throw new BadRequestException(
+          `Já existe um StoreListing para o produto ${productId} na loja ${storeId}.`,
+        );
+      }
+      throw err;
+    }
   }
 
   async findByProductAndStore(
@@ -56,14 +65,23 @@ export class StoreListingService implements StoreListingPort {
         `Já existe uma publicação em ${marketplaceTag} para este StoreListing.`,
       );
     }
-    const doc = await this.marketplaceListingModel.create({
-      storeListingId,
-      marketplaceTag,
-      accountId,
-      externalId: null,
-      status: 'pending_creation' as MarketplaceListingStatus,
-    });
-    return { ...doc.toObject(), id: String(doc._id) };
+    try {
+      const doc = await this.marketplaceListingModel.create({
+        storeListingId,
+        marketplaceTag,
+        accountId,
+        externalId: null,
+        status: 'pending_creation' as MarketplaceListingStatus,
+      });
+      return { ...doc.toObject(), id: String(doc._id) };
+    } catch (err: any) {
+      if (err?.code === 11000) {
+        throw new BadRequestException(
+          `Já existe uma publicação em ${marketplaceTag} para este StoreListing.`,
+        );
+      }
+      throw err;
+    }
   }
 
   async getMarketplaceListings(
