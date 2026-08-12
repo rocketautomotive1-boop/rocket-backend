@@ -182,6 +182,13 @@ export class ProductModel {
     @Prop({ required: true, index: true })
     name: string;
 
+    // Dono do produto (quem cadastrou) — usado para resolver a loja/grupo de
+    // publicação em runtime (createdByUserId → user.groupId → conta por
+    // marketplace). Ver GroupModel e
+    // docs/superpowers/specs/2026-08-10-multi-account-publishing-by-group-design.md.
+    @Prop({ type: SchemaTypes.ObjectId, required: false })
+    createdByUserId?: Types.ObjectId;
+
     // Título curto reutilizável entre produtos (ex: "Parafuso"), com sinônimos
     // próprios — ver ProductShortTitleModel e
     // docs/superpowers/specs/2026-07-25-product-title-subtitle-design.md.
