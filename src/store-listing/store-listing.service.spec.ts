@@ -70,6 +70,21 @@ describe('StoreListingService', () => {
     expect(result).toEqual({ id: 'SL1', _id: 'SL1', productId: PRODUCT_ID, storeId: STORE_ID });
   });
 
+  it('findAnyByProduct: retorna null quando não existe StoreListing pro produto', async () => {
+    modelMock.findOne.mockReturnValue({ sort: () => ({ exec: async () => null }) });
+    const result = await service.findAnyByProduct(PRODUCT_ID);
+    expect(result).toBeNull();
+    expect(modelMock.findOne).toHaveBeenCalledWith({ productId: PRODUCT_ID });
+  });
+
+  it('findAnyByProduct: retorna o StoreListing com id normalizado, independente da loja', async () => {
+    modelMock.findOne.mockReturnValue({
+      sort: () => ({ exec: async () => ({ _id: 'SL1', productId: PRODUCT_ID, storeId: STORE_ID }) }),
+    });
+    const result = await service.findAnyByProduct(PRODUCT_ID);
+    expect(result).toEqual({ id: 'SL1', _id: 'SL1', productId: PRODUCT_ID, storeId: STORE_ID });
+  });
+
   it('findById: retorna null quando não existe', async () => {
     modelMock.findById.mockReturnValue({ exec: async () => null });
     const result = await service.findById('SL1');

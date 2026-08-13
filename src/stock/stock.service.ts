@@ -1,10 +1,12 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ClientSession, Types } from 'mongoose';
 import { StockRepository } from './stock.repository';
 import { StockMoveInput, StockMoveSchema } from './dto/stock-move.dto';
 import { StockMovementType } from './domain/movement-type';
 import { computeBalanceDelta } from './domain/balance.calculator';
 import { weightedAverageCost } from './domain/average-cost';
+import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
+import { STORE_PORT, StorePort } from '../store/ports/store.port';
 
 /**
  * The single entry point for ALL stock changes. Appends to the immutable ledger AND updates
@@ -15,11 +17,37 @@ import { weightedAverageCost } from './domain/average-cost';
 export class StockService {
   private readonly logger = new Logger(StockService.name);
 
-  constructor(private readonly repo: StockRepository) {}
+  constructor(
+    private readonly repo: StockRepository,
+    @Inject(STORE_LISTING_PORT)
+    private readonly storeListingPort: StoreListingPort,
+    @Inject(STORE_PORT)
+    private readonly storePort: StorePort,
+  ) {}
 
   async move(input: StockMoveInput, externalSession?: ClientSession): Promise<{ movementId: string; lotId: string }> {
-    if (externalSession) return this.moveOnce(input, externalSession);
+    let result: { movementId: string; lotId: string };
 
+    if (externalSession) {
+      result = await this.moveOnce(input, externalSession);
+    } else {
+      result = await this.moveWithRetry(input);
+    }
+
+    // Fase 3 dual-write: espelha em store_listing_stock_* DEPOIS que o legado já
+    // terminou (commit incluído) — nunca antes, nunca dentro da mesma transação
+    // (ver mirrorMoveToStoreListing para o porquê de não propagar session).
+    // Sentinela {'', ''} = moveOnce abortou por idempotência (reference duplicada):
+    // não houve escrita real, então não há o que espelhar.
+    if (result.movementId !== '' || result.lotId !== '') {
+      const dto = StockMoveSchema.parse(input);
+      await this.mirrorMoveToStoreListing(dto);
+    }
+
+    return result;
+  }
+
+  private async moveWithRetry(input: StockMoveInput): Promise<{ movementId: string; lotId: string }> {
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -32,6 +60,87 @@ export class StockService {
     }
     throw new Error('unreachable');
   }
+
+  /**
+   * Resolve qual loja é dona do estoque deste produto pra fins de dual-write
+   * (Fase 3): fallback "Rocket Automotive" — mesmo critério do backfill da
+   * Fase 2 (resolveOwnerStore). A busca por um StoreListing JÁ existente do
+   * produto (independente da loja) é feita separadamente via
+   * STORE_LISTING_PORT.findAnyByProduct, antes de cair neste fallback. Nunca
+   * lança: quem chama trata retorno null como "pula o dual-write desta
+   * chamada", não como erro.
+   */
+  private async resolveStoreIdForDualWrite(): Promise<string | null> {
+    const fallbackStore = await this.storePort.findByName('Rocket Automotive');
+    return fallbackStore?.id ?? null;
+  }
+
+  /**
+   * Fire-and-log mirror do movimento pra store_listing_stock_* — NUNCA bloqueia
+   * nem falha o move() legado (por isso não propaga a session da transação
+   * legada: se o espelho abortasse depois, reverteria uma escrita legada que já
+   * "aconteceu" do ponto de vista do chamador).
+   */
+  private async mirrorMoveToStoreListing(dto: StockMoveInput): Promise<void> {
+    try {
+      // Existing StoreListing anywhere for this product wins over the fallback store —
+      // mirrors the Phase 2 backfill's resolution rule (resolveOwnerStore).
+      let storeListing = await this.storeListingPort.findAnyByProduct(dto.productId);
+      if (!storeListing) {
+        const storeId = await this.resolveStoreIdForDualWrite();
+        if (!storeId) {
+          this.logger.error(`[dual-write] loja padrão não resolvida — movimento do produto ${dto.productId} não espelhado.`);
+          return;
+        }
+        storeListing = await this.storeListingPort.createOrGetStoreListing(dto.productId, storeId);
+      }
+
+      const unitCost = dto.unitCost != null ? String(dto.unitCost) : undefined;
+
+      if (dto.type === StockMovementType.TRANSFER) {
+        // TRANSFER nets to {onHand:0, reserved:0} on both sides (legacy `computeBalanceDelta`
+        // and the store-listing repo's internal recompute agree on that) — mirroring it as a
+        // single TRANSFER call would silently record a zero-effect no-op movement and lose the
+        // box-to-box change entirely. Mirror it as the same two signed writes moveOnce() itself
+        // performs against StockRepository.applyBalanceDelta: a debit at fromBoxId and a credit
+        // at toBoxId. ADJUSTMENT has effect {onHand: 1 * quantity} — a raw signed delta — so
+        // using it for both legs reproduces the exact same balance math as the legacy transfer.
+        await this.storeListingPort.recordStockMovement({
+          storeListingId: storeListing.id,
+          type: StockMovementType.ADJUSTMENT,
+          quantity: -dto.quantity,
+          condition: dto.condition,
+          unitCost,
+          fromBoxId: dto.fromBoxId,
+          reason: dto.reason,
+        });
+        await this.storeListingPort.recordStockMovement({
+          storeListingId: storeListing.id,
+          type: StockMovementType.ADJUSTMENT,
+          quantity: dto.quantity,
+          condition: dto.condition,
+          unitCost,
+          toBoxId: dto.toBoxId,
+          reason: dto.reason,
+        });
+        return;
+      }
+
+      await this.storeListingPort.recordStockMovement({
+        storeListingId: storeListing.id,
+        type: dto.type,
+        quantity: dto.quantity,
+        condition: dto.condition,
+        unitCost,
+        fromBoxId: dto.fromBoxId,
+        toBoxId: dto.toBoxId,
+        reason: dto.reason,
+      });
+    } catch (err: any) {
+      this.logger.error(`[dual-write] falha ao espelhar movimento do produto ${dto.productId}: ${err?.message}`);
+    }
+  }
+
 
   private async moveOnce(input: StockMoveInput, externalSession?: ClientSession): Promise<{ movementId: string; lotId: string }> {
     const dto = StockMoveSchema.parse(input);

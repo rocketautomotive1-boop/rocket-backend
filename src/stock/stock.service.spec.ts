@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { MongooseModule, getConnectionToken } from '@nestjs/mongoose';
-import { Connection, Types } from 'mongoose';
+import { MongooseModule, getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { Connection, Types, Model } from 'mongoose';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { StockMovementModel, StockMovementSchema } from './schemas/stock-movement.schema';
 import { StockLotModel, StockLotSchema } from './schemas/stock-lot.schema';
@@ -9,6 +9,13 @@ import { StockRepository } from './stock.repository';
 import { StockService } from './stock.service';
 import { StockQueryService } from './stock-query.service';
 import { StockMovementType } from './domain/movement-type';
+import { StoreListingModule } from '../store-listing/store-listing.module';
+import { STORE_LISTING_PORT } from '../store-listing/ports/store-listing.port';
+import { STORE_PORT, StorePort } from '../store/ports/store.port';
+import { StoreListingStockMovementModel } from '../store-listing/schemas/store-listing-stock-movement.schema';
+import { StoreListingStockBalanceModel } from '../store-listing/schemas/store-listing-stock-balance.schema';
+import { StoreListingModel } from '../store-listing/schemas/store-listing.schema';
+import { MarketplaceListingModel } from '../store-listing/schemas/marketplace-listing.schema';
 
 describe('StockService (integration)', () => {
   let mongo: MongoMemoryReplSet;
@@ -16,7 +23,23 @@ describe('StockService (integration)', () => {
   let svc: StockService;
   let query: StockQueryService;
   let repo: StockRepository;
+  let storeListingModel: Model<any>;
+  let marketplaceListingModel: Model<any>;
+  let slMovementModel: Model<any>;
+  let slBalanceModel: Model<any>;
   const PID = '650000000000000000000001';
+  const FALLBACK_STORE_ID = '650000000000000000000fff';
+
+  // Fake STORE_PORT (Fase 3 dual-write): StoreModule is @Global in prod but depends on
+  // AuthModule (forwardRef) — too heavy for this integration suite. A plain in-memory
+  // fake satisfying StorePort is enough; only findByName is exercised by StockService.
+  const storePortFake: StorePort = {
+    findById: async () => null,
+    findByName: async (name: string) =>
+      name === 'Rocket Automotive' ? ({ id: FALLBACK_STORE_ID, name } as any) : null,
+    resolveAccountId: async () => null,
+    resolveAccountIds: async () => [],
+  };
 
   beforeAll(async () => {
     mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
@@ -28,12 +51,17 @@ describe('StockService (integration)', () => {
           { name: StockLotModel.name, schema: StockLotSchema },
           { name: StockBalanceModel.name, schema: StockBalanceSchema },
         ]),
+        StoreListingModule,
       ],
-      providers: [StockService, StockQueryService, StockRepository],
+      providers: [StockService, StockQueryService, StockRepository, { provide: STORE_PORT, useValue: storePortFake }],
     }).compile();
     svc = mod.get(StockService);
     query = mod.get(StockQueryService);
     repo = mod.get(StockRepository);
+    storeListingModel = mod.get(getModelToken(StoreListingModel.name));
+    marketplaceListingModel = mod.get(getModelToken(MarketplaceListingModel.name));
+    slMovementModel = mod.get(getModelToken(StoreListingStockMovementModel.name));
+    slBalanceModel = mod.get(getModelToken(StoreListingStockBalanceModel.name));
 
     // Pre-create collections + indexes. MongoDB cannot create a collection inside a
     // multi-document transaction, so creating them lazily during the first move() would
@@ -43,6 +71,8 @@ describe('StockService (integration)', () => {
     await repo.movementModel.createCollection();
     await repo.movementModel.syncIndexes();
     await repo.balanceModel.syncIndexes();
+    await storeListingModel.createCollection();
+    await marketplaceListingModel.createCollection();
   });
 
   afterAll(async () => {
@@ -218,5 +248,83 @@ describe('StockService (integration)', () => {
         svc.editMovementViaAdjustment(created.movementId, 4),
       ]),
     ).resolves.toBeDefined();
+  });
+
+  describe('move — dual-write (Fase 3)', () => {
+    it('mirrors a successful INBOUND move into the store_listing_stock_* collections (fallback store)', async () => {
+      const P = '650000000000000000010001';
+      const result = await svc.move({ productId: P, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'dw-1' });
+      expect(result.movementId).toBeTruthy();
+
+      const storeListing = await storeListingModel.findOne({ productId: P, storeId: FALLBACK_STORE_ID }).exec();
+      expect(storeListing).toBeTruthy();
+
+      const movements = await slMovementModel.find({ storeListingId: String(storeListing!._id) }).exec();
+      expect(movements.length).toBe(1);
+      expect(movements[0].type).toBe(StockMovementType.INBOUND);
+      expect(movements[0].quantity).toBe(5);
+
+      const balances = await slBalanceModel.find({ storeListingId: String(storeListing!._id) }).exec();
+      const onHand = balances.reduce((s: number, r: any) => s + r.onHand, 0);
+      expect(onHand).toBe(5);
+    });
+
+    it('does not fail move() when the dual-write side throws', async () => {
+      const P = '650000000000000000010002';
+      const badPort = mod.get(STORE_LISTING_PORT);
+      const spy = jest.spyOn(badPort, 'createOrGetStoreListing').mockRejectedValueOnce(new Error('boom'));
+
+      await expect(
+        svc.move({ productId: P, type: StockMovementType.INBOUND, quantity: 3, condition: 'new', reference: 'dw-2' }),
+      ).resolves.toBeDefined();
+
+      spy.mockRestore();
+    });
+
+    it('reuses an existing StoreListing for the product instead of always falling back to Rocket Automotive', async () => {
+      const P = '650000000000000000010003';
+      const OTHER_STORE_ID = '650000000000000000020002';
+      await storeListingModel.create({ productId: P, storeId: OTHER_STORE_ID });
+
+      await svc.move({ productId: P, type: StockMovementType.INBOUND, quantity: 4, condition: 'new', reference: 'dw-3' });
+
+      const fallbackListing = await storeListingModel.findOne({ productId: P, storeId: FALLBACK_STORE_ID }).exec();
+      expect(fallbackListing).toBeNull();
+
+      const otherListing = await storeListingModel.findOne({ productId: P, storeId: OTHER_STORE_ID }).exec();
+      const movements = await slMovementModel.find({ storeListingId: String(otherListing!._id) }).exec();
+      expect(movements.length).toBe(1);
+    });
+
+    it('mirrors a TRANSFER as two separate signed movements (debit + credit), not a zero-effect no-op', async () => {
+      const P = '650000000000000000010004';
+      const BOX_A = '650000000000000000030001';
+      const BOX_B = '650000000000000000030002';
+
+      await svc.move({ productId: P, type: StockMovementType.INBOUND, quantity: 10, condition: 'new', toBoxId: BOX_A, reference: 'dw-4-seed' });
+      await svc.move({ productId: P, type: StockMovementType.TRANSFER, quantity: 6, condition: 'new', fromBoxId: BOX_A, toBoxId: BOX_B, reference: 'dw-4-transfer' });
+
+      const storeListing = await storeListingModel.findOne({ productId: P, storeId: FALLBACK_STORE_ID }).exec();
+      const balances = await slBalanceModel.find({ storeListingId: String(storeListing!._id) }).exec();
+      const totalOnHand = balances.reduce((s: number, r: any) => s + r.onHand, 0);
+      // Net onHand across boxes must stay 10 (transfer only moves location, no net change).
+      expect(totalOnHand).toBe(10);
+
+      const boxARow = balances.find((r: any) => String(r.boxId) === BOX_A);
+      const boxBRow = balances.find((r: any) => String(r.boxId) === BOX_B);
+      expect(boxARow?.onHand).toBe(4);
+      expect(boxBRow?.onHand).toBe(6);
+    });
+
+    it('does not mirror a movement skipped by legacy idempotency (duplicate reference)', async () => {
+      const P = '650000000000000000010005';
+      await svc.move({ productId: P, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'dw-5-dup' });
+      await svc.move({ productId: P, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'dw-5-dup' });
+
+      const storeListing = await storeListingModel.findOne({ productId: P, storeId: FALLBACK_STORE_ID }).exec();
+      const movements = await slMovementModel.find({ storeListingId: String(storeListing!._id) }).exec();
+      // Only the first (non-duplicate) call should have been mirrored.
+      expect(movements.length).toBe(1);
+    });
   });
 });

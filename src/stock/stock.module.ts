@@ -11,11 +11,16 @@ import { StockLedgerProvider } from './stock-ledger.provider';
 import { StockController } from './stock.controller';
 import { STOCK_QUERY_PORT } from './ports/stock-query.port';
 import { STOCK_LEDGER_PORT } from '../order/ports/stock-ledger.port';
+import { StoreListingModule } from '../store-listing/store-listing.module';
 
 /**
  * Single owner of stock: stock_movements (immutable ledger), stock_lots (cost per condition),
  * stock_balances (materialized projection). Leaf module — imports no domain module; receives
  * productId as data. Exposes only ports (STOCK_LEDGER_PORT, STOCK_QUERY_PORT) to consumers.
+ *
+ * Fase 3 (dual-write): importa StoreListingModule pra injetar STORE_LISTING_PORT — StockService
+ * espelha todo move() bem-sucedido em store_listing_stock_* sem nunca bloquear/falhar o legado
+ * (fire-and-log). STORE_PORT vem de StoreModule, que é @Global (não precisa de import aqui).
  */
 @Module({
   imports: [
@@ -24,6 +29,7 @@ import { STOCK_LEDGER_PORT } from '../order/ports/stock-ledger.port';
       { name: StockLotModel.name, schema: StockLotSchema },
       { name: StockBalanceModel.name, schema: StockBalanceSchema },
     ]),
+    StoreListingModule,
   ],
   controllers: [StockController],
   providers: [

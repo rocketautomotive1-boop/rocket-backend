@@ -68,6 +68,12 @@ export class StoreListingService implements StoreListingPort {
     return { ...((doc as any).toObject?.() ?? doc), id: String((doc as any)._id) };
   }
 
+  async findAnyByProduct(productId: string): Promise<(StoreListingModel & { id: string }) | null> {
+    const doc = await this.storeListingModel.findOne({ productId }).sort({ _id: 1 }).exec();
+    if (!doc) return null;
+    return { ...((doc as any).toObject?.() ?? doc), id: String((doc as any)._id) };
+  }
+
   async findById(storeListingId: string): Promise<(StoreListingModel & { id: string }) | null> {
     if (!Types.ObjectId.isValid(storeListingId)) return null;
     const doc = await this.storeListingModel.findById(storeListingId).exec();

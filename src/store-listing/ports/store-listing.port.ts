@@ -10,6 +10,14 @@ export interface StoreListingPort {
     productId: string,
     storeId: string,
   ): Promise<(StoreListingModel & { id: string }) | null>;
+  /**
+   * Find ANY existing StoreListing for a product, regardless of store. Used by
+   * dual-write callers (e.g. StockService) that have no store context of their
+   * own and want to prefer an existing listing over creating one in a fallback
+   * store. Deterministic on ties (oldest first) — a product is expected to have
+   * at most one StoreListing today, but this must not silently pick a random one.
+   */
+  findAnyByProduct(productId: string): Promise<(StoreListingModel & { id: string }) | null>;
   findById(storeListingId: string): Promise<(StoreListingModel & { id: string }) | null>;
   getMarketplaceListings(
     storeListingId: string,
