@@ -100,4 +100,48 @@ export class StoreListingService implements StoreListingPort {
     const docs = await this.marketplaceListingModel.find({ storeListingId }).exec();
     return docs.map((doc: any) => ({ ...(doc.toObject?.() ?? doc), id: String(doc._id) }));
   }
+
+  async createOrGetStoreListing(
+    productId: string,
+    storeId: string,
+  ): Promise<StoreListingModel & { id: string }> {
+    const existing = await this.findByProductAndStore(productId, storeId);
+    if (existing) return existing;
+    return this.create(productId, storeId);
+  }
+
+  async upsertMarketplaceListing(
+    storeListingId: string,
+    marketplaceTag: string,
+    accountId: string,
+    options?: { externalId?: string | null; status?: MarketplaceListingStatus },
+  ): Promise<MarketplaceListingModel & { id: string }> {
+    const externalId = options?.externalId ?? null;
+    const status = options?.status ?? ('pending_creation' as MarketplaceListingStatus);
+
+    // Mesma lógica de "identidade real" do fix da Fase 2: um marketplace_listing
+    // é o mesmo anúncio se (storeListingId, marketplaceTag, externalId) bate —
+    // sem externalId (pending_creation), não há como saber se já existe, então
+    // sempre cria (mesmo comportamento que createMarketplaceListing já tinha
+    // para esse caso).
+    const existing = externalId
+      ? await this.marketplaceListingModel.findOne({ storeListingId, marketplaceTag, externalId }).exec()
+      : null;
+
+    if (existing) {
+      const updated = await this.marketplaceListingModel
+        .findByIdAndUpdate((existing as any)._id, { $set: { accountId, status } }, { new: true })
+        .exec();
+      return { ...(updated as any).toObject(), id: String((updated as any)._id) };
+    }
+
+    const doc = await this.marketplaceListingModel.create({
+      storeListingId,
+      marketplaceTag,
+      accountId,
+      externalId,
+      status,
+    });
+    return { ...doc.toObject(), id: String(doc._id) };
+  }
 }

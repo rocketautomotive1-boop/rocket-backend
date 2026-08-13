@@ -72,6 +72,35 @@ describe('StoreListingService', () => {
     expect(result).toBeNull();
   });
 
+  describe('createOrGetStoreListing', () => {
+    it('reusa um StoreListing existente para o mesmo (productId, storeId)', async () => {
+      modelMock.findOne.mockReturnValue({
+        exec: async () => ({ _id: 'SL1', productId: PRODUCT_ID, storeId: STORE_ID }),
+      });
+
+      const result = await service.createOrGetStoreListing(PRODUCT_ID, STORE_ID);
+
+      expect(result.id).toBe('SL1');
+      expect(modelMock.create).not.toHaveBeenCalled();
+    });
+
+    it('cria um novo StoreListing quando não existe (productId, storeId)', async () => {
+      modelMock.findOne.mockReturnValue({ exec: async () => null });
+      const created = {
+        _id: 'SL2',
+        productId: PRODUCT_ID,
+        storeId: STORE_ID,
+        toObject: () => ({ productId: PRODUCT_ID, storeId: STORE_ID }),
+      };
+      modelMock.create.mockResolvedValue(created);
+
+      const result = await service.createOrGetStoreListing(PRODUCT_ID, STORE_ID);
+
+      expect(result.id).toBe('SL2');
+      expect(modelMock.create).toHaveBeenCalledWith({ productId: PRODUCT_ID, storeId: STORE_ID });
+    });
+  });
+
   describe('marketplace listings', () => {
     const STORE_LISTING_ID = '6955b688dfe7143a30376c03';
 
@@ -82,6 +111,7 @@ describe('StoreListingService', () => {
         findOne: jest.fn(),
         find: jest.fn(),
         create: jest.fn(),
+        findByIdAndUpdate: jest.fn(),
       };
 
       const moduleRef = await Test.createTestingModule({
@@ -227,6 +257,68 @@ describe('StoreListingService', () => {
       expect(result).toHaveLength(2);
       expect(result[0].id).toBe('ML1');
       expect(result[1].marketplaceTag).toBe('shopee');
+    });
+
+    describe('upsertMarketplaceListing', () => {
+      it('cria um novo MarketplaceListing quando nenhum existe', async () => {
+        listingModelMock.findOne.mockReturnValue({ exec: async () => null });
+        const created = {
+          _id: 'ML1',
+          storeListingId: STORE_LISTING_ID,
+          marketplaceTag: 'mercadolivre',
+          accountId: 'ACC_A',
+          externalId: 'MLB111',
+          status: 'active',
+          toObject: () => ({
+            storeListingId: STORE_LISTING_ID,
+            marketplaceTag: 'mercadolivre',
+            accountId: 'ACC_A',
+            externalId: 'MLB111',
+            status: 'active',
+          }),
+        };
+        listingModelMock.create.mockResolvedValueOnce(created);
+
+        const result = await service.upsertMarketplaceListing(STORE_LISTING_ID, 'mercadolivre', 'ACC_A', {
+          externalId: 'MLB111',
+          status: 'active' as any,
+        });
+
+        expect(result.id).toBe('ML1');
+        expect(listingModelMock.create).toHaveBeenCalled();
+      });
+
+      it('atualiza o MarketplaceListing existente in place quando já existe um match', async () => {
+        const existing = {
+          _id: 'ML1',
+          storeListingId: STORE_LISTING_ID,
+          marketplaceTag: 'mercadolivre',
+          accountId: 'ACC_A',
+          externalId: 'MLB111',
+          status: 'pending_creation',
+        };
+        listingModelMock.findOne.mockReturnValue({ exec: async () => existing });
+        listingModelMock.findByIdAndUpdate.mockReturnValue({
+          exec: async () => ({
+            ...existing,
+            status: 'active',
+            toObject: () => ({ ...existing, status: 'active' }),
+          }),
+        });
+
+        const result = await service.upsertMarketplaceListing(STORE_LISTING_ID, 'mercadolivre', 'ACC_A', {
+          externalId: 'MLB111',
+          status: 'active' as any,
+        });
+
+        expect(result.status).toBe('active');
+        expect(listingModelMock.create).not.toHaveBeenCalled();
+        expect(listingModelMock.findByIdAndUpdate).toHaveBeenCalledWith(
+          'ML1',
+          expect.objectContaining({ $set: expect.objectContaining({ status: 'active' }) }),
+          expect.any(Object),
+        );
+      });
     });
   });
 });
