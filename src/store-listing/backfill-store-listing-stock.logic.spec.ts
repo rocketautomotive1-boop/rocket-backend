@@ -201,6 +201,7 @@ describe('backfillBalances', () => {
     expect(balanceModel.create).not.toHaveBeenCalled();
     expect(result.total).toBe(1);
     expect(result.created).toBe(0);
+    expect(result.skippedMissingStoreListing).toBe(1);
   });
 
   it('dry-run: counts without writing', async () => {
@@ -361,6 +362,7 @@ describe('backfillMovements', () => {
     expect(movementModel.create).not.toHaveBeenCalled();
     expect(result.total).toBe(1);
     expect(result.created).toBe(0);
+    expect(result.skippedMissingStoreListing).toBe(1);
   });
 
   it('dry-run: counts without writing', async () => {

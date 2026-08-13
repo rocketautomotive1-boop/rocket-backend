@@ -77,6 +77,7 @@ export interface RelatedBackfillSummary {
   created: number;
   skippedAlreadyMigrated: number;
   skippedOrphanedLotId: number;
+  skippedMissingStoreListing: number;
 }
 
 export async function backfillStock(params: {
@@ -143,6 +144,7 @@ export async function backfillBalances(params: {
     created: 0,
     skippedAlreadyMigrated: 0,
     skippedOrphanedLotId: 0,
+    skippedMissingStoreListing: 0,
   };
 
   for (const balance of balances) {
@@ -159,6 +161,7 @@ export async function backfillBalances(params: {
       console.warn(
         `  [skip] balance ${String(balance._id)}: produto ${String(balance.productId)} sem StoreListing resolvido (lacuna de integridade).`,
       );
+      summary.skippedMissingStoreListing++;
       continue;
     }
 
@@ -200,6 +203,7 @@ export async function backfillMovements(params: {
     created: 0,
     skippedAlreadyMigrated: 0,
     skippedOrphanedLotId: 0,
+    skippedMissingStoreListing: 0,
   };
 
   for (const movement of movements) {
@@ -216,6 +220,7 @@ export async function backfillMovements(params: {
       console.warn(
         `  [skip] movement ${String(movement._id)}: produto ${String(movement.productId)} sem StoreListing resolvido (lacuna de integridade).`,
       );
+      summary.skippedMissingStoreListing++;
       continue;
     }
 
