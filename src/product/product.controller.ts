@@ -1644,6 +1644,9 @@ export class ProductController {
       throw new BadRequestException(`Produto com ID ${id} não encontrado`);
     }
     const basePrice = await this.pricing.getBasePrice(String((product as any)._id ?? id));
-    return { ...(product as any), basePrice };
+    // price é mantido no shape de resposta por retrocompatibilidade — o schema
+    // não tem mais esse campo (preço vive no PricingModule), mas clientes
+    // antigos (app mobile) ainda leem product.price diretamente.
+    return { ...(product as any), basePrice, price: basePrice };
   }
 }
