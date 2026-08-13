@@ -1,7 +1,10 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ListingDocument, ListingModel } from './schemas/listing.schema';
+import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
+import { STORE_PORT, StorePort } from '../store/ports/store.port';
+import { MarketplaceConfigCacheService } from '../marketplace/services/marketplace-config-cache.service';
 
 @Injectable()
 export class ListingService {
@@ -10,7 +13,54 @@ export class ListingService {
     constructor(
         @InjectModel(ListingModel.name)
         public readonly listingModel: Model<ListingDocument>,
+        @Inject(STORE_LISTING_PORT)
+        private readonly storeListingPort: StoreListingPort,
+        @Inject(STORE_PORT)
+        private readonly storePort: StorePort,
+        private readonly marketplaceConfigCache: MarketplaceConfigCacheService,
     ) { }
+
+    /**
+     * Espelha um ListingModel recém-criado/atualizado em StoreListing +
+     * MarketplaceListing (Fase 3 — dual-write). Nunca lança: o legado é a
+     * fonte de verdade nesta fase; uma falha aqui é logada e ignorada, não
+     * propagada ao chamador de create()/update()/createOrUpdate(). Sem
+     * storeId (listing pré-migração, caso raro/transitório), não há o que
+     * espelhar — pula silenciosamente, não é um erro.
+     */
+    private async mirrorToStoreListing(listing: Partial<ListingModel> & { _id?: any }): Promise<void> {
+        if (!listing.storeId) return;
+        try {
+            const config = await this.marketplaceConfigCache.getById(String(listing.marketplaceId));
+            if (!config) {
+                this.logger.error(
+                    `[dual-write] marketplace ${listing.marketplaceId} não encontrado no cache — listing ${listing._id} não espelhado.`,
+                );
+                return;
+            }
+            const accountId = await this.storePort.resolveAccountId(String(listing.storeId), config.tag);
+            if (!accountId) {
+                this.logger.error(
+                    `[dual-write] loja ${listing.storeId} sem conta configurada para ${config.tag} — listing ${listing._id} não espelhado.`,
+                );
+                return;
+            }
+            const storeListing = await this.storeListingPort.createOrGetStoreListing(
+                String(listing.productId),
+                String(listing.storeId),
+            );
+            await this.storeListingPort.upsertMarketplaceListing(
+                storeListing.id,
+                config.tag,
+                accountId,
+                { externalId: listing.externalId ?? null, status: listing.status as any },
+            );
+        } catch (err: any) {
+            this.logger.error(
+                `[dual-write] falha ao espelhar listing ${listing._id} (produto ${listing.productId}, loja ${listing.storeId}): ${err?.message}`,
+            );
+        }
+    }
 
     async findByProduct(productId: string | Types.ObjectId): Promise<ListingDocument[]> {
         const pId = typeof productId === 'string' ? new Types.ObjectId(productId) : productId;
@@ -46,11 +96,15 @@ export class ListingService {
     }
 
     async create(data: Partial<ListingModel>): Promise<ListingDocument> {
-        return this.listingModel.create(data);
+        const doc = await this.listingModel.create(data);
+        await this.mirrorToStoreListing(doc);
+        return doc;
     }
 
     async update(id: string, data: Partial<ListingModel>): Promise<ListingDocument> {
-        return this.listingModel.findByIdAndUpdate(id, { $set: data }, { new: true });
+        const doc = await this.listingModel.findByIdAndUpdate(id, { $set: data }, { new: true });
+        if (doc) await this.mirrorToStoreListing(doc);
+        return doc;
     }
 
     async delete(id: string): Promise<ListingDocument> {
@@ -63,14 +117,18 @@ export class ListingService {
     }
 
     async createOrUpdate(data: Partial<ListingModel>): Promise<ListingDocument> {
+        let doc: ListingDocument;
         if (data.externalId && data.marketplaceId) {
-            return this.listingModel.findOneAndUpdate(
+            doc = await this.listingModel.findOneAndUpdate(
                 { marketplaceId: data.marketplaceId, externalId: data.externalId },
                 { $set: data },
                 { upsert: true, new: true }
             );
+        } else {
+            doc = await this.listingModel.create(data);
         }
-        return this.listingModel.create(data);
+        await this.mirrorToStoreListing(doc);
+        return doc;
     }
 
     async updateStatus(listingId: string, status: string, errorMessage?: string) {
