@@ -134,7 +134,26 @@ export class StoreListingService implements StoreListingPort {
   ): Promise<StoreListingModel & { id: string }> {
     const existing = await this.findByProductAndStore(productId, storeId);
     if (existing) return existing;
-    return this.create(productId, storeId);
+    try {
+      return await this.create(productId, storeId);
+    } catch (err: any) {
+      // Concurrent-creation race: two callers both missed the findByProductAndStore check
+      // above (neither existed yet), one won the insert, the other hit the unique index
+      // {productId, storeId} inside create() and got a BadRequestException. The loser must
+      // NOT propagate that error — it should end up with the SAME StoreListing the winner
+      // just created, not an exception. `create()` itself still throws on duplicates for
+      // its OTHER callers (that contract is intentional and unchanged); only this internal
+      // race-recovery path re-reads instead of surfacing the error.
+      const isDuplicateKeyRace =
+        err instanceof BadRequestException &&
+        typeof err.message === 'string' &&
+        err.message.includes('Já existe um StoreListing');
+      if (!isDuplicateKeyRace) throw err;
+
+      const winner = await this.findByProductAndStore(productId, storeId);
+      if (!winner) throw err; // truly bizarre case — surface the original error rather than return null.
+      return winner;
+    }
   }
 
   async upsertMarketplaceListing(
@@ -146,20 +165,42 @@ export class StoreListingService implements StoreListingPort {
     const externalId = options?.externalId ?? null;
     const status = options?.status ?? ('pending_creation' as MarketplaceListingStatus);
 
-    // Mesma lógica de "identidade real" do fix da Fase 2: um marketplace_listing
-    // é o mesmo anúncio se (storeListingId, marketplaceTag, externalId) bate —
-    // sem externalId (pending_creation), não há como saber se já existe, então
-    // sempre cria (mesmo comportamento que createMarketplaceListing já tinha
-    // para esse caso).
-    const existing = externalId
-      ? await this.marketplaceListingModel.findOne({ storeListingId, marketplaceTag, externalId }).exec()
-      : null;
+    // Identidade de um marketplace_listing:
+    //  - Com externalId: (storeListingId, marketplaceTag, externalId) — mesma lógica do fix
+    //    da Fase 2, o externalId é a identidade permanente de um anúncio publicado.
+    //  - Sem externalId (ainda pending_creation/error — ex.: publish assíncrono do OLX, ou
+    //    uma falha antes de obter o externalId): trata-se do MESMO anúncio lógico sendo
+    //    rastreado através de pending/error até publicar de verdade. Deve haver no máximo
+    //    UM MarketplaceListing por (storeListingId, marketplaceTag) sem externalId — por
+    //    isso o lookup usa {storeListingId, marketplaceTag, externalId: null} em vez de
+    //    pular a busca. Sem isso, cada retry do SyncQueue (backoff) ou cada poll do
+    //    OLX criaria uma linha nova, duplicando indefinidamente.
+    const existing = await this.marketplaceListingModel
+      .findOne({ storeListingId, marketplaceTag, externalId })
+      .exec();
 
     if (existing) {
       const updated = await this.marketplaceListingModel
         .findByIdAndUpdate((existing as any)._id, { $set: { accountId, status } }, { new: true })
         .exec();
       return { ...(updated as any).toObject(), id: String((updated as any)._id) };
+    }
+
+    // Transição pending→publicado: havia uma linha pending_creation/error sem externalId
+    // rastreando este (storeListingId, marketplaceTag) e agora chegou um externalId real
+    // (primeiro publish bem-sucedido). O lookup acima não encontra essa linha (ela tem
+    // externalId:null, buscamos por externalId real) — herdamos o _id dela em vez de criar
+    // uma linha nova e deixar a antiga órfã em pending_creation para sempre.
+    if (externalId) {
+      const pending = await this.marketplaceListingModel
+        .findOne({ storeListingId, marketplaceTag, externalId: null })
+        .exec();
+      if (pending) {
+        const updated = await this.marketplaceListingModel
+          .findByIdAndUpdate((pending as any)._id, { $set: { accountId, status, externalId } }, { new: true })
+          .exec();
+        return { ...(updated as any).toObject(), id: String((updated as any)._id) };
+      }
     }
 
     const doc = await this.marketplaceListingModel.create({

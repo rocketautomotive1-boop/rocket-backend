@@ -118,6 +118,57 @@ describe('StoreListingService', () => {
       expect(result.id).toBe('SL2');
       expect(modelMock.create).toHaveBeenCalledWith({ productId: PRODUCT_ID, storeId: STORE_ID });
     });
+
+    it('corrida de criação: quando create() colide (11000) porque outro caller já inseriu, re-lê e retorna o existente em vez de lançar', async () => {
+      const winnerDoc = { _id: 'SL_WINNER', productId: PRODUCT_ID, storeId: STORE_ID };
+      // findOne é chamado 3x nesse caminho: (1) createOrGetStoreListing checa existência —
+      // miss; (2) create() faz seu próprio pre-check interno — também miss (outro caller
+      // ainda não commitou); (3) createOrGetStoreListing re-lê após o catch do 11000 —
+      // acha o doc que o vencedor da corrida acabou de inserir.
+      modelMock.findOne
+        .mockReturnValueOnce({ exec: async () => null })
+        .mockReturnValueOnce({ exec: async () => null })
+        .mockReturnValueOnce({ exec: async () => winnerDoc });
+      modelMock.create.mockRejectedValueOnce({ code: 11000 });
+
+      const result = await service.createOrGetStoreListing(PRODUCT_ID, STORE_ID);
+
+      expect(result.id).toBe('SL_WINNER');
+    });
+
+    it('duas chamadas concorrentes de createOrGetStoreListing pra um par novo resolvem com o MESMO id, sem lançar', async () => {
+      // Ambas as chamadas fazem miss no primeiro findOne (corrida real: nenhuma viu a outra ainda).
+      modelMock.findOne.mockReturnValue({ exec: async () => null });
+
+      const winnerDoc = { _id: 'SL_RACE', productId: PRODUCT_ID, storeId: STORE_ID };
+      let created = false;
+      modelMock.create.mockImplementation(async () => {
+        if (created) {
+          const err: any = new Error('duplicate key');
+          err.code = 11000;
+          throw err;
+        }
+        created = true;
+        return { ...winnerDoc, toObject: () => winnerDoc };
+      });
+
+      // Depois que o vencedor cria, o findOne interno (re-leitura do perdedor) deve achar winnerDoc.
+      // Como o mock de findOne é genérico (mockReturnValue), qualquer chamada — inclusive a
+      // re-leitura pós-catch — recebe null enquanto `created` for false, e winnerDoc depois. Para
+      // simular isso de forma determinística sem depender de ordem, ajustamos o mock para refletir
+      // o estado real: uma vez criado, findOne passa a achar o doc.
+      modelMock.findOne.mockImplementation(() => ({
+        exec: async () => (created ? winnerDoc : null),
+      }));
+
+      const [r1, r2] = await Promise.all([
+        service.createOrGetStoreListing(PRODUCT_ID, STORE_ID),
+        service.createOrGetStoreListing(PRODUCT_ID, STORE_ID),
+      ]);
+
+      expect(r1.id).toBe('SL_RACE');
+      expect(r2.id).toBe('SL_RACE');
+    });
   });
 
   describe('marketplace listings', () => {
@@ -338,6 +389,119 @@ describe('StoreListingService', () => {
         expect(listingModelMock.findByIdAndUpdate).toHaveBeenCalledWith(
           'ML1',
           expect.objectContaining({ $set: expect.objectContaining({ status: 'active' }) }),
+          expect.any(Object),
+        );
+      });
+
+      it('atualiza in place (não duplica) quando chamado 2x seguidas com externalId null (pending/OLX assíncrono)', async () => {
+        const pendingRow = {
+          _id: 'MLP1',
+          storeListingId: STORE_LISTING_ID,
+          marketplaceTag: 'olx',
+          accountId: 'ACC_A',
+          externalId: null,
+          status: 'pending_creation',
+        };
+
+        // Primeira chamada: nenhum existente (nem por externalId:null, nem pending com real externalId).
+        listingModelMock.findOne.mockReturnValueOnce({ exec: async () => null });
+        listingModelMock.create.mockResolvedValueOnce({
+          ...pendingRow,
+          toObject: () => pendingRow,
+        });
+
+        const result1 = await service.upsertMarketplaceListing(STORE_LISTING_ID, 'olx', 'ACC_A', {
+          externalId: null,
+          status: 'pending_creation' as any,
+        });
+        expect(result1.id).toBe('MLP1');
+        expect(listingModelMock.create).toHaveBeenCalledTimes(1);
+
+        // Segunda chamada (retry do SyncQueue): agora findOne({..., externalId: null}) acha a linha
+        // criada acima — deve atualizar in place, NÃO criar uma segunda linha.
+        listingModelMock.findOne.mockReturnValueOnce({ exec: async () => pendingRow });
+        listingModelMock.findByIdAndUpdate.mockReturnValueOnce({
+          exec: async () => ({
+            ...pendingRow,
+            status: 'pending_creation',
+            toObject: () => pendingRow,
+          }),
+        });
+
+        const result2 = await service.upsertMarketplaceListing(STORE_LISTING_ID, 'olx', 'ACC_A', {
+          externalId: null,
+          status: 'pending_creation' as any,
+        });
+
+        expect(result2.id).toBe('MLP1');
+        // create() ainda só foi chamado uma vez no total (a segunda chamada atualizou, não criou).
+        expect(listingModelMock.create).toHaveBeenCalledTimes(1);
+        expect(listingModelMock.findByIdAndUpdate).toHaveBeenCalledWith(
+          'MLP1',
+          expect.objectContaining({ $set: expect.objectContaining({ status: 'pending_creation' }) }),
+          expect.any(Object),
+        );
+      });
+
+      it('atualiza in place quando chamado novamente com o MESMO externalId real (comportamento pré-existente preservado)', async () => {
+        const existing = {
+          _id: 'ML9',
+          storeListingId: STORE_LISTING_ID,
+          marketplaceTag: 'mercadolivre',
+          accountId: 'ACC_A',
+          externalId: 'MLB999',
+          status: 'active',
+        };
+        listingModelMock.findOne.mockReturnValue({ exec: async () => existing });
+        listingModelMock.findByIdAndUpdate.mockReturnValue({
+          exec: async () => ({ ...existing, toObject: () => existing }),
+        });
+
+        const result = await service.upsertMarketplaceListing(STORE_LISTING_ID, 'mercadolivre', 'ACC_A', {
+          externalId: 'MLB999',
+          status: 'active' as any,
+        });
+
+        expect(result.id).toBe('ML9');
+        expect(listingModelMock.create).not.toHaveBeenCalled();
+      });
+
+      it('transição pending→publicado: herda a linha pending (externalId:null) em vez de criar uma nova quando chega o externalId real', async () => {
+        const pendingRow = {
+          _id: 'MLP2',
+          storeListingId: STORE_LISTING_ID,
+          marketplaceTag: 'olx',
+          accountId: 'ACC_A',
+          externalId: null,
+          status: 'pending_creation',
+        };
+
+        // Lookup por externalId real: nada encontrado.
+        listingModelMock.findOne.mockReturnValueOnce({ exec: async () => null });
+        // Lookup de fallback por externalId:null: encontra a linha pending.
+        listingModelMock.findOne.mockReturnValueOnce({ exec: async () => pendingRow });
+        listingModelMock.findByIdAndUpdate.mockReturnValueOnce({
+          exec: async () => ({
+            ...pendingRow,
+            externalId: 'MLB777',
+            status: 'active',
+            toObject: () => ({ ...pendingRow, externalId: 'MLB777', status: 'active' }),
+          }),
+        });
+
+        const result = await service.upsertMarketplaceListing(STORE_LISTING_ID, 'olx', 'ACC_A', {
+          externalId: 'MLB777',
+          status: 'active' as any,
+        });
+
+        expect(result.id).toBe('MLP2');
+        expect(result.externalId).toBe('MLB777');
+        expect(listingModelMock.create).not.toHaveBeenCalled();
+        expect(listingModelMock.findByIdAndUpdate).toHaveBeenCalledWith(
+          'MLP2',
+          expect.objectContaining({
+            $set: expect.objectContaining({ status: 'active', externalId: 'MLB777' }),
+          }),
           expect.any(Object),
         );
       });
