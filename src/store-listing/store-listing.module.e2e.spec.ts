@@ -55,24 +55,45 @@ describe('StoreListingModule (e2e)', () => {
     ).rejects.toThrow(/duplicate key/i);
   });
 
-  it('enforces unique {storeListingId, marketplaceTag} at the database level', async () => {
+  it('enforces unique {storeListingId, marketplaceTag, externalId} at the database level', async () => {
     const storeListingId = '000000000000000000000003';
     await marketplaceListingModel.create({
       storeListingId,
       marketplaceTag: 'mercadolivre',
       accountId: 'ACC_A',
-      externalId: null,
-      status: 'pending_creation',
+      externalId: 'MLB111',
+      status: 'active',
     });
     await expect(
       marketplaceListingModel.create({
         storeListingId,
         marketplaceTag: 'mercadolivre',
         accountId: 'ACC_B',
-        externalId: null,
-        status: 'pending_creation',
+        externalId: 'MLB111',
+        status: 'active',
       }),
     ).rejects.toThrow(/duplicate key/i);
+  });
+
+  it('allows two marketplace_listings for the same (storeListingId, marketplaceTag) when externalId differs', async () => {
+    const storeListingId = '000000000000000000000005';
+    await marketplaceListingModel.create({
+      storeListingId,
+      marketplaceTag: 'mercadolivre',
+      accountId: 'ACC_A',
+      externalId: 'MLB111',
+      status: 'active',
+    });
+    await marketplaceListingModel.create({
+      storeListingId,
+      marketplaceTag: 'mercadolivre',
+      accountId: 'ACC_A',
+      externalId: 'MLB222',
+      status: 'active',
+    });
+
+    const count = await marketplaceListingModel.countDocuments({ storeListingId, marketplaceTag: 'mercadolivre' });
+    expect(count).toBe(2);
   });
 
   it('allows two marketplace_listings for the same storeListingId on DIFFERENT marketplaces', async () => {

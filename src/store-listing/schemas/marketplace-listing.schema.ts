@@ -34,4 +34,14 @@ export class MarketplaceListingModel {
 
 export const MarketplaceListingSchema = SchemaFactory.createForClass(MarketplaceListingModel);
 
-MarketplaceListingSchema.index({ storeListingId: 1, marketplaceTag: 1 }, { unique: true });
+// Antes exigia unicidade só por (storeListingId, marketplaceTag), assumindo 1 anúncio por
+// produto+marketplace — falso neste negócio: o mesmo produto vende com N títulos distintos
+// por veículo compatível (limite de 60 caracteres do ML), cada um com seu próprio externalId.
+// A identidade real de um anúncio é o externalId atribuído pelo marketplace, não a dupla
+// (storeListingId, marketplaceTag) — por isso a unicidade só se aplica quando externalId
+// existe (parcial): um MarketplaceListing pending_creation (sem externalId ainda) não colide
+// com nenhum outro até ganhar um externalId real.
+MarketplaceListingSchema.index(
+  { storeListingId: 1, marketplaceTag: 1, externalId: 1 },
+  { unique: true, partialFilterExpression: { externalId: { $type: 'string' } } },
+);
