@@ -181,6 +181,39 @@ describe('backfillStoreListings', () => {
     expect(summary.marketplaceListingsCreated).toBe(0);
   });
 
+  it('two listings of the SAME product+marketplace with DIFFERENT externalId both get their own MarketplaceListing (not treated as duplicates)', async () => {
+    const productId = new Types.ObjectId();
+    const marketplaceId = new Types.ObjectId();
+    const listingA = makeListing({ productId, marketplaceId, externalId: 'MLB111', _id: new Types.ObjectId() });
+    const listingB = makeListing({ productId, marketplaceId, externalId: 'MLB222', _id: new Types.ObjectId() });
+
+    const storeListingService = {
+      findByProductAndStore: jest.fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'SL1' }), // same product -> same StoreListing reused on 2nd call
+      create: jest.fn().mockResolvedValue({ id: 'SL1' }),
+      createMarketplaceListing: jest.fn()
+        .mockResolvedValueOnce({ id: 'ML1' })
+        .mockResolvedValueOnce({ id: 'ML2' }), // both succeed — different externalId
+    };
+    const listingModel = { updateOne: jest.fn().mockResolvedValue({}) };
+
+    const summary = await backfillStoreListings({
+      listings: [listingA, listingB],
+      resolveStore: async () => FALLBACK_STORE_ID,
+      storeListingService: storeListingService as any,
+      resolveMarketplaceTag: async () => 'mercadolivre',
+      resolveAccountId: async () => 'ACC_A',
+      listingModel: listingModel as any,
+      dryRun: false,
+    });
+
+    expect(summary.storeListingsCreated).toBe(1);
+    expect(summary.storeListingsReused).toBe(1);
+    expect(summary.marketplaceListingsCreated).toBe(2); // NOT 1 created + 1 reused — this is the bug this plan fixes
+    expect(summary.marketplaceListingsReused).toBe(0);
+  });
+
   it('resolved account creates the MarketplaceListing normally', async () => {
     const listing = makeListing();
     const storeListingService = {
