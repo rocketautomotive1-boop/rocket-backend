@@ -12,7 +12,8 @@ export type StoreListingStockLotDocument = HydratedDocument<StoreListingStockLot
  */
 @Schema({ collection: 'store_listing_stock_lots', timestamps: true })
 export class StoreListingStockLotModel {
-  @Prop({ type: Types.ObjectId, required: true, index: true })
+  /** Sem index:true aqui — o índice composto {storeListingId, condition} abaixo já cobre queries por storeListingId sozinho (prefixo do índice composto). */
+  @Prop({ type: Types.ObjectId, required: true })
   storeListingId: Types.ObjectId;
 
   @Prop({ type: Types.ObjectId, required: true, unique: true })

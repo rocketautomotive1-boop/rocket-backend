@@ -15,9 +15,12 @@ import { STORE_LISTING_PORT } from './ports/store-listing.port';
  * wireado nesta fase) devem injetar STORE_LISTING_PORT, nunca
  * StoreListingService diretamente.
  *
- * Fase 1 (expand) do plano de migração: só identidade + marketplace_listings.
- * Estoque/pricing/allocation são adicionados na Fase 2, quando o backfill
- * também é escrito.
+ * Fase 1 (expand) do plano de migração: identidade + marketplace_listings.
+ * Fase 2 registra também os schemas de estoque (store_listing_stock_lots/
+ * balances/movements) aqui no forFeature, para o script de backfill
+ * (app.get(getModelToken(...))) — mas eles ainda não são consumidos por
+ * nenhum service nem expostos via STORE_LISTING_PORT; isso é trabalho da
+ * Fase 3.
  */
 @Module({
   imports: [
