@@ -28,6 +28,7 @@ import { GatewaysModule } from '../gateways/gateways.module';
 import { SyncResultConsumer } from './sync-result.consumer';
 import { ModerationModule } from '../moderation/moderation.module';
 import { ModerationRemovalWorker } from './workers/moderation-removal.worker';
+import { ListingModule } from '../listing/listing.module';
 
 /**
  * Backend half of the marketplace-sync contract. This module is NOT the orchestrator itself —
@@ -66,6 +67,7 @@ import { ModerationRemovalWorker } from './workers/moderation-removal.worker';
         GatewaysModule,
         OutboxModule,
         ModerationModule,
+        ListingModule,
     ],
     controllers: [MarketplaceOrchestratorController],
     providers: [
