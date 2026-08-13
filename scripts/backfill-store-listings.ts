@@ -29,8 +29,47 @@ import { Model, Types } from 'mongoose';
 // values are lazily require()'d inside main(), which only ever runs via the
 // CLI entrypoint (`node scripts/backfill-store-listings.ts`), never under Jest.
 import type { StoreListingService } from '../src/store-listing/store-listing.service';
+import type { MarketplaceListingStatus } from '../src/store-listing/schemas/marketplace-listing.schema';
 import type { StorePort } from '../src/store/ports/store.port';
 import type { ListingDocument } from '../src/listing/schemas/listing.schema';
+
+/**
+ * ListingModel.status (legado) tem mais valores que MarketplaceListingStatus
+ * (novo — 4 estados operacionais). 'pending_removal'/'removal_failed'/
+ * 'removed' não têm equivalente 1:1 ainda (o novo modelo não modela remoção
+ * como estado próprio nesta fase) — mapeados para 'error', visível e
+ * revisável manualmente, em vez de perder a informação silenciosamente ou
+ * quebrar o backfill num valor inesperado.
+ */
+export function mapLegacyStatus(legacyStatus: string): MarketplaceListingStatus {
+  switch (legacyStatus) {
+    case 'active':
+    case 'paused':
+    case 'error':
+    case 'pending_creation':
+      return legacyStatus;
+    case 'pending_removal':
+    case 'removal_failed':
+    case 'removed':
+      return 'error';
+    default:
+      return 'error';
+  }
+}
+
+/**
+ * Calcula o `skip` da próxima página de `ListingModel.find({storeId:
+ * {$exists:false}})`. Em --execute, cada listing processado grava storeId,
+ * removendo-se do próprio filtro — o resultado encolhe a cada iteração, e
+ * paginar com skip crescente pula documentos (skip avança mais rápido que
+ * o resultado encolhe). Em dry-run nada é gravado, o filtro nunca encolhe,
+ * então skip cresce normalmente. Extraído como função pura testável porque
+ * esse bug (revisão da Fase 2) passou despercebido justamente por main()
+ * não ter cobertura de teste para a lógica de paginação.
+ */
+export function nextSkip(currentSkip: number, batchSize: number, dryRun: boolean): number {
+  return dryRun ? currentSkip + batchSize : 0;
+}
 
 export interface ListingRow {
   _id: Types.ObjectId;
@@ -110,7 +149,10 @@ export async function backfillStoreListings(params: {
       summary.skippedNoAccount++;
     } else {
       try {
-        await storeListingService.createMarketplaceListing(storeListingId, marketplaceTag, accountId);
+        await storeListingService.createMarketplaceListing(storeListingId, marketplaceTag, accountId, {
+          externalId: listing.externalId ?? null,
+          status: mapLegacyStatus(listing.status),
+        });
         summary.marketplaceListingsCreated++;
       } catch (err: any) {
         if (err instanceof BadRequestException) {
@@ -194,9 +236,17 @@ async function main() {
     };
 
     for (;;) {
+      // Em --execute, cada listing processado grava storeId, o que o remove do
+      // filtro {storeId: {$exists: false}} — o resultado encolhe a cada
+      // iteração. Paginar com .skip() nesse cenário pula metade dos
+      // documentos (skip avança mais rápido que o resultado encolhe). Em
+      // dry-run nada é gravado, o filtro nunca encolhe, então .skip() pagina
+      // corretamente. Por isso: skip=0 sempre em execute (sempre relê o
+      // início, que a cada rodada é um lote novo); skip avança normalmente
+      // em dry-run.
       const batch = await listingModel
         .find({ storeId: { $exists: false } })
-        .skip(skip)
+        .skip(dryRun ? skip : 0)
         .limit(BATCH_SIZE)
         .lean()
         .exec();
@@ -241,7 +291,7 @@ async function main() {
 
       processed += batch.length;
       console.log(`  ... processados ${processed} listings`);
-      skip += BATCH_SIZE;
+      skip = nextSkip(skip, BATCH_SIZE, dryRun);
     }
 
     console.log(`\n${dryRun ? '[DRY-RUN] ' : ''}Resumo:`, aggregateSummary);

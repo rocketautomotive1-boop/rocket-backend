@@ -68,6 +68,7 @@ export interface StockMovementRow {
 export interface StockBackfillSummary {
   totalLots: number;
   lotsCreated: number;
+  lotsWouldCreate: number;
   lotsSkippedAlreadyMigrated: number;
   storeListingsCreatedForStockOnly: number;
 }
@@ -75,6 +76,7 @@ export interface StockBackfillSummary {
 export interface RelatedBackfillSummary {
   total: number;
   created: number;
+  wouldCreate: number;
   skippedAlreadyMigrated: number;
   skippedOrphanedLotId: number;
   skippedMissingStoreListing: number;
@@ -92,6 +94,7 @@ export async function backfillStock(params: {
   const summary: StockBackfillSummary = {
     totalLots: lots.length,
     lotsCreated: 0,
+    lotsWouldCreate: 0,
     lotsSkippedAlreadyMigrated: 0,
     storeListingsCreatedForStockOnly: 0,
   };
@@ -103,7 +106,13 @@ export async function backfillStock(params: {
       continue;
     }
 
-    if (dryRun) continue;
+    if (dryRun) {
+      // resolveStore/findByProductAndStore são leituras — seguras em dry-run,
+      // dão visibilidade real de quantos lots seriam criados sem gravar nada
+      // (create() só é chamado fora do bloco dry-run, abaixo).
+      summary.lotsWouldCreate++;
+      continue;
+    }
 
     const storeId = await resolveStore(lot.createdByUserId);
     let storeListingId: string;
@@ -142,6 +151,7 @@ export async function backfillBalances(params: {
   const summary: RelatedBackfillSummary = {
     total: balances.length,
     created: 0,
+    wouldCreate: 0,
     skippedAlreadyMigrated: 0,
     skippedOrphanedLotId: 0,
     skippedMissingStoreListing: 0,
@@ -153,8 +163,6 @@ export async function backfillBalances(params: {
       summary.skippedAlreadyMigrated++;
       continue;
     }
-
-    if (dryRun) continue;
 
     const storeListingId = storeListingIdByProductId.get(String(balance.productId));
     if (!storeListingId) {
@@ -171,6 +179,11 @@ export async function backfillBalances(params: {
         `  [skip] balance ${String(balance._id)}: lot ${String(balance.lotId)} órfão (não migrado).`,
       );
       summary.skippedOrphanedLotId++;
+      continue;
+    }
+
+    if (dryRun) {
+      summary.wouldCreate++;
       continue;
     }
 
@@ -201,6 +214,7 @@ export async function backfillMovements(params: {
   const summary: RelatedBackfillSummary = {
     total: movements.length,
     created: 0,
+    wouldCreate: 0,
     skippedAlreadyMigrated: 0,
     skippedOrphanedLotId: 0,
     skippedMissingStoreListing: 0,
@@ -212,8 +226,6 @@ export async function backfillMovements(params: {
       summary.skippedAlreadyMigrated++;
       continue;
     }
-
-    if (dryRun) continue;
 
     const storeListingId = storeListingIdByProductId.get(String(movement.productId));
     if (!storeListingId) {
@@ -234,6 +246,11 @@ export async function backfillMovements(params: {
         summary.skippedOrphanedLotId++;
         continue;
       }
+    }
+
+    if (dryRun) {
+      summary.wouldCreate++;
+      continue;
     }
 
     await movementModel.create({
@@ -351,15 +368,20 @@ async function main() {
 
     console.log(`\n${dryRun ? '[DRY-RUN] ' : ''}Lots:`, lotSummary);
 
-    if (dryRun) {
-      console.log('\n[DRY-RUN] Balances/Movements não avaliados em dry-run (dependem dos lots gravados).');
-      return;
-    }
-
     // storeListingIdByProductId: reresolve por produto (barato, cache em
     // memória) em vez de reaproveitar direto do loop acima porque nem todo
     // produto com balance/movement necessariamente teve um lot processado
     // nesta mesma execução (idempotência entre corridas separadas).
+    //
+    // Em dry-run, isso reflete só os StoreListing que JÁ existem (de
+    // execuções reais anteriores) — nenhum StoreListing novo foi criado
+    // pelo passe de lots acima (backfillStock não grava nada em dry-run).
+    // Produtos cujo StoreListing ainda não existe aparecem corretamente
+    // como skippedMissingStoreListing abaixo: é o que de fato aconteceria
+    // se essas balances/movements fossem processadas ANTES de rodar em
+    // --execute (a ordem lots->balances->movements dentro do mesmo --execute
+    // resolve isso; um dry-run isolado não tem como prever esse
+    // encadeamento sem gravar, então relata o estado real de agora).
     const storeListingIdByProductId = new Map<string, string>();
     for (const [productId, createdByUserId] of createdByUserIdByProductId as Map<string, Types.ObjectId | null>) {
       const storeId = await resolveStore(createdByUserId);

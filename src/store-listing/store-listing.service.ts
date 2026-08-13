@@ -58,6 +58,7 @@ export class StoreListingService implements StoreListingPort {
     storeListingId: string,
     marketplaceTag: string,
     accountId: string,
+    options?: { externalId?: string | null; status?: MarketplaceListingStatus },
   ): Promise<MarketplaceListingModel & { id: string }> {
     const existing = await this.marketplaceListingModel.findOne({ storeListingId, marketplaceTag }).exec();
     if (existing) {
@@ -70,8 +71,8 @@ export class StoreListingService implements StoreListingPort {
         storeListingId,
         marketplaceTag,
         accountId,
-        externalId: null,
-        status: 'pending_creation' as MarketplaceListingStatus,
+        externalId: options?.externalId ?? null,
+        status: options?.status ?? ('pending_creation' as MarketplaceListingStatus),
       });
       return { ...doc.toObject(), id: String(doc._id) };
     } catch (err: any) {

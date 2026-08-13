@@ -37,6 +37,8 @@ describe('backfillStock', () => {
 
     expect(summary.totalLots).toBe(1);
     expect(stockLotModel.create).not.toHaveBeenCalled();
+    expect(summary.lotsWouldCreate).toBe(1);
+    expect(summary.lotsCreated).toBe(0);
   });
 
   it('execute: creates a StoreListing when the product has stock but no prior listing', async () => {
@@ -204,9 +206,9 @@ describe('backfillBalances', () => {
     expect(result.skippedMissingStoreListing).toBe(1);
   });
 
-  it('dry-run: counts without writing', async () => {
+  it('dry-run: counts wouldCreate for a balance that resolves cleanly, without writing', async () => {
     const balance = makeBalance();
-    const balanceModel = { findOne: jest.fn(), create: jest.fn() };
+    const balanceModel = { findOne: jest.fn().mockResolvedValue(null), create: jest.fn() };
     const storeListingIdByProductId = new Map([[String(productId), storeListingId]]);
     const lotIdMap = new Map([[String(originalLotId), newLotId]]);
 
@@ -220,6 +222,8 @@ describe('backfillBalances', () => {
 
     expect(result.total).toBe(1);
     expect(balanceModel.create).not.toHaveBeenCalled();
+    expect(result.wouldCreate).toBe(1);
+    expect(result.created).toBe(0);
   });
 });
 
@@ -365,9 +369,9 @@ describe('backfillMovements', () => {
     expect(result.skippedMissingStoreListing).toBe(1);
   });
 
-  it('dry-run: counts without writing', async () => {
+  it('dry-run: counts wouldCreate for a movement that resolves cleanly, without writing', async () => {
     const movement = makeMovement();
-    const movementModel = { findOne: jest.fn(), create: jest.fn() };
+    const movementModel = { findOne: jest.fn().mockResolvedValue(null), create: jest.fn() };
     const storeListingIdByProductId = new Map([[String(productId), storeListingId]]);
     const lotIdMap = new Map([[String(originalLotId), newLotId]]);
 
@@ -381,5 +385,7 @@ describe('backfillMovements', () => {
 
     expect(result.total).toBe(1);
     expect(movementModel.create).not.toHaveBeenCalled();
+    expect(result.wouldCreate).toBe(1);
+    expect(result.created).toBe(0);
   });
 });

@@ -1,6 +1,38 @@
 import { Types } from 'mongoose';
 import { BadRequestException } from '@nestjs/common';
-import { backfillStoreListings, ListingRow } from '../../scripts/backfill-store-listings';
+import { backfillStoreListings, ListingRow, mapLegacyStatus, nextSkip } from '../../scripts/backfill-store-listings';
+
+describe('mapLegacyStatus', () => {
+  it('preserves operational statuses that exist in the new model', () => {
+    expect(mapLegacyStatus('active')).toBe('active');
+    expect(mapLegacyStatus('paused')).toBe('paused');
+    expect(mapLegacyStatus('error')).toBe('error');
+    expect(mapLegacyStatus('pending_creation')).toBe('pending_creation');
+  });
+
+  it('maps removal-related legacy statuses to error (no 1:1 equivalent yet)', () => {
+    expect(mapLegacyStatus('pending_removal')).toBe('error');
+    expect(mapLegacyStatus('removal_failed')).toBe('error');
+    expect(mapLegacyStatus('removed')).toBe('error');
+  });
+
+  it('maps an unknown/unexpected status to error rather than throwing', () => {
+    expect(mapLegacyStatus('some_future_status')).toBe('error');
+  });
+});
+
+describe('nextSkip', () => {
+  it('dry-run: advances skip by batchSize (filter never shrinks, safe to paginate)', () => {
+    expect(nextSkip(0, 500, true)).toBe(500);
+    expect(nextSkip(500, 500, true)).toBe(1000);
+  });
+
+  it('execute: always resets to 0 (each write shrinks the filter — re-read the new first page)', () => {
+    expect(nextSkip(0, 500, false)).toBe(0);
+    expect(nextSkip(500, 500, false)).toBe(0);
+    expect(nextSkip(11500, 500, false)).toBe(0);
+  });
+});
 
 describe('backfillStoreListings', () => {
   const FALLBACK_STORE_ID = '6a00000000000000000000f0';
@@ -60,7 +92,10 @@ describe('backfillStoreListings', () => {
     });
 
     expect(storeListingService.create).toHaveBeenCalledWith(String(listing.productId), FALLBACK_STORE_ID);
-    expect(storeListingService.createMarketplaceListing).toHaveBeenCalledWith('SL1', 'mercadolivre', 'account-1');
+    expect(storeListingService.createMarketplaceListing).toHaveBeenCalledWith('SL1', 'mercadolivre', 'account-1', {
+      externalId: 'MLB123',
+      status: 'active',
+    });
     expect(listingModel.updateOne).toHaveBeenCalledWith({ _id: listing._id }, { $set: { storeId: FALLBACK_STORE_ID } });
     expect(summary.storeListingsCreated).toBe(1);
     expect(summary.marketplaceListingsCreated).toBe(1);
@@ -86,7 +121,10 @@ describe('backfillStoreListings', () => {
     });
 
     expect(storeListingService.create).not.toHaveBeenCalled();
-    expect(storeListingService.createMarketplaceListing).toHaveBeenCalledWith('SL-EXISTING', 'mercadolivre', 'account-1');
+    expect(storeListingService.createMarketplaceListing).toHaveBeenCalledWith('SL-EXISTING', 'mercadolivre', 'account-1', {
+      externalId: 'MLB123',
+      status: 'active',
+    });
     expect(summary.storeListingsReused).toBe(1);
   });
 
@@ -162,7 +200,10 @@ describe('backfillStoreListings', () => {
       dryRun: false,
     });
 
-    expect(storeListingService.createMarketplaceListing).toHaveBeenCalledWith('SL1', 'mercadolivre', 'account-1');
+    expect(storeListingService.createMarketplaceListing).toHaveBeenCalledWith('SL1', 'mercadolivre', 'account-1', {
+      externalId: 'MLB123',
+      status: 'active',
+    });
     expect(summary.marketplaceListingsCreated).toBe(1);
     expect(summary.skippedNoAccount).toBe(0);
   });
