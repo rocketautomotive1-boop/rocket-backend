@@ -3,6 +3,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { BadRequestException } from '@nestjs/common';
 import { StoreListingModel } from './schemas/store-listing.schema';
 import { StoreListingService } from './store-listing.service';
+import { StockMovementType } from '../stock/domain/movement-type';
 
 describe('StoreListingService', () => {
   const PRODUCT_ID = '6955b688dfe7143a30376c01';
@@ -23,6 +24,9 @@ describe('StoreListingService', () => {
         StoreListingService,
         { provide: getModelToken(StoreListingModel.name), useValue: modelMock },
         { provide: getModelToken('MarketplaceListingModel'), useValue: {} },
+        { provide: getModelToken('StoreListingStockLotModel'), useValue: {} },
+        { provide: getModelToken('StoreListingStockBalanceModel'), useValue: {} },
+        { provide: getModelToken('StoreListingStockMovementModel'), useValue: {} },
       ],
     }).compile();
 
@@ -119,6 +123,9 @@ describe('StoreListingService', () => {
           StoreListingService,
           { provide: getModelToken(StoreListingModel.name), useValue: modelMock },
           { provide: getModelToken('MarketplaceListingModel'), useValue: listingModelMock },
+          { provide: getModelToken('StoreListingStockLotModel'), useValue: {} },
+          { provide: getModelToken('StoreListingStockBalanceModel'), useValue: {} },
+          { provide: getModelToken('StoreListingStockMovementModel'), useValue: {} },
         ],
       }).compile();
 
@@ -319,6 +326,187 @@ describe('StoreListingService', () => {
           expect.any(Object),
         );
       });
+    });
+  });
+
+  describe('recordStockMovement', () => {
+    const STORE_LISTING_ID = '6955b688dfe7143a30376c03';
+
+    let stockLotModelMock: any;
+    let stockBalanceModelMock: any;
+    let stockMovementModelMock: any;
+
+    beforeEach(async () => {
+      stockLotModelMock = {
+        findOne: jest.fn(),
+        findById: jest.fn(),
+        create: jest.fn(),
+      };
+      stockBalanceModelMock = {
+        updateOne: jest.fn(),
+      };
+      stockMovementModelMock = {
+        create: jest.fn(),
+      };
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          StoreListingService,
+          { provide: getModelToken(StoreListingModel.name), useValue: modelMock },
+          { provide: getModelToken('MarketplaceListingModel'), useValue: {} },
+          { provide: getModelToken('StoreListingStockLotModel'), useValue: stockLotModelMock },
+          { provide: getModelToken('StoreListingStockBalanceModel'), useValue: stockBalanceModelMock },
+          { provide: getModelToken('StoreListingStockMovementModel'), useValue: stockMovementModelMock },
+        ],
+      }).compile();
+
+      service = moduleRef.get(StoreListingService);
+    });
+
+    it('cria um novo lote quando nenhum existe para (storeListingId, condition) e faz upsert atômico do saldo', async () => {
+      stockLotModelMock.findOne.mockReturnValue({ exec: async () => null });
+      stockLotModelMock.create.mockResolvedValue({ _id: 'LOT1' });
+      stockBalanceModelMock.updateOne.mockResolvedValue({ acknowledged: true });
+      stockMovementModelMock.create.mockResolvedValue({ _id: 'MOV1' });
+
+      const result = await service.recordStockMovement({
+        storeListingId: STORE_LISTING_ID,
+        type: StockMovementType.INBOUND,
+        quantity: 5,
+      });
+
+      expect(result.lotId).toBe('LOT1');
+      expect(result.movementId).toBe('MOV1');
+      expect(stockLotModelMock.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ storeListingId: STORE_LISTING_ID, condition: 'new' }),
+      );
+      expect(stockLotModelMock.create).toHaveBeenCalledWith(
+        expect.objectContaining({ storeListingId: STORE_LISTING_ID, condition: 'new' }),
+      );
+      expect(stockBalanceModelMock.updateOne).toHaveBeenCalledWith(
+        { storeListingId: STORE_LISTING_ID, lotId: 'LOT1', boxId: null },
+        { $inc: { onHand: 5, reserved: 0 }, $setOnInsert: { condition: 'new' } },
+        { upsert: true },
+      );
+    });
+
+    it('reusa um lote existente para a mesma (storeListingId, condition) sem recriar', async () => {
+      stockLotModelMock.findOne.mockReturnValue({ exec: async () => ({ _id: 'LOT1' }) });
+      stockBalanceModelMock.updateOne.mockResolvedValue({ acknowledged: true });
+      stockMovementModelMock.create.mockResolvedValue({ _id: 'MOV2' });
+
+      const result = await service.recordStockMovement({
+        storeListingId: STORE_LISTING_ID,
+        type: StockMovementType.OUTBOUND,
+        quantity: 3,
+      });
+
+      expect(result.lotId).toBe('LOT1');
+      expect(stockLotModelMock.create).not.toHaveBeenCalled();
+      expect(stockBalanceModelMock.updateOne).toHaveBeenCalledWith(
+        { storeListingId: STORE_LISTING_ID, lotId: 'LOT1', boxId: null },
+        { $inc: { onHand: -3, reserved: 0 }, $setOnInsert: { condition: 'new' } },
+        { upsert: true },
+      );
+    });
+
+    it('acumula onHand via $inc (não overwrite) numa segunda movimentação contra o mesmo (lotId, boxId)', async () => {
+      stockLotModelMock.findOne.mockReturnValue({ exec: async () => ({ _id: 'LOT1' }) });
+      stockBalanceModelMock.updateOne.mockResolvedValue({ acknowledged: true });
+      stockMovementModelMock.create.mockResolvedValue({ _id: 'MOV1' });
+
+      await service.recordStockMovement({
+        storeListingId: STORE_LISTING_ID,
+        type: StockMovementType.INBOUND,
+        quantity: 5,
+      });
+
+      stockMovementModelMock.create.mockResolvedValue({ _id: 'MOV2' });
+      await service.recordStockMovement({
+        storeListingId: STORE_LISTING_ID,
+        type: StockMovementType.INBOUND,
+        quantity: 2,
+      });
+
+      expect(stockBalanceModelMock.updateOne).toHaveBeenNthCalledWith(
+        1,
+        { storeListingId: STORE_LISTING_ID, lotId: 'LOT1', boxId: null },
+        { $inc: { onHand: 5, reserved: 0 }, $setOnInsert: { condition: 'new' } },
+        { upsert: true },
+      );
+      expect(stockBalanceModelMock.updateOne).toHaveBeenNthCalledWith(
+        2,
+        { storeListingId: STORE_LISTING_ID, lotId: 'LOT1', boxId: null },
+        { $inc: { onHand: 2, reserved: 0 }, $setOnInsert: { condition: 'new' } },
+        { upsert: true },
+      );
+      // No manual read-modify-write: updateOne is called with the raw per-call delta,
+      // never a pre-summed running total computed in application code.
+      expect(stockBalanceModelMock.updateOne).toHaveBeenCalledTimes(2);
+    });
+
+    it('usa fromBoxId/toBoxId como chave boxId no saldo quando informado (transfer usa toBoxId)', async () => {
+      stockLotModelMock.findOne.mockReturnValue({ exec: async () => ({ _id: 'LOT1' }) });
+      stockBalanceModelMock.updateOne.mockResolvedValue({ acknowledged: true });
+      stockMovementModelMock.create.mockResolvedValue({ _id: 'MOV3' });
+
+      await service.recordStockMovement({
+        storeListingId: STORE_LISTING_ID,
+        type: StockMovementType.INBOUND,
+        quantity: 1,
+        toBoxId: 'BOX1',
+      });
+
+      expect(stockBalanceModelMock.updateOne).toHaveBeenCalledWith(
+        { storeListingId: STORE_LISTING_ID, lotId: 'LOT1', boxId: 'BOX1' },
+        { $inc: { onHand: 1, reserved: 0 }, $setOnInsert: { condition: 'new' } },
+        { upsert: true },
+      );
+    });
+
+    it('registra o movimento com os campos informados, sem original*Id (documento novo, não migrado)', async () => {
+      stockLotModelMock.findOne.mockReturnValue({ exec: async () => ({ _id: 'LOT1' }) });
+      stockBalanceModelMock.updateOne.mockResolvedValue({ acknowledged: true });
+      stockMovementModelMock.create.mockResolvedValue({ _id: 'MOV1' });
+
+      await service.recordStockMovement({
+        storeListingId: STORE_LISTING_ID,
+        type: StockMovementType.INBOUND,
+        quantity: 5,
+        orderId: 'ORDER1',
+        unitCost: '12.50',
+        reason: 'compra',
+      });
+
+      const createArg = stockMovementModelMock.create.mock.calls[0][0];
+      expect(createArg).toMatchObject({
+        storeListingId: STORE_LISTING_ID,
+        lotId: 'LOT1',
+        type: StockMovementType.INBOUND,
+        quantity: 5,
+        orderId: 'ORDER1',
+        unitCost: '12.50',
+        reason: 'compra',
+        condition: 'new',
+      });
+      expect(createArg.originalMovementId).toBeUndefined();
+    });
+
+    it('usa lotId explícito (findById) quando informado, sem consultar por (storeListingId, condition)', async () => {
+      stockLotModelMock.findById.mockReturnValue({ exec: async () => ({ _id: 'LOT9' }) });
+      stockBalanceModelMock.updateOne.mockResolvedValue({ acknowledged: true });
+      stockMovementModelMock.create.mockResolvedValue({ _id: 'MOV1' });
+
+      const result = await service.recordStockMovement({
+        storeListingId: STORE_LISTING_ID,
+        type: StockMovementType.INBOUND,
+        quantity: 1,
+        lotId: 'LOT9',
+      });
+
+      expect(result.lotId).toBe('LOT9');
+      expect(stockLotModelMock.findById).toHaveBeenCalledWith('LOT9');
+      expect(stockLotModelMock.findOne).not.toHaveBeenCalled();
     });
   });
 });

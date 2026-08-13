@@ -7,7 +7,22 @@ import {
   MarketplaceListingDocument,
   MarketplaceListingStatus,
 } from './schemas/marketplace-listing.schema';
+import {
+  StoreListingStockLotModel,
+  StoreListingStockLotDocument,
+} from './schemas/store-listing-stock-lot.schema';
+import {
+  StoreListingStockBalanceModel,
+  StoreListingStockBalanceDocument,
+} from './schemas/store-listing-stock-balance.schema';
+import {
+  StoreListingStockMovementModel,
+  StoreListingStockMovementDocument,
+} from './schemas/store-listing-stock-movement.schema';
 import { StoreListingPort } from './ports/store-listing.port';
+import { StockMovementType } from '../stock/domain/movement-type';
+import { StockCondition } from '../stock/schemas/stock-lot.schema';
+import { computeBalanceDelta } from '../stock/domain/balance.calculator';
 
 @Injectable()
 export class StoreListingService implements StoreListingPort {
@@ -16,6 +31,12 @@ export class StoreListingService implements StoreListingPort {
     private readonly storeListingModel: Model<StoreListingDocument>,
     @InjectModel(MarketplaceListingModel.name)
     private readonly marketplaceListingModel: Model<MarketplaceListingDocument>,
+    @InjectModel(StoreListingStockLotModel.name)
+    private readonly storeListingStockLotModel: Model<StoreListingStockLotDocument>,
+    @InjectModel(StoreListingStockBalanceModel.name)
+    private readonly storeListingStockBalanceModel: Model<StoreListingStockBalanceDocument>,
+    @InjectModel(StoreListingStockMovementModel.name)
+    private readonly storeListingStockMovementModel: Model<StoreListingStockMovementDocument>,
   ) {}
 
   async create(productId: string, storeId: string): Promise<StoreListingModel & { id: string }> {
@@ -143,5 +164,65 @@ export class StoreListingService implements StoreListingPort {
       status,
     });
     return { ...doc.toObject(), id: String(doc._id) };
+  }
+
+  async recordStockMovement(params: {
+    storeListingId: string;
+    type: StockMovementType;
+    quantity: number;
+    condition?: StockCondition;
+    unitCost?: string;
+    lotId?: string;
+    orderId?: string;
+    fromBoxId?: string;
+    toBoxId?: string;
+    reason?: string;
+  }): Promise<{ lotId: string; movementId: string }> {
+    const condition: StockCondition = params.condition ?? 'new';
+
+    const lot = params.lotId
+      ? await this.storeListingStockLotModel.findById(params.lotId).exec()
+      : await this.storeListingStockLotModel
+          .findOne({ storeListingId: params.storeListingId, condition })
+          .exec();
+
+    const resolvedLot =
+      lot ??
+      (await this.storeListingStockLotModel.create({
+        storeListingId: params.storeListingId,
+        condition,
+        unitCost: params.unitCost,
+        // originalLotId deliberately omitted — this is a net-new lot, not migrated.
+      }));
+
+    const lotId = String((resolvedLot as any)._id);
+    const boxId = params.toBoxId ?? params.fromBoxId ?? null;
+    const delta = computeBalanceDelta(params.type, params.quantity);
+
+    // Atomic upsert mirroring StockRepository.applyBalanceDelta: keyed by
+    // {storeListingId, lotId, boxId} (condition only set on insert), no
+    // separate find-then-branch — $inc is race-safe under concurrent writes.
+    await this.storeListingStockBalanceModel.updateOne(
+      { storeListingId: params.storeListingId, lotId, boxId },
+      { $inc: { onHand: delta.onHand, reserved: delta.reserved }, $setOnInsert: { condition } },
+      { upsert: true },
+    );
+
+    const movement = await this.storeListingStockMovementModel.create({
+      storeListingId: params.storeListingId,
+      lotId,
+      orderId: params.orderId,
+      type: params.type,
+      quantity: params.quantity,
+      date: new Date(),
+      unitCost: params.unitCost,
+      fromBoxId: params.fromBoxId,
+      toBoxId: params.toBoxId,
+      condition,
+      reason: params.reason,
+      // originalMovementId deliberately omitted — this is a net-new movement, not migrated.
+    });
+
+    return { lotId, movementId: String((movement as any)._id) };
   }
 }
