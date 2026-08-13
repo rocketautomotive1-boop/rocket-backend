@@ -98,19 +98,23 @@ describe('StoreListingModule (e2e)', () => {
 
   it('allows two marketplace_listings for the same storeListingId on DIFFERENT marketplaces', async () => {
     const storeListingId = '000000000000000000000004';
+    // externalId distinto e presente (não null) em ambos: garante que o teste continua
+    // discriminante sob o índice parcial novo (externalId:{$type:'string'}) — com null em
+    // ambos, os dois documentos ficariam fora do índice e o teste passaria mesmo se
+    // marketplaceTag deixasse de fazer parte da chave.
     await marketplaceListingModel.create({
       storeListingId,
       marketplaceTag: 'mercadolivre',
       accountId: 'ACC_A',
-      externalId: null,
-      status: 'pending_creation',
+      externalId: 'MLB_DIFFERENT_MARKETPLACE_1',
+      status: 'active',
     });
     await marketplaceListingModel.create({
       storeListingId,
       marketplaceTag: 'shopee',
       accountId: 'ACC_C',
-      externalId: null,
-      status: 'pending_creation',
+      externalId: 'SHOPEE_DIFFERENT_MARKETPLACE_1',
+      status: 'active',
     });
 
     const count = await marketplaceListingModel.countDocuments({ storeListingId });

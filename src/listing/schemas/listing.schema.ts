@@ -86,16 +86,17 @@ export const ListingSchema = SchemaFactory.createForClass(ListingModel);
 // Índice composto para buscar todos os anúncios de um produto (todas as lojas) rapidamente.
 ListingSchema.index({ productId: 1, marketplaceId: 1 });
 
-// Identidade real do listing: um produto pode ter N listings ATIVOS por
-// (marketplace, loja) — o mesmo produto físico vende com títulos diferentes por veículo
-// compatível (limite de 60 caracteres do ML), cada um com seu próprio externalId. A
-// identidade real é (productId, marketplaceId, storeId, externalId), não a tripla sem
-// externalId — por isso a unicidade só se aplica quando storeId E externalId existem
-// (listings pré-backfill, sem storeId, e listings pending_creation, sem externalId ainda,
-// não colidem entre si nesta constraint).
+// Um produto pode ter N listings ATIVOS por (marketplace, loja) — o mesmo produto físico
+// vende com títulos diferentes por veículo compatível (limite de 60 caracteres do ML), cada
+// um com seu próprio externalId. A constraint de unicidade real já é garantida pelo índice
+// {marketplaceId, externalId} logo abaixo (globalmente mais forte: dois documentos só
+// colidem aqui se JÁ colidissem lá, já que ambos compartilham marketplaceId+externalId) —
+// por isso NÃO é unique aqui, só um índice de suporte a query por
+// (productId, marketplaceId, storeId, externalId) sem se transformar em constraint
+// duplicada/redundante.
 ListingSchema.index(
     { productId: 1, marketplaceId: 1, storeId: 1, externalId: 1 },
-    { unique: true, partialFilterExpression: { storeId: { $exists: true }, externalId: { $type: 'string' } } },
+    { partialFilterExpression: { storeId: { $exists: true }, externalId: { $type: 'string' } } },
 );
 
 // Índice único parcial: garante unicidade do externalId APENAS se ele existir e for

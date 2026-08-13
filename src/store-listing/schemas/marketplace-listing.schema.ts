@@ -15,7 +15,7 @@ export type MarketplaceListingStatus = 'pending_creation' | 'active' | 'paused' 
  */
 @Schema({ collection: 'marketplace_listings', timestamps: true })
 export class MarketplaceListingModel {
-  /** Sem index:true aqui — o índice composto {storeListingId, marketplaceTag} abaixo já cobre queries por storeListingId sozinho (prefixo do índice composto). */
+  /** Sem index:true aqui — o índice composto {storeListingId, marketplaceTag, externalId} abaixo já cobre queries por storeListingId sozinho (prefixo do índice composto). */
   @Prop({ type: Types.ObjectId, required: true })
   storeListingId: Types.ObjectId;
 
