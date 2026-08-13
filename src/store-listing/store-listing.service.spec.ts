@@ -127,13 +127,91 @@ describe('StoreListingService', () => {
       });
     });
 
-    it('createMarketplaceListing: rejeita duplicata (storeListingId, marketplaceTag)', async () => {
-      listingModelMock.findOne.mockReturnValue({ exec: async () => ({ _id: 'ML1' }) });
+    it('createMarketplaceListing: permite N listings com o mesmo storeListingId+marketplaceTag quando externalId difere', async () => {
+      listingModelMock.findOne.mockReturnValueOnce({ exec: async () => null }); // primeira chamada: sem MLB111 existente
+      const first = {
+        _id: 'ML1',
+        storeListingId: STORE_LISTING_ID,
+        marketplaceTag: 'mercadolivre',
+        accountId: 'ACC_A',
+        externalId: 'MLB111',
+        status: 'active',
+        toObject: () => ({
+          storeListingId: STORE_LISTING_ID,
+          marketplaceTag: 'mercadolivre',
+          accountId: 'ACC_A',
+          externalId: 'MLB111',
+          status: 'active',
+        }),
+      };
+      listingModelMock.create.mockResolvedValueOnce(first);
+
+      const result1 = await service.createMarketplaceListing(STORE_LISTING_ID, 'mercadolivre', 'ACC_A', {
+        externalId: 'MLB111',
+        status: 'active' as any,
+      });
+      expect(result1.id).toBe('ML1');
+
+      listingModelMock.findOne.mockReturnValueOnce({ exec: async () => null }); // segunda chamada: sem MLB222 existente
+      const second = {
+        _id: 'ML2',
+        storeListingId: STORE_LISTING_ID,
+        marketplaceTag: 'mercadolivre',
+        accountId: 'ACC_A',
+        externalId: 'MLB222',
+        status: 'active',
+        toObject: () => ({
+          storeListingId: STORE_LISTING_ID,
+          marketplaceTag: 'mercadolivre',
+          accountId: 'ACC_A',
+          externalId: 'MLB222',
+          status: 'active',
+        }),
+      };
+      listingModelMock.create.mockResolvedValueOnce(second);
+
+      const result2 = await service.createMarketplaceListing(STORE_LISTING_ID, 'mercadolivre', 'ACC_A', {
+        externalId: 'MLB222',
+        status: 'active' as any,
+      });
+      expect(result2.id).toBe('ML2');
+    });
+
+    it('createMarketplaceListing: rejeita quando o MESMO externalId já existe para (storeListingId, marketplaceTag)', async () => {
+      listingModelMock.findOne.mockReturnValue({ exec: async () => ({ _id: 'ML1', externalId: 'MLB111' }) });
 
       await expect(
-        service.createMarketplaceListing(STORE_LISTING_ID, 'mercadolivre', 'ACC_A'),
+        service.createMarketplaceListing(STORE_LISTING_ID, 'mercadolivre', 'ACC_A', {
+          externalId: 'MLB111',
+          status: 'active' as any,
+        }),
       ).rejects.toThrow(BadRequestException);
       expect(listingModelMock.create).not.toHaveBeenCalled();
+    });
+
+    it('createMarketplaceListing: não faz pre-check quando externalId não é informado (pending_creation)', async () => {
+      listingModelMock.create.mockResolvedValueOnce({
+        _id: 'ML3',
+        storeListingId: STORE_LISTING_ID,
+        marketplaceTag: 'mercadolivre',
+        accountId: 'ACC_A',
+        externalId: null,
+        status: 'pending_creation',
+        toObject: () => ({
+          storeListingId: STORE_LISTING_ID,
+          marketplaceTag: 'mercadolivre',
+          accountId: 'ACC_A',
+          externalId: null,
+          status: 'pending_creation',
+        }),
+      });
+
+      const result = await service.createMarketplaceListing(STORE_LISTING_ID, 'mercadolivre', 'ACC_A');
+
+      // já coberto por 'cria com status pending_creation' quanto ao resultado; aqui garantimos que
+      // nenhum findOne é necessário para permitir a criação sem externalId.
+      expect(listingModelMock.findOne).not.toHaveBeenCalled();
+      expect(result.id).toBe('ML3');
     });
 
     it('getMarketplaceListings: retorna todas as publicações do StoreListing', async () => {

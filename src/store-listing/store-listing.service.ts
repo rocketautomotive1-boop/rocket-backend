@@ -60,25 +60,34 @@ export class StoreListingService implements StoreListingPort {
     accountId: string,
     options?: { externalId?: string | null; status?: MarketplaceListingStatus },
   ): Promise<MarketplaceListingModel & { id: string }> {
-    const existing = await this.marketplaceListingModel.findOne({ storeListingId, marketplaceTag }).exec();
-    if (existing) {
-      throw new BadRequestException(
-        `Já existe uma publicação em ${marketplaceTag} para este StoreListing.`,
-      );
+    const externalId = options?.externalId ?? null;
+
+    // Duplicata real = mesmo externalId já publicado para este storeListingId+marketplaceTag.
+    // Sem externalId (pending_creation), não há o que checar — o índice único parcial também
+    // não protege esse caso (decisão explícita: criação é ação deliberada do usuário).
+    if (externalId) {
+      const existing = await this.marketplaceListingModel
+        .findOne({ storeListingId, marketplaceTag, externalId })
+        .exec();
+      if (existing) {
+        throw new BadRequestException(
+          `Já existe uma publicação com externalId ${externalId} em ${marketplaceTag} para este StoreListing.`,
+        );
+      }
     }
     try {
       const doc = await this.marketplaceListingModel.create({
         storeListingId,
         marketplaceTag,
         accountId,
-        externalId: options?.externalId ?? null,
+        externalId,
         status: options?.status ?? ('pending_creation' as MarketplaceListingStatus),
       });
       return { ...doc.toObject(), id: String(doc._id) };
     } catch (err: any) {
       if (err?.code === 11000) {
         throw new BadRequestException(
-          `Já existe uma publicação em ${marketplaceTag} para este StoreListing.`,
+          `Já existe uma publicação com externalId ${externalId} em ${marketplaceTag} para este StoreListing.`,
         );
       }
       throw err;
