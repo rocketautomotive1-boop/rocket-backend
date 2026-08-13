@@ -13,8 +13,17 @@ export class StoreListingStockBalanceModel {
   @Prop({ type: Types.ObjectId, required: true, index: true })
   lotId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, required: true, unique: true })
-  originalBalanceId: Types.ObjectId;
+  /**
+   * Referência ao StockBalanceModel de origem — presente apenas em saldos
+   * migrados pelo backfill da Fase 2. Saldos criados via dual-write (Fase 3,
+   * tráfego ao vivo) não têm um StockBalanceModel de origem — o campo fica
+   * ausente, não um placeholder. Índice único esparso: garante unicidade
+   * entre os documentos migrados (nunca duplica um mesmo originalBalanceId),
+   * mas não aplica nenhuma constraint entre documentos onde o campo está
+   * ausente.
+   */
+  @Prop({ type: Types.ObjectId, unique: true, sparse: true })
+  originalBalanceId?: Types.ObjectId;
 
   @Prop({ type: String, enum: ['new', 'damaged', 'used', 'refurbished'], required: true })
   condition: StockCondition;

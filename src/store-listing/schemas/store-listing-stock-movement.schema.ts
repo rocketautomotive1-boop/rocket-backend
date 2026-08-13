@@ -14,8 +14,17 @@ export class StoreListingStockMovementModel {
   @Prop({ type: Types.ObjectId, index: true })
   lotId?: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, required: true, unique: true })
-  originalMovementId: Types.ObjectId;
+  /**
+   * Referência ao StockMovementModel de origem — presente apenas em
+   * movimentos migrados pelo backfill da Fase 2. Movimentos criados via
+   * dual-write (Fase 3, tráfego ao vivo) não têm um StockMovementModel de
+   * origem — o campo fica ausente, não um placeholder. Índice único esparso:
+   * garante unicidade entre os documentos migrados (nunca duplica um mesmo
+   * originalMovementId), mas não aplica nenhuma constraint entre documentos
+   * onde o campo está ausente.
+   */
+  @Prop({ type: Types.ObjectId, unique: true, sparse: true })
+  originalMovementId?: Types.ObjectId;
 
   @Prop({ type: Types.ObjectId })
   orderId?: Types.ObjectId;

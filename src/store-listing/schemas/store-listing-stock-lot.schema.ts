@@ -16,8 +16,16 @@ export class StoreListingStockLotModel {
   @Prop({ type: Types.ObjectId, required: true })
   storeListingId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, required: true, unique: true })
-  originalLotId: Types.ObjectId;
+  /**
+   * Referência ao StockLotModel de origem — presente apenas em lotes migrados
+   * pelo backfill da Fase 2. Lotes criados via dual-write (Fase 3, tráfego ao
+   * vivo) não têm um StockLotModel de origem — o campo fica ausente, não um
+   * placeholder. Índice único esparso: garante unicidade entre os documentos
+   * migrados (nunca duplica um mesmo originalLotId), mas não aplica nenhuma
+   * constraint entre documentos onde o campo está ausente.
+   */
+  @Prop({ type: Types.ObjectId, unique: true, sparse: true })
+  originalLotId?: Types.ObjectId;
 
   @Prop({ type: String, enum: ['new', 'damaged', 'used', 'refurbished'], default: 'new' })
   condition: StockCondition;
