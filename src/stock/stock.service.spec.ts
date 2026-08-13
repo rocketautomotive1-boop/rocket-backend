@@ -326,5 +326,33 @@ describe('StockService (integration)', () => {
       // Only the first (non-duplicate) call should have been mirrored.
       expect(movements.length).toBe(1);
     });
+
+    it('does not mirror when move() runs inside an externally-owned session (caller commits later)', async () => {
+      const P = '650000000000000000010006';
+      const session = await repo.getConnection().startSession();
+      session.startTransaction();
+      try {
+        const result = await svc.move(
+          { productId: P, type: StockMovementType.INBOUND, quantity: 7, condition: 'new', reference: 'dw-6-ext' },
+          session,
+        );
+        expect(result.movementId).toBeTruthy();
+        await session.commitTransaction();
+      } catch (err) {
+        await session.abortTransaction();
+        throw err;
+      } finally {
+        await session.endSession();
+      }
+
+      // Legacy movement/balance succeeded normally.
+      const rows = await repo.balanceModel.find({ productId: new Types.ObjectId(P) });
+      expect(rows.reduce((s, r) => s + r.onHand, 0)).toBe(7);
+
+      // But no StoreListing/mirror was created for this product — dual-write was skipped
+      // entirely because the session was externally owned.
+      const storeListing = await storeListingModel.findOne({ productId: P }).exec();
+      expect(storeListing).toBeNull();
+    });
   });
 });

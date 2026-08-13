@@ -39,7 +39,19 @@ export class StockService {
     // (ver mirrorMoveToStoreListing para o porquê de não propagar session).
     // Sentinela {'', ''} = moveOnce abortou por idempotência (reference duplicada):
     // não houve escrita real, então não há o que espelhar.
-    if (result.movementId !== '' || result.lotId !== '') {
+    //
+    // Quando há externalSession (chamador é dono da transação — ex.: OrderSyncPipeline
+    // via StockLedgerProvider.deductAndLink), moveOnce() escreve DENTRO dessa transação
+    // mas NÃO a comita — quem comita é o chamador, bem depois deste ponto. Espelhar aqui
+    // seria espelhar ANTES do commit real: se a transação do chamador abortar depois, o
+    // espelho fica órfão (legado voltou atrás, espelho não); e o retry loop do pipeline
+    // (WriteConflict → reexecuta a transação inteira) faria o mesmo movimento ser
+    // espelhado de novo, duplicando linhas para uma única dedução lógica de estoque.
+    // Por isso, quando externalSession é passado, o dual-write é pulado por completo
+    // aqui. Mirroring correto desse caminho exigiria o dono da transação (OrderSyncPipeline)
+    // disparar o espelho ELE MESMO depois do seu próprio commit — fora do escopo deste
+    // fix (limitação conhecida da Fase 3, a fechar em follow-up).
+    if (!externalSession && (result.movementId !== '' || result.lotId !== '')) {
       const dto = StockMoveSchema.parse(input);
       await this.mirrorMoveToStoreListing(dto);
     }
