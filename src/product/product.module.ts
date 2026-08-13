@@ -23,6 +23,7 @@ import { AllocationModel, AllocationSchema } from './schemas/allocation.schema';
 import { WarehouseModel, WarehouseSchema } from './schemas/warehouse.schema';
 import { BoxModel, BoxSchema } from './schemas/box.schema';
 import { BoxItemModel, BoxItemSchema } from './schemas/box-item.schema';
+import { UserModel, UserSchema } from '../auth/schemas/user.schema';
 
 import { ProductService } from './product.service';
 import { ProductRepository } from './product.repository';
@@ -158,6 +159,7 @@ import { PricingModule } from '../pricing/pricing.module';
       // { name: BoxModel.name, schema: BoxSchema }, // Agora é sub-documento de Allocation
       { name: BoxItemModel.name, schema: BoxItemSchema },
       { name: 'MarketplaceModel', schema: require('../marketplace/schemas/marketplace.schema').MarketplaceSchema },
+      { name: UserModel.name, schema: UserSchema },
     ]),
     forwardRef(() => SearchModule),
     S3Module,
