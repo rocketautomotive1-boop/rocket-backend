@@ -43,7 +43,11 @@ export class InternalProductController {
     ) {}
 
     @Get(':id')
-    async getProduct(@Param('id') id: string, @Query('marketplaceId') marketplaceId?: string) {
+    async getProduct(
+        @Param('id') id: string,
+        @Query('marketplaceId') marketplaceId?: string,
+        @Query('storeId') storeId?: string,
+    ) {
         const doc = await this.productModel
             .findById(id)
             .populate('category', '_id name mlCategoryId marketplaceMappings')
@@ -58,7 +62,12 @@ export class InternalProductController {
         // false→true e é volátil (defasa quando o estado muda por um caminho assíncrono
         // sem evento — ex.: rembg concluindo). O gate de publicação NUNCA deve ler o
         // persistido; deriva da mesma verdade que o app mostra ao usuário.
-        const completion = await this.productService.getProductCompletion(id);
+        //
+        // storeId: opcional (orchestrator ainda pode chamar sem, listings pré-storeId) —
+        // quando informado (loja do listing sendo publicado), o gate é exatamente dessa
+        // loja, sem fallback. Sem storeId, cai no fallback já existente do
+        // ProductReadinessService (primeira loja com StoreListing).
+        const completion = await this.productService.getProductCompletion(id, storeId);
         normalized.readyToPublish = !!completion?.readyToPublish;
 
         // Resolve o category_id do ML a partir do marketplaceMappings quando o campo

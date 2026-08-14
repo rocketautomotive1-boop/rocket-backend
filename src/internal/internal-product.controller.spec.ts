@@ -206,3 +206,71 @@ describe('InternalProductController — getListings (catalog listing Fase 2)', (
     });
   });
 });
+
+describe('InternalProductController — getProduct (gate de readiness por loja)', () => {
+  let controller: InternalProductController;
+  let productModel: { findById: jest.Mock };
+  let productService: { getProductCompletion: jest.Mock };
+  let stockQuery: { getProductStock: jest.Mock };
+  let pricing: { getBasePrice: jest.Mock; getEffectivePrice: jest.Mock };
+
+  const productId = new Types.ObjectId().toHexString();
+
+  beforeEach(async () => {
+    productModel = {
+      findById: jest.fn().mockReturnValue({
+        populate: () => ({ lean: () => ({ exec: () => Promise.resolve({ _id: productId, name: 'X' }) }) }),
+      }),
+    };
+    productService = { getProductCompletion: jest.fn().mockResolvedValue({ readyToPublish: true }) };
+    stockQuery = { getProductStock: jest.fn().mockResolvedValue({ onHand: 5 }) };
+    pricing = {
+      getBasePrice: jest.fn().mockResolvedValue(10),
+      getEffectivePrice: jest.fn().mockResolvedValue(10),
+    };
+
+    const moduleRef = await Test.createTestingModule({
+      controllers: [InternalProductController],
+      providers: [
+        { provide: getModelToken(ProductModel.name), useValue: productModel },
+        { provide: getModelToken(ListingModel.name), useValue: {} },
+        { provide: getModelToken(UserModel.name), useValue: {} },
+        { provide: MarketplaceConfigCacheService, useValue: { resolveId: jest.fn().mockResolvedValue(null) } },
+        { provide: MarketplaceDescriptionService, useValue: {} },
+        { provide: STOCK_QUERY_PORT, useValue: stockQuery },
+        { provide: PRICING_PORT, useValue: pricing },
+        { provide: CategorySnapshotService, useValue: {} },
+        { provide: ProductService, useValue: productService },
+        { provide: ProductCompatibilityPositionService, useValue: {} },
+        { provide: StoreService, useValue: {} },
+      ],
+    })
+      .overrideGuard(InternalKeyGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+
+    controller = moduleRef.get(InternalProductController);
+  });
+
+  it('propaga storeId do query param pra getProductCompletion', async () => {
+    const storeId = new Types.ObjectId().toHexString();
+
+    await controller.getProduct(productId, undefined, storeId);
+
+    expect(productService.getProductCompletion).toHaveBeenCalledWith(productId, storeId);
+  });
+
+  it('sem storeId, chama getProductCompletion com undefined (mantém o fallback existente)', async () => {
+    await controller.getProduct(productId);
+
+    expect(productService.getProductCompletion).toHaveBeenCalledWith(productId, undefined);
+  });
+
+  it('readyToPublish reflete o resultado de getProductCompletion para o storeId pedido', async () => {
+    productService.getProductCompletion.mockResolvedValue({ readyToPublish: false });
+
+    const result = await controller.getProduct(productId, undefined, 'store-x');
+
+    expect(result.readyToPublish).toBe(false);
+  });
+});
