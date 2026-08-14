@@ -67,26 +67,31 @@ async function main() {
         continue;
       }
 
-      const headers = { Authorization: `Bearer ${token.accessToken}` };
-      const me = await axios.get('https://api.mercadolibre.com/users/me', { headers });
-      const sellerId = me.data.id;
+      try {
+        const headers = { Authorization: `Bearer ${token.accessToken}` };
+        const me = await axios.get('https://api.mercadolibre.com/users/me', { headers });
+        const sellerId = me.data.id;
 
-      let offset = 0;
-      let total = Infinity;
-      let count = 0;
-      while (offset < total) {
-        const res = await axios.get(`https://api.mercadolibre.com/users/${sellerId}/items/search`, {
-          headers,
-          params: { offset, limit: 50 },
-        });
-        total = res.data.paging?.total ?? 0;
-        const ids: string[] = res.data.results || [];
-        for (const id of ids) externalIdToAccount.set(id, { accountId, label: account.label });
-        count += ids.length;
-        offset += 50;
-        if (ids.length === 0) break;
+        let offset = 0;
+        let total = Infinity;
+        let count = 0;
+        while (offset < total) {
+          const res = await axios.get(`https://api.mercadolibre.com/users/${sellerId}/items/search`, {
+            headers,
+            params: { offset, limit: 50 },
+          });
+          total = res.data.paging?.total ?? 0;
+          const ids: string[] = res.data.results || [];
+          for (const id of ids) externalIdToAccount.set(id, { accountId, label: account.label });
+          count += ids.length;
+          offset += 50;
+          if (ids.length === 0) break;
+        }
+        console.log(`  conta ${account.label} (seller ${sellerId}): ${count} itens publicados.`);
+      } catch (err: any) {
+        console.warn(`  [skip] conta ${account.label}: falha na API do ML (${err?.response?.status ?? ''} ${err?.message})`);
+        continue;
       }
-      console.log(`  conta ${account.label} (seller ${sellerId}): ${count} itens publicados.`);
     }
 
     console.log(`\nTotal de externalIds encontrados nas ${accounts.length} contas: ${externalIdToAccount.size}`);
