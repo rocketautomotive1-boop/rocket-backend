@@ -15,6 +15,7 @@ import { CategorySnapshotService } from '../product/services/category-snapshot.s
 import { ProductService } from '../product/product.service';
 import { ProductCompatibilityPositionService } from '../product/services/product-compatibility-position.service';
 import { StoreService } from '../store/services/store.service';
+import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
 
 // Piloto Fase 2 (catalog listing): só category_id do ML já validados ao vivo como
 // portadores de POSITION/SIDE_POSITION no catálogo de peças (GET /categories/{id}/attributes).
@@ -40,6 +41,7 @@ export class InternalProductController {
         @Inject(forwardRef(() => ProductService)) private readonly productService: ProductService,
         private readonly compatibilityPosition: ProductCompatibilityPositionService,
         private readonly storeService: StoreService,
+        @Inject(STORE_LISTING_PORT) private readonly storeListing: StoreListingPort,
     ) {}
 
     @Get(':id')
@@ -75,15 +77,21 @@ export class InternalProductController {
         // (externalId) mas não o mlCategoryId, e o orchestrator só lê mlCategoryId.
         await this.fillMlCategoryId(normalized.category);
 
-        // Stock comes from StockModule (single source of truth). Sale price comes from
-        // PricingModule: effectivePrice = per-marketplace override > basePrice (null → no price).
-        const [stock, basePrice, effectivePrice] = await Promise.all([
-            this.stockQuery.getProductStock(id),
+        // Stock: com storeId, o saldo é DESSA loja (StoreListing — Fase 4), nunca o agregado
+        // entre lojas — um produto com estoque multi-loja (1 unidade em cada uma de N lojas)
+        // não pode publicar a soma no anúncio de uma loja só. Sem storeId (chamada legada,
+        // listing pré-storeId), cai no agregado do StockModule como antes.
+        // Sale price vem do PricingModule: effectivePrice = per-marketplace override > basePrice
+        // (null → no price).
+        const [stockOnHand, basePrice, effectivePrice] = await Promise.all([
+            storeId
+                ? this.storeListing.getStockSummary(id, storeId).then((s) => s.onHand)
+                : this.stockQuery.getProductStock(id).then((s) => s.onHand),
             this.pricing.getBasePrice(id),
             this.pricing.getEffectivePrice(id, marketplaceId),
         ]);
 
-        normalized.stockQuantity = stock.onHand;
+        normalized.stockQuantity = stockOnHand;
         normalized.basePrice = basePrice;
         normalized.effectivePrice = effectivePrice;
 

@@ -12,6 +12,7 @@ import { MarketplaceModule } from '../marketplace/marketplace.module';
 import { ProductModule } from '../product/product.module';
 import { StockModule } from '../stock/stock.module';
 import { PricingModule } from '../pricing/pricing.module';
+import { StoreListingModule } from '../store-listing/store-listing.module';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
 import { ListingModel, ListingSchema } from '../listing/schemas/listing.schema';
 import { MarketplaceModel, MarketplaceSchema } from '../marketplace/schemas/marketplace.schema';
@@ -25,6 +26,7 @@ import { UserModel, UserSchema } from '../auth/schemas/user.schema';
         forwardRef(() => ProductModule),
         StockModule,
         PricingModule,
+        StoreListingModule,
         GatewaysModule,
         MongooseModule.forFeature([
             { name: ProductModel.name, schema: ProductSchema },

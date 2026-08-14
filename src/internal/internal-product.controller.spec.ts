@@ -13,6 +13,7 @@ import { CategorySnapshotService } from '../product/services/category-snapshot.s
 import { ProductService } from '../product/product.service';
 import { ProductCompatibilityPositionService } from '../product/services/product-compatibility-position.service';
 import { StoreService } from '../store/services/store.service';
+import { STORE_LISTING_PORT } from '../store-listing/ports/store-listing.port';
 import { InternalKeyGuard } from './internal-key.guard';
 
 describe('InternalProductController — getListings (catalog listing Fase 2)', () => {
@@ -65,6 +66,7 @@ describe('InternalProductController — getListings (catalog listing Fase 2)', (
         { provide: ProductService, useValue: {} },
         { provide: ProductCompatibilityPositionService, useValue: compatibilityPosition },
         { provide: StoreService, useValue: storeService },
+        { provide: STORE_LISTING_PORT, useValue: {} },
       ],
     })
       .overrideGuard(InternalKeyGuard)
@@ -245,6 +247,7 @@ describe('InternalProductController — getProduct (gate de readiness por loja)'
   let productService: { getProductCompletion: jest.Mock };
   let stockQuery: { getProductStock: jest.Mock };
   let pricing: { getBasePrice: jest.Mock; getEffectivePrice: jest.Mock };
+  let storeListingPort: { getStockSummary: jest.Mock };
 
   const productId = new Types.ObjectId().toHexString();
 
@@ -259,6 +262,9 @@ describe('InternalProductController — getProduct (gate de readiness por loja)'
     pricing = {
       getBasePrice: jest.fn().mockResolvedValue(10),
       getEffectivePrice: jest.fn().mockResolvedValue(10),
+    };
+    storeListingPort = {
+      getStockSummary: jest.fn().mockResolvedValue({ onHand: 1, reserved: 0, available: 1, avgCost: 0 }),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -275,6 +281,7 @@ describe('InternalProductController — getProduct (gate de readiness por loja)'
         { provide: ProductService, useValue: productService },
         { provide: ProductCompatibilityPositionService, useValue: {} },
         { provide: StoreService, useValue: {} },
+        { provide: STORE_LISTING_PORT, useValue: storeListingPort },
       ],
     })
       .overrideGuard(InternalKeyGuard)
@@ -304,5 +311,29 @@ describe('InternalProductController — getProduct (gate de readiness por loja)'
     const result = await controller.getProduct(productId, undefined, 'store-x');
 
     expect(result.readyToPublish).toBe(false);
+  });
+
+  describe('stockQuantity (estoque multi-loja)', () => {
+    it('com storeId, usa o saldo DESSA loja (StoreListing), não o agregado entre lojas', async () => {
+      const storeId = new Types.ObjectId().toHexString();
+      // Agregado legado somaria 2 (1 unidade em cada uma de 2 lojas) — regressão real:
+      // item publicado no ML com available_quantity=2 quando cada loja só tinha 1.
+      stockQuery.getProductStock.mockResolvedValue({ onHand: 2 });
+      storeListingPort.getStockSummary.mockResolvedValue({ onHand: 1, reserved: 0, available: 1, avgCost: 0 });
+
+      const result = await controller.getProduct(productId, undefined, storeId);
+
+      expect(storeListingPort.getStockSummary).toHaveBeenCalledWith(productId, storeId);
+      expect(result.stockQuantity).toBe(1);
+    });
+
+    it('sem storeId, mantém o comportamento legado (agregado entre lojas)', async () => {
+      stockQuery.getProductStock.mockResolvedValue({ onHand: 2 });
+
+      const result = await controller.getProduct(productId);
+
+      expect(storeListingPort.getStockSummary).not.toHaveBeenCalled();
+      expect(result.stockQuantity).toBe(2);
+    });
   });
 });
