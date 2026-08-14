@@ -106,8 +106,14 @@ async function main() {
     const movementModel = app.get(getModelToken(StoreListingStockMovementModel.name));
     const marketplaceListingModel = app.get(getModelToken(MarketplaceListingModel.name));
 
-    // 1. Levanta os mismatches: StoreListing com saldo real cuja loja diverge
-    // do storeId consistente dos listings do mesmo produto.
+    // 1. Levanta os mismatches: StoreListing cuja loja diverge do storeId
+    // consistente dos listings do mesmo produto. NÃO exige saldo real
+    // (onHand>0) — um StoreListing sem saldo migrado ainda é um mismatch real
+    // (achado 2026-08-14: exigir saldo cria uma dependência circular com o
+    // backfill de estoque, que só migra saldo para um StoreListing que já
+    // exista na loja certa — sem essa correção, o StoreListing errado nunca é
+    // corrigido porque "não tem saldo", e o saldo nunca é migrado porque o
+    // StoreListing correto nunca é criado).
     const allStoreListings = await storeListingModel.find().lean().exec();
     const mismatches: StoreListingMismatch[] = [];
 
@@ -123,9 +129,6 @@ async function main() {
 
       const correctStoreId: string = listingStoreIds[0];
       if (correctStoreId === String(sl.storeId)) continue;
-
-      const hasStock = await balanceModel.findOne({ storeListingId: sl._id, onHand: { $gt: 0 } }).lean().exec();
-      if (!hasStock) continue;
 
       mismatches.push({
         storeListingId: sl._id,
