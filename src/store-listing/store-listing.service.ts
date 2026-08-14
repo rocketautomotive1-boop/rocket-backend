@@ -339,4 +339,58 @@ export class StoreListingService implements StoreListingPort {
       { $project: { _id: 0, boxId: '$_id', onHand: 1, reserved: 1 } },
     ]);
   }
+
+  async listStockMovements(
+    productId: string,
+    storeId: string,
+    limit = 50,
+  ): Promise<
+    Array<{
+      id: string;
+      type: StockMovementType;
+      quantity: number;
+      date: Date;
+      unitCost?: number;
+      salePrice?: number;
+      condition: StockCondition;
+      reason?: string;
+    }>
+  > {
+    const listing = await this.findByProductAndStore(productId, storeId);
+    if (!listing) return [];
+
+    const rows = await this.storeListingStockMovementModel
+      .find({ storeListingId: new Types.ObjectId(listing.id) })
+      .sort({ date: -1 })
+      .limit(limit)
+      .lean()
+      .exec();
+
+    return rows.map((m: any) => ({
+      id: String(m._id),
+      type: m.type,
+      quantity: m.quantity,
+      date: m.date,
+      unitCost: m.unitCost != null ? Number(m.unitCost.toString()) : undefined,
+      salePrice: m.metadata?.salePrice != null ? Number(m.metadata.salePrice) : undefined,
+      condition: m.condition ?? 'new',
+      reason: m.reason,
+    }));
+  }
+
+  async getStockMovementStatistics(
+    productId: string,
+    storeId: string,
+  ): Promise<Record<string, { count: number; quantity: number }>> {
+    const listing = await this.findByProductAndStore(productId, storeId);
+    if (!listing) return {};
+
+    const rows = await this.storeListingStockMovementModel.aggregate([
+      { $match: { storeListingId: new Types.ObjectId(listing.id) } },
+      { $group: { _id: '$type', count: { $sum: 1 }, quantity: { $sum: '$quantity' } } },
+    ]);
+    const out: Record<string, { count: number; quantity: number }> = {};
+    for (const r of rows) out[r._id] = { count: r.count, quantity: r.quantity };
+    return out;
+  }
 }

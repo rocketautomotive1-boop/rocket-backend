@@ -131,6 +131,7 @@ import { PRODUCT_INFO_QUERY_PORT } from '../notifications/bot/ports/bot-query.po
 // STOCK_LEDGER_PORT is now owned by StockModule (single stock owner).
 import { StockModule } from '../stock/stock.module';
 import { PricingModule } from '../pricing/pricing.module';
+import { StoreListingModule } from '../store-listing/store-listing.module';
 
 
 @Module({
@@ -174,6 +175,7 @@ import { PricingModule } from '../pricing/pricing.module';
     ListingModule,
     StockModule,
     PricingModule,
+    StoreListingModule,
     UserProductivityModule,
     forwardRef(() => MarketplaceOrchestratorModule),
     GatewaysModule,

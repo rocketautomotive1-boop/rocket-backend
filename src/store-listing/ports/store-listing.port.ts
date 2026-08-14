@@ -60,4 +60,27 @@ export interface StoreListingPort {
     productId: string,
     storeId: string,
   ): Promise<Array<{ boxId: string | null; onHand: number; reserved: number }>>;
+
+  /** Histórico de movimentações store-aware, mais recente primeiro. Sem StoreListing → []. */
+  listStockMovements(
+    productId: string,
+    storeId: string,
+    limit?: number,
+  ): Promise<
+    Array<{
+      id: string;
+      type: StockMovementType;
+      quantity: number;
+      date: Date;
+      unitCost?: number;
+      salePrice?: number;
+      condition: StockCondition;
+      reason?: string;
+    }>
+  >;
+  /** Estatísticas por tipo de movimento, store-aware. Sem StoreListing → {}. */
+  getStockMovementStatistics(
+    productId: string,
+    storeId: string,
+  ): Promise<Record<string, { count: number; quantity: number }>>;
 }

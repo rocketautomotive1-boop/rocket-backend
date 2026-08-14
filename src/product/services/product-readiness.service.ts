@@ -4,7 +4,7 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProductRepository } from '../product.repository';
-import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
+import { STORE_LISTING_PORT, StoreListingPort } from '../../store-listing/ports/store-listing.port';
 import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 import { ProductTitleService } from './product-title.service';
 import { normalizeCompletedAt } from './product-readiness.normalize';
@@ -36,7 +36,7 @@ export class ProductReadinessService {
 
   constructor(
     private readonly productRepository: ProductRepository,
-    @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+    @Inject(STORE_LISTING_PORT) private readonly storeListingPort: StoreListingPort,
     @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     private readonly productTitleService: ProductTitleService,
     private readonly eventEmitter: EventEmitter2,
@@ -101,7 +101,13 @@ export class ProductReadinessService {
 
     const category = !!(product as any).category;
 
-    const stockQty = (await this.stockQuery.getProductStock(productId)).onHand;
+    // Estoque store-aware (Fase 4): resolve a loja DONA do produto (hoje um produto
+    // pertence a no máximo uma loja) — sem StoreListing ainda, sem estoque, inventory
+    // fica false. Nunca soma/herda estoque de outra loja (mesma invariante da tela).
+    const ownerListing = await this.storeListingPort.findAnyByProduct(productId);
+    const stockQty = ownerListing
+      ? (await this.storeListingPort.getStockSummary(productId, String(ownerListing.storeId))).onHand
+      : 0;
     // Sale price lives in PricingModule (removed from Product in the pricing refactor).
     const priceRaw = await this.pricing.getBasePrice(productId);
     const inventory = stockQty > 0 && priceRaw > 0;

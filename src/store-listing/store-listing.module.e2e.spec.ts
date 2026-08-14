@@ -191,5 +191,55 @@ describe('StoreListingModule (e2e)', () => {
       expect(boxed?.onHand).toBe(3);
       expect(unboxed?.onHand).toBe(4);
     });
+
+    it('listStockMovements/getStockMovementStatistics retornam vazio sem StoreListing', async () => {
+      expect(await port.listStockMovements(PRODUCT, STORE_A)).toEqual([]);
+      expect(await port.getStockMovementStatistics(PRODUCT, STORE_A)).toEqual({});
+    });
+
+    it('listStockMovements/getStockMovementStatistics não vazam movimentos entre lojas', async () => {
+      const listingA = await port.createOrGetStoreListing(PRODUCT, STORE_A);
+      const listingB = await port.createOrGetStoreListing(PRODUCT, STORE_B);
+
+      await port.recordStockMovement({
+        storeListingId: listingA.id,
+        type: StockMovementType.INBOUND,
+        quantity: 5,
+        condition: 'new',
+        unitCost: '2',
+      });
+      await port.recordStockMovement({
+        storeListingId: listingB.id,
+        type: StockMovementType.OUTBOUND,
+        quantity: 2,
+        condition: 'new',
+      });
+
+      const movementsA = await port.listStockMovements(PRODUCT, STORE_A);
+      const movementsB = await port.listStockMovements(PRODUCT, STORE_B);
+      expect(movementsA).toHaveLength(1);
+      expect(movementsA[0].type).toBe(StockMovementType.INBOUND);
+      expect(movementsA[0].quantity).toBe(5);
+      expect(movementsB).toHaveLength(1);
+      expect(movementsB[0].type).toBe(StockMovementType.OUTBOUND);
+
+      const statsA = await port.getStockMovementStatistics(PRODUCT, STORE_A);
+      const statsB = await port.getStockMovementStatistics(PRODUCT, STORE_B);
+      expect(statsA[StockMovementType.INBOUND]).toEqual({ count: 1, quantity: 5 });
+      expect(statsA[StockMovementType.OUTBOUND]).toBeUndefined();
+      expect(statsB[StockMovementType.OUTBOUND]).toEqual({ count: 1, quantity: 2 });
+    });
+
+    it('listStockMovements respeita o limit e ordena mais recente primeiro', async () => {
+      const listing = await port.createOrGetStoreListing(PRODUCT, STORE_A);
+      await port.recordStockMovement({ storeListingId: listing.id, type: StockMovementType.INBOUND, quantity: 1, condition: 'new' });
+      await port.recordStockMovement({ storeListingId: listing.id, type: StockMovementType.INBOUND, quantity: 2, condition: 'new' });
+      await port.recordStockMovement({ storeListingId: listing.id, type: StockMovementType.INBOUND, quantity: 3, condition: 'new' });
+
+      const limited = await port.listStockMovements(PRODUCT, STORE_A, 2);
+      expect(limited).toHaveLength(2);
+      expect(limited[0].quantity).toBe(3);
+      expect(limited[1].quantity).toBe(2);
+    });
   });
 });
