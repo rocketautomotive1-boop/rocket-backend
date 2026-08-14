@@ -1,15 +1,24 @@
-import { Controller, Get, Post, Param, Body, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Req, UseGuards, Inject, BadRequestException } from '@nestjs/common';
 import { StockReconcilerService } from './stock-reconciler.service';
-import { StockQueryService } from './stock-query.service';
 import { StockService } from './stock.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
 
 @Controller('stock')
 export class StockController {
   constructor(
     private readonly reconciler: StockReconcilerService,
-    private readonly query: StockQueryService,
     private readonly stock: StockService,
+    @Inject(STORE_LISTING_PORT) private readonly storeListingPort: StoreListingPort,
   ) {}
+
+  private requireStoreId(req: any): string {
+    const storeId = req?.user?.storeId;
+    if (!storeId) {
+      throw new BadRequestException('Usuário sem loja configurada — não é possível consultar estoque.');
+    }
+    return storeId;
+  }
 
   @Get('reconcile/health')
   health() {
@@ -22,34 +31,39 @@ export class StockController {
   }
 
   @Get(':productId/balance')
-  async balance(@Param('productId') productId: string) {
-    const [summary, avgCost] = await Promise.all([
-      this.query.getProductStock(productId),
-      this.query.getProductCost(productId),
-    ]);
-    return { ...summary, avgCost };
+  @UseGuards(JwtAuthGuard)
+  async balance(@Param('productId') productId: string, @Req() req: any) {
+    const storeId = this.requireStoreId(req);
+    const summary = await this.storeListingPort.getStockSummary(productId, storeId);
+    return { productId, ...summary };
   }
 
   @Get(':productId/balance/by-condition')
-  byCondition(@Param('productId') productId: string) {
-    return this.query.getByCondition(productId);
+  @UseGuards(JwtAuthGuard)
+  byCondition(@Param('productId') productId: string, @Req() req: any) {
+    return this.storeListingPort.getStockByCondition(productId, this.requireStoreId(req));
   }
 
   @Get(':productId/balance/by-location')
-  byLocation(@Param('productId') productId: string) {
-    return this.query.getByLocation(productId);
+  @UseGuards(JwtAuthGuard)
+  byLocation(@Param('productId') productId: string, @Req() req: any) {
+    return this.storeListingPort.getStockByLocation(productId, this.requireStoreId(req));
   }
 
   @Post(':productId/correct-to')
+  @UseGuards(JwtAuthGuard)
   async correctTo(
     @Param('productId') productId: string,
     @Body() body: { quantity?: number; condition?: 'new' | 'damaged' | 'used' | 'refurbished' },
+    @Req() req: any,
   ) {
     if (typeof body?.quantity !== 'number' || !Number.isInteger(body.quantity) || body.quantity < 0) {
       throw new BadRequestException('quantity deve ser um inteiro >= 0');
     }
+    const storeId = this.requireStoreId(req);
     const result = await this.stock.correctTo({
       productId,
+      storeId,
       targetQuantity: body.quantity,
       condition: body.condition,
     });

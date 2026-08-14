@@ -6,6 +6,7 @@ import { StoreListingModule } from './store-listing.module';
 import { StoreListingModel } from './schemas/store-listing.schema';
 import { MarketplaceListingModel } from './schemas/marketplace-listing.schema';
 import { STORE_LISTING_PORT, StoreListingPort } from './ports/store-listing.port';
+import { StockMovementType } from '../stock/domain/movement-type';
 
 describe('StoreListingModule (e2e)', () => {
   let mongo: MongoMemoryReplSet;
@@ -119,5 +120,76 @@ describe('StoreListingModule (e2e)', () => {
 
     const count = await marketplaceListingModel.countDocuments({ storeListingId });
     expect(count).toBe(2);
+  });
+
+  describe('leitura store-aware (Fase 4, sub-projeto 3)', () => {
+    const PRODUCT = '000000000000000000000010';
+    const STORE_A = '000000000000000000000011';
+    const STORE_B = '000000000000000000000012';
+
+    it('getStockSummary retorna zero (sem lançar) quando a loja não tem StoreListing pro produto', async () => {
+      const summary = await port.getStockSummary(PRODUCT, STORE_A);
+      expect(summary).toEqual({ onHand: 0, reserved: 0, available: 0, avgCost: 0 });
+    });
+
+    it('getStockByCondition/getStockByLocation retornam lista vazia sem StoreListing', async () => {
+      expect(await port.getStockByCondition(PRODUCT, STORE_A)).toEqual([]);
+      expect(await port.getStockByLocation(PRODUCT, STORE_A)).toEqual([]);
+    });
+
+    it('duas lojas com estoque do mesmo produto têm saldos independentes — sem vazamento entre elas', async () => {
+      const listingA = await port.createOrGetStoreListing(PRODUCT, STORE_A);
+      const listingB = await port.createOrGetStoreListing(PRODUCT, STORE_B);
+
+      await port.recordStockMovement({
+        storeListingId: listingA.id,
+        type: StockMovementType.INBOUND,
+        quantity: 5,
+        condition: 'new',
+        unitCost: '2',
+      });
+      await port.recordStockMovement({
+        storeListingId: listingB.id,
+        type: StockMovementType.INBOUND,
+        quantity: 9,
+        condition: 'used',
+        unitCost: '6',
+      });
+
+      const summaryA = await port.getStockSummary(PRODUCT, STORE_A);
+      const summaryB = await port.getStockSummary(PRODUCT, STORE_B);
+      expect(summaryA.onHand).toBe(5);
+      expect(summaryB.onHand).toBe(9);
+      expect(summaryA.avgCost).toBeCloseTo(2, 2);
+      expect(summaryB.avgCost).toBeCloseTo(6, 2);
+
+      const byConditionA = await port.getStockByCondition(PRODUCT, STORE_A);
+      expect(byConditionA).toEqual([{ condition: 'new', onHand: 5, reserved: 0 }]);
+    });
+
+    it('getStockByLocation agrega por boxId, incluindo o "sem box" (null)', async () => {
+      const listing = await port.createOrGetStoreListing(PRODUCT, STORE_A);
+      const BOX = '000000000000000000000099';
+
+      await port.recordStockMovement({
+        storeListingId: listing.id,
+        type: StockMovementType.INBOUND,
+        quantity: 3,
+        condition: 'new',
+        toBoxId: BOX,
+      });
+      await port.recordStockMovement({
+        storeListingId: listing.id,
+        type: StockMovementType.INBOUND,
+        quantity: 4,
+        condition: 'new',
+      });
+
+      const byLocation = await port.getStockByLocation(PRODUCT, STORE_A);
+      const boxed = byLocation.find((r) => String(r.boxId) === BOX);
+      const unboxed = byLocation.find((r) => r.boxId == null);
+      expect(boxed?.onHand).toBe(3);
+      expect(unboxed?.onHand).toBe(4);
+    });
   });
 });

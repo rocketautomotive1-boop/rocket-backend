@@ -3,6 +3,7 @@ import { StockMovementType } from '../domain/movement-type';
 
 export const StockMoveSchema = z.object({
   productId: z.string().min(1, 'productId é obrigatório'),
+  storeId: z.string().min(1, 'storeId é obrigatório'),
   type: z.nativeEnum(StockMovementType),
   quantity: z.number().int('quantidade deve ser inteira'),
   condition: z.enum(['new', 'damaged', 'used', 'refurbished']).default('new'),

@@ -41,4 +41,23 @@ export interface StoreListingPort {
     toBoxId?: string;
     reason?: string;
   }): Promise<{ lotId: string; movementId: string }>;
+
+  /**
+   * Leitura store-aware do saldo (Fase 4, sub-projeto 3) — usada só pela tela de inventário,
+   * que tem storeId real do usuário autenticado. Sem StoreListing para (productId, storeId) →
+   * zero, sem fallback pra outra loja (decisão explícita: uma loja sem estoque próprio nunca
+   * herda o saldo de outra).
+   */
+  getStockSummary(
+    productId: string,
+    storeId: string,
+  ): Promise<{ onHand: number; reserved: number; available: number; avgCost: number }>;
+  getStockByCondition(
+    productId: string,
+    storeId: string,
+  ): Promise<Array<{ condition: StockCondition; onHand: number; reserved: number }>>;
+  getStockByLocation(
+    productId: string,
+    storeId: string,
+  ): Promise<Array<{ boxId: string | null; onHand: number; reserved: number }>>;
 }

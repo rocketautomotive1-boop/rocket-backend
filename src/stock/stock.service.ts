@@ -6,7 +6,6 @@ import { StockMovementType } from './domain/movement-type';
 import { computeBalanceDelta } from './domain/balance.calculator';
 import { weightedAverageCost } from './domain/average-cost';
 import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
-import { STORE_PORT, StorePort } from '../store/ports/store.port';
 
 /**
  * The single entry point for ALL stock changes. Appends to the immutable ledger AND updates
@@ -21,8 +20,6 @@ export class StockService {
     private readonly repo: StockRepository,
     @Inject(STORE_LISTING_PORT)
     private readonly storeListingPort: StoreListingPort,
-    @Inject(STORE_PORT)
-    private readonly storePort: StorePort,
   ) {}
 
   async move(input: StockMoveInput, externalSession?: ClientSession): Promise<{ movementId: string; lotId: string }> {
@@ -34,23 +31,17 @@ export class StockService {
       result = await this.moveWithRetry(input);
     }
 
-    // Fase 3 dual-write: espelha em store_listing_stock_* DEPOIS que o legado já
-    // terminou (commit incluído) — nunca antes, nunca dentro da mesma transação
-    // (ver mirrorMoveToStoreListing para o porquê de não propagar session).
-    // Sentinela {'', ''} = moveOnce abortou por idempotência (reference duplicada):
-    // não houve escrita real, então não há o que espelhar.
+    // Espelha em store_listing_stock_* DEPOIS que o legado já terminou (commit incluído)
+    // — nunca antes, nunca dentro da mesma transação (ver mirrorMoveToStoreListing).
+    // Sentinela {'', ''} = moveOnce abortou por idempotência (reference duplicada): não
+    // houve escrita real, então não há o que espelhar.
     //
-    // Quando há externalSession (chamador é dono da transação — ex.: OrderSyncPipeline
-    // via StockLedgerProvider.deductAndLink), moveOnce() escreve DENTRO dessa transação
-    // mas NÃO a comita — quem comita é o chamador, bem depois deste ponto. Espelhar aqui
-    // seria espelhar ANTES do commit real: se a transação do chamador abortar depois, o
-    // espelho fica órfão (legado voltou atrás, espelho não); e o retry loop do pipeline
-    // (WriteConflict → reexecuta a transação inteira) faria o mesmo movimento ser
-    // espelhado de novo, duplicando linhas para uma única dedução lógica de estoque.
-    // Por isso, quando externalSession é passado, o dual-write é pulado por completo
-    // aqui. Mirroring correto desse caminho exigiria o dono da transação (OrderSyncPipeline)
-    // disparar o espelho ELE MESMO depois do seu próprio commit — fora do escopo deste
-    // fix (limitação conhecida da Fase 3, a fechar em follow-up).
+    // Quando há externalSession (chamador é dono da transação — ex.: OrderSyncPipeline via
+    // StockLedgerProvider.deductAndLink), moveOnce() escreve DENTRO dessa transação mas NÃO
+    // a comita — quem comita é o chamador, bem depois deste ponto. Espelhar aqui seria
+    // espelhar ANTES do commit real, então é pulado por completo aqui (Fase 4 fecha esse
+    // gap: o dono da transação chama mirrorMoveToStoreListing ele mesmo, pós-commit — ver
+    // StockLedgerProvider.mirrorAfterCommit).
     if (!externalSession && (result.movementId !== '' || result.lotId !== '')) {
       const dto = StockMoveSchema.parse(input);
       await this.mirrorMoveToStoreListing(dto);
@@ -74,38 +65,19 @@ export class StockService {
   }
 
   /**
-   * Resolve qual loja é dona do estoque deste produto pra fins de dual-write
-   * (Fase 3): fallback "Rocket Automotive" — mesmo critério do backfill da
-   * Fase 2 (resolveOwnerStore). A busca por um StoreListing JÁ existente do
-   * produto (independente da loja) é feita separadamente via
-   * STORE_LISTING_PORT.findAnyByProduct, antes de cair neste fallback. Nunca
-   * lança: quem chama trata retorno null como "pula o dual-write desta
-   * chamada", não como erro.
-   */
-  private async resolveStoreIdForDualWrite(): Promise<string | null> {
-    const fallbackStore = await this.storePort.findByName('Rocket Automotive');
-    return fallbackStore?.id ?? null;
-  }
-
-  /**
    * Fire-and-log mirror do movimento pra store_listing_stock_* — NUNCA bloqueia
    * nem falha o move() legado (por isso não propaga a session da transação
    * legada: se o espelho abortasse depois, reverteria uma escrita legada que já
    * "aconteceu" do ponto de vista do chamador).
+   *
+   * Fase 4: storeId vem do chamador (usuário autenticado ou processo que resolveu
+   * a loja dona da operação) — não há mais fallback pra loja padrão. Isso é o que
+   * torna o espelho correto por loja (sem o que, MAXESHOP acabaria gravando/lendo
+   * o saldo da Rocket Automotive).
    */
-  private async mirrorMoveToStoreListing(dto: StockMoveInput): Promise<void> {
+  async mirrorMoveToStoreListing(dto: StockMoveInput): Promise<void> {
     try {
-      // Existing StoreListing anywhere for this product wins over the fallback store —
-      // mirrors the Phase 2 backfill's resolution rule (resolveOwnerStore).
-      let storeListing = await this.storeListingPort.findAnyByProduct(dto.productId);
-      if (!storeListing) {
-        const storeId = await this.resolveStoreIdForDualWrite();
-        if (!storeId) {
-          this.logger.error(`[dual-write] loja padrão não resolvida — movimento do produto ${dto.productId} não espelhado.`);
-          return;
-        }
-        storeListing = await this.storeListingPort.createOrGetStoreListing(dto.productId, storeId);
-      }
+      const storeListing = await this.storeListingPort.createOrGetStoreListing(dto.productId, dto.storeId);
 
       const unitCost = dto.unitCost != null ? String(dto.unitCost) : undefined;
 
@@ -189,6 +161,7 @@ export class StockService {
         {
           lotId: lot._id,
           productId,
+          storeId: new Types.ObjectId(dto.storeId),
           type: dto.type,
           quantity: dto.quantity,
           unitCost,
@@ -243,6 +216,7 @@ export class StockService {
   async adjust(
     input: {
       productId: string;
+      storeId: string;
       quantity: number;
       condition?: 'new' | 'damaged' | 'used' | 'refurbished';
       reason?: string;
@@ -254,6 +228,7 @@ export class StockService {
     return this.move(
       {
         productId: input.productId,
+        storeId: input.storeId,
         type: StockMovementType.ADJUSTMENT,
         quantity: input.quantity,
         condition: input.condition ?? 'new',
@@ -268,15 +243,26 @@ export class StockService {
   /**
    * "Delete" a movement → append a compensating adjustment that cancels its balance effect.
    * The ledger stays append-only (audit/fiscal correctness). Returns the compensating movement id.
+   *
+   * storeId: o movimento original grava a loja dona (Fase 4). Ausente só em movimentos
+   * anteriores a esta fase — nesse caso, exige que o chamador informe explicitamente
+   * (não há fallback silencioso pra loja padrão).
    */
-  async reverseMovement(movementId: string): Promise<{ movementId: string; lotId: string }> {
+  async reverseMovement(movementId: string, fallbackStoreId?: string): Promise<{ movementId: string; lotId: string }> {
     const original = await this.repo.movementModel.findById(movementId).lean().exec();
     if (!original) throw new BadRequestException(`Movement ${movementId} not found`);
+    const storeId = (original as any).storeId ? String((original as any).storeId) : fallbackStoreId;
+    if (!storeId) {
+      throw new BadRequestException(
+        `Movimento ${movementId} não tem loja associada (anterior à Fase 4) e nenhum storeId foi informado para o estorno.`,
+      );
+    }
     const delta = computeBalanceDelta((original as any).type, (original as any).quantity);
     const originalBoxId = (original as any).toBoxId ?? (original as any).fromBoxId;
     // Compensate the net onHand effect with an adjustment of the opposite sign, in the same box.
     return this.adjust({
       productId: String((original as any).productId),
+      storeId,
       quantity: -delta.onHand,
       condition: (original as any).condition ?? 'new',
       reason: `Estorno do movimento ${movementId}`,
@@ -291,6 +277,7 @@ export class StockService {
    */
   async correctTo(input: {
     productId: string;
+    storeId: string;
     targetQuantity: number;
     condition?: 'new' | 'damaged' | 'used' | 'refurbished';
   }): Promise<{ movementId: string; lotId: string } | null> {
@@ -301,6 +288,7 @@ export class StockService {
     if (diff === 0) return null;
     return this.adjust({
       productId: input.productId,
+      storeId: input.storeId,
       quantity: diff,
       condition,
       reason: `Correção de estoque: ${current} → ${input.targetQuantity}`,
@@ -311,15 +299,22 @@ export class StockService {
    * "Edit" a movement's quantity → append an adjustment for the difference (no destructive edit).
    * `newQuantity` is the intended absolute quantity of the original movement.
    */
-  async editMovementViaAdjustment(movementId: string, newQuantity: number): Promise<{ movementId: string; lotId: string }> {
+  async editMovementViaAdjustment(movementId: string, newQuantity: number, fallbackStoreId?: string): Promise<{ movementId: string; lotId: string }> {
     const original = await this.repo.movementModel.findById(movementId).lean().exec();
     if (!original) throw new BadRequestException(`Movement ${movementId} not found`);
+    const storeId = (original as any).storeId ? String((original as any).storeId) : fallbackStoreId;
+    if (!storeId) {
+      throw new BadRequestException(
+        `Movimento ${movementId} não tem loja associada (anterior à Fase 4) e nenhum storeId foi informado para a correção.`,
+      );
+    }
     const oldDelta = computeBalanceDelta((original as any).type, (original as any).quantity);
     const newDelta = computeBalanceDelta((original as any).type, newQuantity);
     const diff = newDelta.onHand - oldDelta.onHand;
     const originalBoxId = (original as any).toBoxId ?? (original as any).fromBoxId;
     return this.adjust({
       productId: String((original as any).productId),
+      storeId,
       quantity: diff,
       condition: (original as any).condition ?? 'new',
       reason: `Correção do movimento ${movementId} (qtd ${(original as any).quantity} → ${newQuantity})`,

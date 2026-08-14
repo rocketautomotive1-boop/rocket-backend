@@ -21,6 +21,14 @@ export class StockMovementModel {
   @Prop({ type: Types.ObjectId, ref: 'OrderModel', index: true })
   orderId?: Types.ObjectId;
 
+  /**
+   * Loja dona deste movimento (Fase 4). Opcional — movimentos anteriores a esta fase não têm
+   * o campo; reverseMovement/editMovementViaAdjustment tratam ausência como fallback explícito,
+   * não como erro.
+   */
+  @Prop({ type: Types.ObjectId, ref: 'StoreModel' })
+  storeId?: Types.ObjectId;
+
   @Prop({ required: true, enum: Object.values(StockMovementType) })
   type: StockMovementType;
 

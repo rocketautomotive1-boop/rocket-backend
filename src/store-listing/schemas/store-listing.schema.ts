@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type StoreListingDocument = HydratedDocument<StoreListingModel>;
 
@@ -15,10 +15,12 @@ export type StoreListingDocument = HydratedDocument<StoreListingModel>;
  */
 @Schema({ collection: 'store_listings', timestamps: true })
 export class StoreListingModel {
-  @Prop({ type: Types.ObjectId, required: true })
+  // type: MongooseSchema.Types.ObjectId (não mongoose.Types.ObjectId) — ver nota em
+  // store-listing-stock-movement.schema.ts.
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   productId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   storeId: Types.ObjectId;
 }
 

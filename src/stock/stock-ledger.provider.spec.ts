@@ -1,0 +1,117 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { StockLedgerProvider } from './stock-ledger.provider';
+import { StockService } from './stock.service';
+import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
+import { STORE_PORT, StorePort } from '../store/ports/store.port';
+import { StockMovementType } from './domain/movement-type';
+
+describe('StockLedgerProvider', () => {
+  let provider: StockLedgerProvider;
+  let stock: { move: jest.Mock; mirrorMoveToStoreListing: jest.Mock };
+  let storeListingPort: { findAnyByProduct: jest.Mock };
+  let storePort: { findByName: jest.Mock };
+
+  const P1 = 'product-1';
+  const STORE_A = 'store-a';
+  const FALLBACK_STORE = 'store-rocket';
+
+  beforeEach(async () => {
+    stock = { move: jest.fn(), mirrorMoveToStoreListing: jest.fn() };
+    storeListingPort = { findAnyByProduct: jest.fn() };
+    storePort = { findByName: jest.fn() };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        StockLedgerProvider,
+        { provide: StockService, useValue: stock },
+        { provide: STORE_LISTING_PORT, useValue: storeListingPort },
+        { provide: STORE_PORT, useValue: storePort },
+      ],
+    }).compile();
+
+    provider = module.get(StockLedgerProvider);
+  });
+
+  describe('deductAndLink', () => {
+    it('resolves storeId from the product\'s existing StoreListing and passes it to move()', async () => {
+      storeListingPort.findAnyByProduct.mockResolvedValue({ storeId: STORE_A });
+      stock.move.mockResolvedValue({ movementId: 'm1', lotId: 'l1' });
+
+      const session: any = {};
+      const result = await provider.deductAndLink('order-1', [{ productId: P1, quantity: 2 }], 'ref-1', 'ML', session);
+
+      expect(stock.move).toHaveBeenCalledWith(
+        expect.objectContaining({ productId: P1, storeId: STORE_A }),
+        session,
+      );
+      expect(result.movementIds).toEqual(['m1']);
+      expect(result.items).toEqual([{ productId: P1, quantity: 2 }]);
+    });
+
+    it('falls back to the default store only when the product has no StoreListing yet', async () => {
+      storeListingPort.findAnyByProduct.mockResolvedValue(null);
+      storePort.findByName.mockResolvedValue({ id: FALLBACK_STORE, name: 'Rocket Automotive' });
+      stock.move.mockResolvedValue({ movementId: 'm1', lotId: 'l1' });
+
+      await provider.deductAndLink('order-1', [{ productId: P1, quantity: 2 }], 'ref-1', 'ML', {} as any);
+
+      expect(stock.move).toHaveBeenCalledWith(
+        expect.objectContaining({ storeId: FALLBACK_STORE }),
+        expect.anything(),
+      );
+    });
+
+    it('skips an item (without throwing) when no store can be resolved at all', async () => {
+      storeListingPort.findAnyByProduct.mockResolvedValue(null);
+      storePort.findByName.mockResolvedValue(null);
+
+      const result = await provider.deductAndLink('order-1', [{ productId: P1, quantity: 2 }], 'ref-1', 'ML', {} as any);
+
+      expect(stock.move).not.toHaveBeenCalled();
+      expect(result.movementIds).toEqual([]);
+      expect(result.items).toEqual([]);
+    });
+  });
+
+  describe('mirrorAfterCommit', () => {
+    it('mirrors each deducted item using the resolved storeId, never throws on failure', async () => {
+      storeListingPort.findAnyByProduct.mockResolvedValue({ storeId: STORE_A });
+      stock.mirrorMoveToStoreListing.mockRejectedValueOnce(new Error('boom'));
+
+      await expect(
+        provider.mirrorAfterCommit('order-1', [{ productId: P1, quantity: 2 }]),
+      ).resolves.toBeUndefined();
+
+      expect(stock.mirrorMoveToStoreListing).toHaveBeenCalledWith(
+        expect.objectContaining({ productId: P1, storeId: STORE_A, type: StockMovementType.OUTBOUND, quantity: 2 }),
+      );
+    });
+  });
+
+  describe('revert', () => {
+    it('resolves storeId per item before calling move()', async () => {
+      storeListingPort.findAnyByProduct.mockResolvedValue({ storeId: STORE_A });
+      stock.move.mockResolvedValue({ movementId: 'm2', lotId: 'l2' });
+
+      await provider.revert('order-1', [{ productId: P1, quantity: 1, unitPrice: 10 }], 'cancel:order-1');
+
+      expect(stock.move).toHaveBeenCalledWith(
+        expect.objectContaining({ productId: P1, storeId: STORE_A, type: StockMovementType.INBOUND }),
+      );
+    });
+  });
+
+  describe('deductStandalone', () => {
+    it('resolves storeId per item before calling move()', async () => {
+      storeListingPort.findAnyByProduct.mockResolvedValue({ storeId: STORE_A });
+      stock.move.mockResolvedValue({ movementId: 'm3', lotId: 'l3' });
+
+      const result = await provider.deductStandalone('order-1', [{ productId: P1, quantity: 3 }], 'ref-2', 'Shopee');
+
+      expect(stock.move).toHaveBeenCalledWith(
+        expect.objectContaining({ productId: P1, storeId: STORE_A, type: StockMovementType.OUTBOUND }),
+      );
+      expect(result.movementsCount).toBe(1);
+    });
+  });
+});

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Types, Schema as MongooseSchema } from 'mongoose';
 import { StockCondition } from '../../stock/schemas/stock-lot.schema';
 import { StockMovementType } from '../../stock/domain/movement-type';
 
@@ -7,8 +7,16 @@ export type StoreListingStockMovementDocument = HydratedDocument<StoreListingSto
 
 @Schema({ collection: 'store_listing_stock_movements', timestamps: true })
 export class StoreListingStockMovementModel {
-  /** Sem index:true aqui — o índice composto {storeListingId, date} abaixo já cobre queries por storeListingId sozinho (prefixo do índice composto). */
-  @Prop({ type: Types.ObjectId, required: true })
+  /**
+   * Sem index:true aqui — o índice composto {storeListingId, date} abaixo já cobre queries por
+   * storeListingId sozinho (prefixo do índice composto).
+   *
+   * type: MongooseSchema.Types.ObjectId (não mongoose.Types.ObjectId) — achado nesta sessão:
+   * o construtor de instância Types.ObjectId não é reconhecido como tipo de schema nesta versão
+   * do Mongoose e o campo silenciosamente vira Mixed, quebrando cast automático de string→ObjectId
+   * em find()/queries. Mesmo bug existe em outros schemas do projeto (fora de escopo aqui).
+   */
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   storeListingId: Types.ObjectId;
 
   @Prop({ type: Types.ObjectId, index: true })

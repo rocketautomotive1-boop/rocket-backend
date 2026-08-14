@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Types, Schema as MongooseSchema } from 'mongoose';
 import { StockCondition } from '../../stock/schemas/stock-lot.schema';
 
 export type StoreListingStockLotDocument = HydratedDocument<StoreListingStockLotModel>;
@@ -12,8 +12,14 @@ export type StoreListingStockLotDocument = HydratedDocument<StoreListingStockLot
  */
 @Schema({ collection: 'store_listing_stock_lots', timestamps: true })
 export class StoreListingStockLotModel {
-  /** Sem index:true aqui — o índice composto {storeListingId, condition} abaixo já cobre queries por storeListingId sozinho (prefixo do índice composto). */
-  @Prop({ type: Types.ObjectId, required: true })
+  /**
+   * Sem index:true aqui — o índice composto {storeListingId, condition} abaixo já cobre queries
+   * por storeListingId sozinho (prefixo do índice composto).
+   *
+   * type: MongooseSchema.Types.ObjectId (não mongoose.Types.ObjectId) — ver nota equivalente em
+   * store-listing-stock-movement.schema.ts.
+   */
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   storeListingId: Types.ObjectId;
 
   /**

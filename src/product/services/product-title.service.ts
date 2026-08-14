@@ -2,7 +2,6 @@ import { Injectable, Inject, forwardRef, NotFoundException, Logger } from '@nest
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ProductModel, ProductDocument, ProductTitle } from '../schemas/product.schema';
-import { UserModel, UserDocument } from '../../auth/schemas/user.schema';
 import { ListingService } from '../../listing/listing.service';
 import { ListingDocument } from '../../listing/schemas/listing.schema';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -14,16 +13,12 @@ export class ProductTitleService {
 
   constructor(
     @InjectModel(ProductModel.name) private productModel: Model<ProductDocument>,
-    @InjectModel(UserModel.name) private userModel: Model<UserDocument>,
     private readonly listingService: ListingService,
     private readonly eventEmitter: EventEmitter2,
   ) { }
 
-  /** storeId do usuário logado que está criando o listing — snapshot gravado uma única vez. */
-  private async resolveStoreId(userId?: number | string): Promise<Types.ObjectId | undefined> {
-    if (!userId) return undefined;
-    const user = await this.userModel.findById(userId).select('storeId').lean().exec();
-    const storeId = (user as any)?.storeId;
+  /** storeId já resolvido pelo controller (req.user.storeId) — snapshot gravado uma única vez. */
+  private toStoreObjectId(storeId?: string | null): Types.ObjectId | undefined {
     return storeId && Types.ObjectId.isValid(storeId) ? new Types.ObjectId(storeId) : undefined;
   }
 
@@ -133,7 +128,7 @@ export class ProductTitleService {
       else if (Types.ObjectId.isValid(String(titleData.marketplaceId))) mId = new Types.ObjectId(String(titleData.marketplaceId));
     }
 
-    const storeId = await this.resolveStoreId((titleData as any).userId);
+    const storeId = this.toStoreObjectId((titleData as any).storeId);
 
     const newListing = await this.listingService.create({
       ...titleData as any,
@@ -166,12 +161,12 @@ export class ProductTitleService {
   }
 
   // Mirror Logic (Complex Sync)
-  async updateTitles(productId: number | string, titles: { id?: string | number, title: string; locale?: string; marketplaceId?: string; order?: number }[], userId?: number): Promise<any[]> {
+  async updateTitles(productId: number | string, titles: { id?: string | number, title: string; locale?: string; marketplaceId?: string; order?: number }[], userId?: number, storeId?: string | null): Promise<any[]> {
     const pId = await this.resolveProductId(productId);
     if (!pId) throw new Error(`Produto com ID ${productId} não encontrado`);
 
     const pObjectId = new Types.ObjectId(pId);
-    const storeId = await this.resolveStoreId(userId);
+    const storeObjectId = this.toStoreObjectId(storeId);
 
     // 1. Get existing listings
     const existingListings = await this.listingService.findByProduct(pObjectId);
@@ -214,7 +209,7 @@ export class ProductTitleService {
         const created = await this.listingService.create({
           productId: pObjectId,
           marketplaceId: mId,
-          storeId,
+          storeId: storeObjectId,
           title: t.title,
           locale: t.locale || 'pt-BR',
           status: 'active',

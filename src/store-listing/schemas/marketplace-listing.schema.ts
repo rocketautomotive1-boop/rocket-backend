@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type MarketplaceListingDocument = HydratedDocument<MarketplaceListingModel>;
 
@@ -15,8 +15,14 @@ export type MarketplaceListingStatus = 'pending_creation' | 'active' | 'paused' 
  */
 @Schema({ collection: 'marketplace_listings', timestamps: true })
 export class MarketplaceListingModel {
-  /** Sem index:true aqui — o índice composto {storeListingId, marketplaceTag, externalId} abaixo já cobre queries por storeListingId sozinho (prefixo do índice composto). */
-  @Prop({ type: Types.ObjectId, required: true })
+  /**
+   * Sem index:true aqui — o índice composto {storeListingId, marketplaceTag, externalId} abaixo
+   * já cobre queries por storeListingId sozinho (prefixo do índice composto).
+   *
+   * type: MongooseSchema.Types.ObjectId (não mongoose.Types.ObjectId) — ver nota em
+   * store-listing-stock-movement.schema.ts.
+   */
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   storeListingId: Types.ObjectId;
 
   @Prop({ required: true })

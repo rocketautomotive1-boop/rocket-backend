@@ -40,18 +40,19 @@ export class ProductTitleController {
     @Req() req: any
   ): Promise<ProductTitle> {
     const userId = req?.user?.id || req?.user?.sub;
-    return this.productTitleService.create(productId as any, { ...createProductTitleDto, userId } as any);
+    const storeId = req?.user?.storeId ?? null;
+    return this.productTitleService.create(productId as any, { ...createProductTitleDto, userId, storeId } as any);
   }
 
   @Post('batch')
   async updateTitles(@Body() updateTitlesDto: UpdateTitlesDto, @Req() req: any) {
     const userId = req?.user?.id || req?.user?.sub;
-    console.log('ProductTitleController.updateTitles - Payload:', JSON.stringify(updateTitlesDto));
-    console.log('ProductTitleController.updateTitles - userId:', userId, 'User:', req.user);
+    const storeId = req?.user?.storeId ?? null;
     return this.productTitleService.updateTitles(
       updateTitlesDto.productId as any,
       updateTitlesDto.titles as any,
-      userId
+      userId,
+      storeId
     );
   }
 

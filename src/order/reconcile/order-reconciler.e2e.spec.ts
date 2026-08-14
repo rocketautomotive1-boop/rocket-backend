@@ -50,9 +50,13 @@ describe('OrderReconciler (end-to-end)', () => {
   const gateway = { fetchOrder: jest.fn(), listOrdersSince: jest.fn(), getBillingInfo: jest.fn() };
   // Borda externa: ledger de estoque (transacional, recebe a session da TX).
   const stock = {
-    deductAndLink: jest.fn().mockResolvedValue({ movementIds: ['650000000000000000000abc'] }),
+    deductAndLink: jest.fn().mockResolvedValue({
+      movementIds: ['650000000000000000000abc'],
+      items: [{ productId: '650000000000000000000001', quantity: 1 }],
+    }),
     revert: jest.fn(),
     deductStandalone: jest.fn(),
+    mirrorAfterCommit: jest.fn(),
   };
   // Borda externa: resolução de produto (1 item → 1 produto válido com custo 10).
   const resolver = {
@@ -118,7 +122,10 @@ describe('OrderReconciler (end-to-end)', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    stock.deductAndLink.mockResolvedValue({ movementIds: ['650000000000000000000abc'] });
+    stock.deductAndLink.mockResolvedValue({
+      movementIds: ['650000000000000000000abc'],
+      items: [{ productId: PRODUCT_ID, quantity: 1 }],
+    });
     resolver.resolveProducts.mockResolvedValue(new Map([[0, PRODUCT_ID]]));
     resolver.getCostPrices.mockResolvedValue(new Map([[PRODUCT_ID, 10]]));
     await orderModel.deleteMany({});

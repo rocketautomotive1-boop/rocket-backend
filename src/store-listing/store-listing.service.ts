@@ -226,37 +226,42 @@ export class StoreListingService implements StoreListingPort {
     reason?: string;
   }): Promise<{ lotId: string; movementId: string }> {
     const condition: StockCondition = params.condition ?? 'new';
+    // updateOne com upsert NÃO aplica cast de schema no valor do filtro pro documento novo —
+    // sem isso, storeListingId ficaria salvo como string em vez de ObjectId, quebrando
+    // comparação de igualdade em aggregation ($match) que espera o tipo BSON correto.
+    const storeListingId = new Types.ObjectId(params.storeListingId);
 
     const lot = params.lotId
       ? await this.storeListingStockLotModel.findById(params.lotId).exec()
       : await this.storeListingStockLotModel
-          .findOne({ storeListingId: params.storeListingId, condition })
+          .findOne({ storeListingId, condition })
           .exec();
 
     const resolvedLot =
       lot ??
       (await this.storeListingStockLotModel.create({
-        storeListingId: params.storeListingId,
+        storeListingId,
         condition,
         unitCost: params.unitCost,
         // originalLotId deliberately omitted — this is a net-new lot, not migrated.
       }));
 
-    const lotId = String((resolvedLot as any)._id);
-    const boxId = params.toBoxId ?? params.fromBoxId ?? null;
+    const lotId: Types.ObjectId = (resolvedLot as any)._id;
+    const boxIdRaw = params.toBoxId ?? params.fromBoxId ?? null;
+    const boxId = boxIdRaw ? new Types.ObjectId(boxIdRaw) : null;
     const delta = computeBalanceDelta(params.type, params.quantity);
 
     // Atomic upsert mirroring StockRepository.applyBalanceDelta: keyed by
     // {storeListingId, lotId, boxId} (condition only set on insert), no
     // separate find-then-branch — $inc is race-safe under concurrent writes.
     await this.storeListingStockBalanceModel.updateOne(
-      { storeListingId: params.storeListingId, lotId, boxId },
+      { storeListingId, lotId, boxId },
       { $inc: { onHand: delta.onHand, reserved: delta.reserved }, $setOnInsert: { condition } },
       { upsert: true },
     );
 
     const movement = await this.storeListingStockMovementModel.create({
-      storeListingId: params.storeListingId,
+      storeListingId,
       lotId,
       orderId: params.orderId,
       type: params.type,
@@ -270,6 +275,68 @@ export class StoreListingService implements StoreListingPort {
       // originalMovementId deliberately omitted — this is a net-new movement, not migrated.
     });
 
-    return { lotId, movementId: String((movement as any)._id) };
+    return { lotId: String(lotId), movementId: String((movement as any)._id) };
+  }
+
+  async getStockSummary(
+    productId: string,
+    storeId: string,
+  ): Promise<{ onHand: number; reserved: number; available: number; avgCost: number }> {
+    const listing = await this.findByProductAndStore(productId, storeId);
+    if (!listing) return { onHand: 0, reserved: 0, available: 0, avgCost: 0 };
+
+    const storeListingId = new Types.ObjectId(listing.id);
+    const balances = await this.storeListingStockBalanceModel.aggregate([
+      { $match: { storeListingId } },
+      { $group: { _id: '$storeListingId', onHand: { $sum: '$onHand' }, reserved: { $sum: '$reserved' } } },
+    ]);
+    const onHand = balances[0]?.onHand ?? 0;
+    const reserved = balances[0]?.reserved ?? 0;
+
+    const costRows = await this.storeListingStockBalanceModel.aggregate([
+      { $match: { storeListingId } },
+      { $group: { _id: '$lotId', onHand: { $sum: '$onHand' } } },
+      { $lookup: { from: 'store_listing_stock_lots', localField: '_id', foreignField: '_id', as: 'lot' } },
+      { $unwind: '$lot' },
+      { $project: { onHand: 1, unitCost: { $toDouble: '$lot.unitCost' } } },
+    ]);
+    let totalQty = 0;
+    let totalCost = 0;
+    for (const r of costRows) {
+      const qty = Math.max(0, r.onHand);
+      totalQty += qty;
+      totalCost += qty * (r.unitCost ?? 0);
+    }
+    const avgCost = totalQty > 0 ? totalCost / totalQty : 0;
+
+    return { onHand, reserved, available: onHand - reserved, avgCost };
+  }
+
+  async getStockByCondition(
+    productId: string,
+    storeId: string,
+  ): Promise<Array<{ condition: StockCondition; onHand: number; reserved: number }>> {
+    const listing = await this.findByProductAndStore(productId, storeId);
+    if (!listing) return [];
+
+    return this.storeListingStockBalanceModel.aggregate([
+      { $match: { storeListingId: new Types.ObjectId(listing.id) } },
+      { $group: { _id: '$condition', onHand: { $sum: '$onHand' }, reserved: { $sum: '$reserved' } } },
+      { $project: { _id: 0, condition: '$_id', onHand: 1, reserved: 1 } },
+    ]);
+  }
+
+  async getStockByLocation(
+    productId: string,
+    storeId: string,
+  ): Promise<Array<{ boxId: string | null; onHand: number; reserved: number }>> {
+    const listing = await this.findByProductAndStore(productId, storeId);
+    if (!listing) return [];
+
+    return this.storeListingStockBalanceModel.aggregate([
+      { $match: { storeListingId: new Types.ObjectId(listing.id) } },
+      { $group: { _id: '$boxId', onHand: { $sum: '$onHand' }, reserved: { $sum: '$reserved' } } },
+      { $project: { _id: 0, boxId: '$_id', onHand: 1, reserved: 1 } },
+    ]);
   }
 }

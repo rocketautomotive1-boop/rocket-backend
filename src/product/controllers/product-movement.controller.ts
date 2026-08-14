@@ -7,7 +7,9 @@ import {
   Body,
   Param,
   Query,
+  Req,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -37,6 +39,14 @@ export class ProductMovementController {
     private readonly stock: StockService,
     private readonly stockQuery: StockQueryService,
   ) {}
+
+  private requireStoreId(req: any): string {
+    const storeId = req?.user?.storeId;
+    if (!storeId) {
+      throw new BadRequestException('Usuário sem loja configurada — não é possível lançar movimentação de estoque.');
+    }
+    return storeId;
+  }
 
   private mapType(legacy?: string): StockMovementType {
     switch ((legacy || 'inbound').toLowerCase()) {
@@ -84,9 +94,10 @@ export class ProductMovementController {
   @Post()
   @ApiOperation({ summary: 'Criar movimentação (via StockService)' })
   @ApiResponse({ status: 201, description: 'Movimentação criada' })
-  async create(@Body() dto: CreateProductMovementDto): Promise<any> {
+  async create(@Body() dto: CreateProductMovementDto, @Req() req: any): Promise<any> {
     return this.stock.move({
       productId: String(dto.productId),
+      storeId: this.requireStoreId(req),
       type: this.mapType(dto.type),
       quantity: dto.quantity,
       condition: (dto.condition as any) ?? 'new',
@@ -101,11 +112,11 @@ export class ProductMovementController {
 
   @Put(':id')
   @ApiOperation({ summary: 'Corrigir quantidade (append-only: gera ajuste da diferença)' })
-  async update(@Param('id') id: string, @Body() dto: UpdateProductMovementDto): Promise<any> {
+  async update(@Param('id') id: string, @Body() dto: UpdateProductMovementDto, @Req() req: any): Promise<any> {
     if (dto.quantity == null) {
       return { message: 'Nada a corrigir (quantidade não informada).' };
     }
-    return this.stock.editMovementViaAdjustment(id, dto.quantity);
+    return this.stock.editMovementViaAdjustment(id, dto.quantity, this.requireStoreId(req));
   }
 
   @Put(':id/process')
@@ -116,8 +127,8 @@ export class ProductMovementController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Estornar movimentação (append-only: gera movimento de estorno)' })
-  async remove(@Param('id') id: string): Promise<{ message: string }> {
-    await this.stock.reverseMovement(id);
+  async remove(@Param('id') id: string, @Req() req: any): Promise<{ message: string }> {
+    await this.stock.reverseMovement(id, this.requireStoreId(req));
     return { message: 'Movimentação estornada (ajuste de estorno criado).' };
   }
 }

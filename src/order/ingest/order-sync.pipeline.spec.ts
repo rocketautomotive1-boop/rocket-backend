@@ -21,7 +21,7 @@ describe('OrderSyncPipeline (integration)', () => {
   let emitter: EventEmitter2;
 
   const gateway = { fetchOrder: jest.fn(), listOrdersSince: jest.fn() };
-  const stock = { deductAndLink: jest.fn(), revert: jest.fn(), deductStandalone: jest.fn() };
+  const stock = { deductAndLink: jest.fn(), revert: jest.fn(), deductStandalone: jest.fn(), mirrorAfterCommit: jest.fn() };
   const resolver = {
     resolveProduct: jest.fn(),
     resolveProducts: jest.fn().mockResolvedValue(new Map([[0, '650000000000000000000001']])),
@@ -80,7 +80,10 @@ describe('OrderSyncPipeline (integration)', () => {
       total_amount: 100,
       items: [{ id: 'i1', sku: 'S1', title: 'X', quantity: 1, unit_price: 100 }],
     });
-    stock.deductAndLink.mockResolvedValue({ movementIds: ['650000000000000000000abc'] });
+    stock.deductAndLink.mockResolvedValue({
+      movementIds: ['650000000000000000000abc'],
+      items: [{ productId: '650000000000000000000001', quantity: 1 }],
+    });
 
     const seen: any[] = [];
     emitter.on(ORDER_EVENTS.PROCESSED, (e) => seen.push(e));
@@ -108,7 +111,10 @@ describe('OrderSyncPipeline (integration)', () => {
       total_amount: 100,
       items: [{ id: 'i1', sku: 'S1', title: 'X', quantity: 1, unit_price: 100 }],
     });
-    stock.deductAndLink.mockResolvedValue({ movementIds: ['650000000000000000000abc'] });
+    stock.deductAndLink.mockResolvedValue({
+      movementIds: ['650000000000000000000abc'],
+      items: [{ productId: '650000000000000000000001', quantity: 1 }],
+    });
 
     await pipeline.execute('EXT-TX', '650000000000000000000099', 'webhook');
 
@@ -116,5 +122,35 @@ describe('OrderSyncPipeline (integration)', () => {
       { productId: expect.any(String), reason: 'stock_deduction' },
       expect.anything(), // the ClientSession
     );
+  });
+
+  it('calls mirrorAfterCommit with the deducted items only after the transaction has committed', async () => {
+    gateway.fetchOrder.mockResolvedValue({
+      id: 'EXT-MIRROR',
+      marketplaceId: '650000000000000000000099',
+      marketplaceName: 'ML',
+      status: 'paid',
+      date_created: new Date().toISOString(),
+      total_amount: 100,
+      items: [{ id: 'i1', sku: 'S1', title: 'X', quantity: 2, unit_price: 50 }],
+    });
+    stock.deductAndLink.mockResolvedValue({
+      movementIds: ['650000000000000000000def'],
+      items: [{ productId: '650000000000000000000001', quantity: 2 }],
+    });
+
+    await pipeline.execute('EXT-MIRROR', '650000000000000000000099', 'webhook');
+
+    expect(stock.mirrorAfterCommit).toHaveBeenCalledTimes(1);
+    expect(stock.mirrorAfterCommit).toHaveBeenCalledWith(
+      expect.any(String),
+      [{ productId: '650000000000000000000001', quantity: 2 }],
+    );
+  });
+
+  it('does not call mirrorAfterCommit when nothing was deducted', async () => {
+    gateway.fetchOrder.mockResolvedValue(null);
+    await pipeline.execute('MISSING-2', '650000000000000000000099', 'reconcile');
+    expect(stock.mirrorAfterCommit).not.toHaveBeenCalled();
   });
 });

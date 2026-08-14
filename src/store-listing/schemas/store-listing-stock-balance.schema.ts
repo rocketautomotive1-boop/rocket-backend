@@ -1,16 +1,22 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Types, Schema as MongooseSchema } from 'mongoose';
 import { StockCondition } from '../../stock/schemas/stock-lot.schema';
 
 export type StoreListingStockBalanceDocument = HydratedDocument<StoreListingStockBalanceModel>;
 
 @Schema({ collection: 'store_listing_stock_balances', timestamps: true })
 export class StoreListingStockBalanceModel {
-  /** Sem index:true aqui — o índice composto {storeListingId, condition} abaixo já cobre queries por storeListingId sozinho (prefixo do índice composto). */
-  @Prop({ type: Types.ObjectId, required: true })
+  /**
+   * Sem index:true aqui — o índice composto {storeListingId, condition} abaixo já cobre queries
+   * por storeListingId sozinho (prefixo do índice composto).
+   *
+   * type: MongooseSchema.Types.ObjectId (não mongoose.Types.ObjectId) — ver nota equivalente em
+   * store-listing-stock-movement.schema.ts.
+   */
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true })
   storeListingId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, required: true, index: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, required: true, index: true })
   lotId: Types.ObjectId;
 
   /**
@@ -28,7 +34,7 @@ export class StoreListingStockBalanceModel {
   @Prop({ type: String, enum: ['new', 'damaged', 'used', 'refurbished'], required: true })
   condition: StockCondition;
 
-  @Prop({ type: Types.ObjectId, default: null })
+  @Prop({ type: MongooseSchema.Types.ObjectId, default: null })
   boxId: Types.ObjectId | null;
 
   @Prop({ type: Number, default: 0 })
