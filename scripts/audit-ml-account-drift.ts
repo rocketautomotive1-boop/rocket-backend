@@ -72,22 +72,48 @@ async function main() {
         const me = await axios.get('https://api.mercadolibre.com/users/me', { headers });
         const sellerId = me.data.id;
 
-        let offset = 0;
-        let total = Infinity;
+        // ML rejeita offset+limit > 1000 em /items/search (visto em produção:
+        // "Invalid limit and offset values" ao tentar paginar 2152 itens da conta
+        // autopecas-default) — acima de 1000 resultados, usa scroll (search_type=scan
+        // + scroll_id), documentado pelo próprio ML para exatamente esse caso.
         let count = 0;
-        while (offset < total) {
-          const res = await axios.get(`https://api.mercadolibre.com/users/${sellerId}/items/search`, {
-            headers,
-            params: { offset, limit: 50 },
-          });
-          total = res.data.paging?.total ?? 0;
-          const ids: string[] = res.data.results || [];
-          for (const id of ids) externalIdToAccount.set(id, { accountId, label: account.label });
-          count += ids.length;
-          offset += 50;
-          if (ids.length === 0) break;
+        const firstPage = await axios.get(`https://api.mercadolibre.com/users/${sellerId}/items/search`, {
+          headers,
+          params: { limit: 50 },
+        });
+        const total = firstPage.data.paging?.total ?? 0;
+
+        if (total <= 1000) {
+          let offset = 0;
+          while (offset < total) {
+            const res = offset === 0
+              ? firstPage
+              : await axios.get(`https://api.mercadolibre.com/users/${sellerId}/items/search`, {
+                  headers,
+                  params: { offset, limit: 50 },
+                });
+            const ids: string[] = res.data.results || [];
+            for (const id of ids) externalIdToAccount.set(id, { accountId, label: account.label });
+            count += ids.length;
+            offset += 50;
+            if (ids.length === 0) break;
+          }
+        } else {
+          let scrollId: string | undefined;
+          for (;;) {
+            const res = await axios.get(`https://api.mercadolibre.com/users/${sellerId}/items/search`, {
+              headers,
+              params: scrollId ? { search_type: 'scan', scroll_id: scrollId } : { search_type: 'scan' },
+            });
+            const ids: string[] = res.data.results || [];
+            if (ids.length === 0) break;
+            for (const id of ids) externalIdToAccount.set(id, { accountId, label: account.label });
+            count += ids.length;
+            scrollId = res.data.scroll_id;
+            if (!scrollId) break;
+          }
         }
-        console.log(`  conta ${account.label} (seller ${sellerId}): ${count} itens publicados.`);
+        console.log(`  conta ${account.label} (seller ${sellerId}): ${count} itens publicados (total reportado: ${total}).`);
       } catch (err: any) {
         console.warn(
           `  [skip] conta ${account.label}: falha na API do ML (${err?.response?.status ?? ''} ${err?.message}) ` +
