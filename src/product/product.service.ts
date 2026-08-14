@@ -219,7 +219,11 @@ export class ProductService {
 
     // Títulos por marketplace são EXIGIDOS para general também (mesmo fluxo de
     // autopeças): só conclui com pelo menos um título e bloqueia readyToPublish.
-    const titlesList = await this.productTitleService.findByProductId(id);
+    // Store-aware igual a ProductReadinessService.compute: com storeId, só a própria loja
+    // conta — senão "done" aparece mesmo com a tela de Títulos vazia para esta loja.
+    const titlesList = storeId
+      ? await this.productTitleService.findByProductIdAndStore(id, storeId)
+      : await this.productTitleService.findByProductId(id);
     const titles = Array.isArray(titlesList) && titlesList.length > 0;
 
     // Dimensões não se aplicam a itens gerais — não devem reprovar a publicação.

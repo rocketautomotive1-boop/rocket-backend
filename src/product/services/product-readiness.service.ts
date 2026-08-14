@@ -105,7 +105,14 @@ export class ProductReadinessService {
     // NOT mark the Images section done (see completion/has-usable-image).
     const images = hasUsableImage((product as any).images);
 
-    const titles = await this.productTitleService.findByProductId(productId);
+    // Store-aware, igual ao estoque: com storeId (usuário logado), "titles done" só
+    // pode significar "esta loja tem título", nunca "alguma loja tem título" — senão o
+    // status aparece done mas a tela de Títulos (já isolada por loja) mostra vazio.
+    // Sem storeId (gate de publish/listener assíncrono), mantém o comportamento anterior
+    // (qualquer loja) até o publish multi-loja ser desenhado.
+    const titles = storeId
+      ? await this.productTitleService.findByProductIdAndStore(productId, storeId)
+      : await this.productTitleService.findByProductId(productId);
     const titlesOk = Array.isArray(titles) && titles.length > 0;
 
     const category = !!(product as any).category;

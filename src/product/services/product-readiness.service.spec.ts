@@ -11,7 +11,7 @@ describe('ProductReadinessService.compute — inventory store-aware', () => {
   let productRepository: { findByIdClean: jest.Mock };
   let storeListingPort: { findAnyByProduct: jest.Mock; getStockSummary: jest.Mock };
   let pricing: { getBasePrice: jest.Mock };
-  let productTitleService: { findByProductId: jest.Mock };
+  let productTitleService: { findByProductId: jest.Mock; findByProductIdAndStore: jest.Mock };
 
   const BASE_PRODUCT = {
     _id: 'P1',
@@ -27,7 +27,10 @@ describe('ProductReadinessService.compute — inventory store-aware', () => {
     productRepository = { findByIdClean: jest.fn().mockResolvedValue(BASE_PRODUCT) };
     storeListingPort = { findAnyByProduct: jest.fn(), getStockSummary: jest.fn() };
     pricing = { getBasePrice: jest.fn().mockResolvedValue(50) };
-    productTitleService = { findByProductId: jest.fn().mockResolvedValue([{ id: 't1' }]) };
+    productTitleService = {
+      findByProductId: jest.fn().mockResolvedValue([{ id: 't1' }]),
+      findByProductIdAndStore: jest.fn().mockResolvedValue([{ id: 't1' }]),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -103,6 +106,40 @@ describe('ProductReadinessService.compute — inventory store-aware', () => {
       const result = await service.compute('P1', 'store-rocket-vazia');
 
       expect(result?.inventory).toBe(false);
+    });
+  });
+
+  describe('titles store-aware — mesma regra do inventory', () => {
+    it('com storeId explícito, usa findByProductIdAndStore (nunca findByProductId)', async () => {
+      storeListingPort.getStockSummary.mockResolvedValue({ onHand: 1, reserved: 0, available: 1, avgCost: 5 });
+      productTitleService.findByProductIdAndStore.mockResolvedValue([{ id: 't-maxeshop' }]);
+
+      const result = await service.compute('P1', 'store-maxeshop');
+
+      expect(productTitleService.findByProductIdAndStore).toHaveBeenCalledWith('P1', 'store-maxeshop');
+      expect(productTitleService.findByProductId).not.toHaveBeenCalled();
+      expect(result?.titles).toBe(true);
+    });
+
+    it('regressão: titles é false quando a loja pedida não tem título, mesmo que outra loja do produto tenha', async () => {
+      storeListingPort.getStockSummary.mockResolvedValue({ onHand: 1, reserved: 0, available: 1, avgCost: 5 });
+      productTitleService.findByProductIdAndStore.mockResolvedValue([]);
+
+      const result = await service.compute('P1', 'store-sem-titulo');
+
+      expect(result?.titles).toBe(false);
+      expect(result?.readyToPublish).toBe(false);
+    });
+
+    it('sem storeId (gate de publish/listener), mantém comportamento anterior via findByProductId', async () => {
+      storeListingPort.findAnyByProduct.mockResolvedValue({ id: 'SL1', storeId: 'store-rocket' });
+      storeListingPort.getStockSummary.mockResolvedValue({ onHand: 1, reserved: 0, available: 1, avgCost: 5 });
+
+      const result = await service.compute('P1');
+
+      expect(productTitleService.findByProductId).toHaveBeenCalledWith('P1');
+      expect(productTitleService.findByProductIdAndStore).not.toHaveBeenCalled();
+      expect(result?.titles).toBe(true);
     });
   });
 });
