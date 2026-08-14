@@ -1,11 +1,16 @@
-import { Controller, Get, Post, Body, Delete, Param, UseGuards, Request, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Delete, Param, UseGuards, Request, Query, UnauthorizedException } from '@nestjs/common';
 import { CartService } from './cart.service';
 import { CheckoutService } from './checkout.service';
 import { AddToCartDto } from './dto/add-to-cart.dto';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
+import { SkipJwtAuth } from '../auth/decorators/skip-jwt-auth.decorator';
 
-// We need a strategy to identify guest users (Session ID) vs Logged users.
-// For now, we accept a 'session_id' query param for guests, or Bearer token for logged users.
-
+// Carrinho serve tanto convidado (session_id) quanto cliente logado (Bearer token).
+// OptionalJwtAuthGuard popula req.user quando há token válido, sem nunca bloquear —
+// por isso @SkipJwtAuth() a nível de classe, senão o JwtAuthGuard global exigiria
+// token obrigatório antes mesmo do OptionalJwtAuthGuard rodar.
+@SkipJwtAuth()
+@UseGuards(OptionalJwtAuthGuard)
 @Controller('cart')
 export class CartController {
     constructor(
@@ -15,48 +20,52 @@ export class CartController {
 
     @Get()
     async getCart(@Request() req, @Query('session_id') sessionId: string) {
-        // TODO: Implement proper CustomerAuthGuard that populates req.user
-        const customerId = req.user?.id ? req.user.id : null;
-
+        const customerId = req.user?.sub ?? null;
         return this.cartService.getCart(customerId, sessionId);
     }
 
     @Post('items')
     async addItem(@Request() req, @Query('session_id') sessionId: string, @Body() dto: AddToCartDto) {
-        const customerId = req.user?.id ? req.user.id : null;
+        const customerId = req.user?.sub ?? null;
         return this.cartService.addToCart(customerId, sessionId, dto);
     }
 
     @Delete('items/:id')
     async removeItem(@Request() req, @Query('session_id') sessionId: string, @Param('id') itemId: string) {
-        const customerId = req.user?.id ? req.user.id : null;
+        const customerId = req.user?.sub ?? null;
         return this.cartService.removeItem(customerId, sessionId, itemId);
     }
 
     @Post('items/update') // Using Post for compatibility, but conceptually Patch. Or Patch.
     async updateItem(@Request() req, @Query('session_id') sessionId: string, @Body() dto: AddToCartDto) {
-        const customerId = req.user?.id ? req.user.id : null;
+        const customerId = req.user?.sub ?? null;
         return this.cartService.updateItemQuantity(customerId, sessionId, dto);
     }
 
     @Post('coupon')
     async applyCoupon(@Request() req, @Query('session_id') sessionId: string, @Body() body: { code: string }) {
-        const customerId = req.user?.id ? req.user.id : null;
+        const customerId = req.user?.sub ?? null;
         return this.cartService.applyCoupon(customerId, sessionId, body.code);
     }
 
     @Post('freight')
-    async calculateFreight(@Request() req, @Body() body: { zipCode: string }) {
-        const customerId = req.user?.id ? req.user.id : 1; // Default to 1 for testing if no auth
-        // if (!customerId) throw new Error('Customer required for freight calc (mock)');
-        return this.checkoutService.calculateFreight(customerId, body.zipCode);
+    async calculateFreight(@Request() req, @Query('session_id') sessionId: string, @Body() body: { zipCode: string }) {
+        const customerId = req.user?.sub ?? null;
+        return this.checkoutService.calculateFreight(customerId, sessionId, body.zipCode);
     }
 
+    /**
+     * Checkout exige cliente autenticado — precisamos de um CustomerModel real
+     * (email, documento, endereço) para gerar o Order e processar o pagamento no MP.
+     */
     @Post('checkout')
     async checkout(@Request() req, @Body() body: any) {
-        const customerId = req.user?.id ? req.user.id : 1; // Default to 1 for testing if no auth
-        return this.checkoutService.processCheckout(customerId, body);
+        if (!req.user?.sub) {
+            throw new UnauthorizedException('É necessário estar logado para finalizar a compra.');
+        }
+        return this.checkoutService.processCheckout(req.user.sub, body);
     }
+
     @Get('seed-coupon')
     async seedCoupon() {
         return this.cartService.createTestCoupon();

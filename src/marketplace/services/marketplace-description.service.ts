@@ -1,12 +1,12 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
-import { MarketplaceModel, MarketplaceDocument, MarketplaceDescriptionTemplateSnapshot } from '../schemas/marketplace.schema';
+import { Types } from 'mongoose';
+import { MarketplaceDescriptionTemplateSnapshot } from '../schemas/marketplace.schema';
 import { ProductDocument } from '../../product/product-types';
 import { MarketplaceTemplateRepository } from './marketplace-template.repository';
+import { MarketplaceConfigCacheService } from './marketplace-config-cache.service';
 import { ProductFieldMapper } from './product-field-mapper.service';
 import { TemplateEngine } from './template-engine.service';
-import { ProductMovementService } from '../../product/services/product-movement.service';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
 
 /**
  * Orchestrator do sistema de templates de descrição.
@@ -34,13 +34,12 @@ export class MarketplaceDescriptionService {
   private readonly logger = new Logger(MarketplaceDescriptionService.name);
 
   constructor(
-    @InjectModel(MarketplaceModel.name)
-    private readonly marketplaceModel: Model<MarketplaceDocument>,
+    private readonly configCache: MarketplaceConfigCacheService,
     private readonly templateRepo: MarketplaceTemplateRepository,
     private readonly fieldMapper: ProductFieldMapper,
     private readonly engine: TemplateEngine,
-    @Inject(forwardRef(() => ProductMovementService))
-    private readonly productMovementService: ProductMovementService,
+    @Inject(STOCK_QUERY_PORT)
+    private readonly stockQuery: StockQueryPort,
   ) {}
 
   // ── Geração de descrição (core) ───────────────────────────────────────────
@@ -51,9 +50,10 @@ export class MarketplaceDescriptionService {
     templateId?: string,
     listingTitle?: string,
   ): Promise<string> {
+    const productDomain = (product as any)?.domain as string | undefined;
     const template = templateId
       ? await this.templateRepo.findById(templateId)
-      : await this.templateRepo.findDefault(marketplaceName);
+      : await this.templateRepo.findDefault(marketplaceName, productDomain);
 
     if (!template) {
       throw new Error(`Nenhum template padrão encontrado para marketplace "${marketplaceName}"`);
@@ -66,7 +66,8 @@ export class MarketplaceDescriptionService {
     let stockSnapshot: { condition: string; situation: string } | null = null;
     if (productId && Types.ObjectId.isValid(productId)) {
       try {
-        stockSnapshot = await this.productMovementService.getListingStockSnapshot(productId);
+        const snap = await this.stockQuery.getListingSnapshot(productId);
+        if (snap) stockSnapshot = { condition: snap.condition, situation: 'normal' };
       } catch (e: any) {
         this.logger.warn(`Descrição: snapshot de estoque ignorado: ${e?.message}`);
       }
@@ -105,8 +106,10 @@ export class MarketplaceDescriptionService {
     isDefault = false,
     placeholders?: Record<string, any>,
     sections?: Record<string, any>[],
+    domain?: string,
+    accountId?: string,
   ): Promise<MarketplaceDescriptionTemplateSnapshot> {
-    return this.templateRepo.create(marketplaceId, { name, title, template, isDefault, placeholders, sections });
+    return this.templateRepo.create(marketplaceId, { name, title, template, isDefault, placeholders, sections, domain, accountId });
   }
 
   async updateTemplate(
@@ -129,9 +132,9 @@ export class MarketplaceDescriptionService {
   }
 
   async getDefaultTemplateForMarketplace(marketplaceId: string): Promise<MarketplaceDescriptionTemplateSnapshot | null> {
-    const marketplace = await this.marketplaceModel.findById(marketplaceId);
+    const marketplace = await this.configCache.getById(marketplaceId);
     if (!marketplace) return null;
-    return marketplace.templates?.find(t => t.isDefault && t.isActive) ?? null;
+    return (marketplace as any).templates?.find((t: any) => t.isDefault && t.isActive) ?? null;
   }
 
   async getDefaultTemplateForMarketplaceName(marketplaceName: string): Promise<MarketplaceDescriptionTemplateSnapshot | null> {

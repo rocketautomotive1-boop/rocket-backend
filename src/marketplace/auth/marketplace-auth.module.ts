@@ -4,6 +4,10 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { MarketplaceModel, MarketplaceSchema } from '../schemas/marketplace.schema';
 import { MarketplaceAuthService } from './services/marketplace-auth.service';
 import { TokenManagerService } from './services/token-manager.service';
+import { MarketplaceTokenBrokerService } from './services/marketplace-token-broker.service';
+import { TokenRefreshScheduler } from './services/token-refresh.scheduler';
+import { MarketplaceSignerService } from './services/marketplace-signer.service';
+import { MarketplaceCredentialsController } from './controllers/marketplace-credentials.controller';
 
 import { MarketplaceRegistryModule } from '../marketplace-registry.module';
 import { MarketplaceModule } from '../marketplace.module';
@@ -18,8 +22,13 @@ import { YampiAuthAdapter } from '../adapters/yampi/yampi-auth.adapter';
 
 import { HttpModule } from '@nestjs/axios';
 
+import { MarketplaceAccountAuthController } from './controllers/marketplace-account-auth.controller';
 import { MarketplaceAuthController } from './controllers/marketplace-auth.controller';
 import { MarketplaceCallbackController } from './controllers/marketplace-callback.controller';
+
+import { MarketplaceBotQueryService } from '../services/marketplace-bot-query.service';
+import { BALANCE_QUERY_PORT } from '../../notifications/bot/ports/bot-query.ports';
+import { MercadoPagoModule } from '../../mercado-pago/mercado-pago.module';
 
 @Module({
     imports: [
@@ -28,18 +37,23 @@ import { MarketplaceCallbackController } from './controllers/marketplace-callbac
 
         MongooseModule.forFeature([
             { name: MarketplaceModel.name, schema: MarketplaceSchema },
-
         ]),
         forwardRef(() => MarketplaceRegistryModule),
         forwardRef(() => MarketplaceModule),
+        MercadoPagoModule,
     ],
     controllers: [
         MarketplaceAuthController,
-        MarketplaceCallbackController
+        MarketplaceCallbackController,
+        MarketplaceAccountAuthController,
+        MarketplaceCredentialsController,
     ],
     providers: [
         MarketplaceAuthService,
         TokenManagerService,
+        MarketplaceTokenBrokerService,
+        TokenRefreshScheduler,
+        MarketplaceSignerService,
         AmazonAuthAdapter,
         ShopeeAuthAdapter,
         MercadoLivreAuthAdapter,
@@ -47,10 +61,15 @@ import { MarketplaceCallbackController } from './controllers/marketplace-callbac
         MagaluAuthAdapter,
         ViaVarejoAuthAdapter,
         YampiAuthAdapter,
+        MarketplaceBotQueryService,
+        { provide: BALANCE_QUERY_PORT, useExisting: MarketplaceBotQueryService },
     ],
     exports: [
         MarketplaceAuthService,
+        BALANCE_QUERY_PORT,
         TokenManagerService,
+        MarketplaceTokenBrokerService,
+        MarketplaceSignerService,
         AmazonAuthAdapter,
         ShopeeAuthAdapter,
         MercadoLivreAuthAdapter,

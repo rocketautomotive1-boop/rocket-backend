@@ -1,11 +1,18 @@
-import { Inject, forwardRef, Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException, OnModuleInit } from '@nestjs/common';
 import axios from 'axios';
-import { MarketplaceAuthService } from '../../auth/services/marketplace-auth.service';
+import { IMarketplaceAuthAdapter, AdapterAccountCredentials } from '../../interfaces/marketplace-auth-adapter.interface';
+import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
+import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
+import { TokenManagerService } from '../../auth/services/token-manager.service';
 
-
-import { OnModuleInit } from '@nestjs/common';
-import { IMarketplaceAuthAdapter } from '../../interfaces/marketplace-auth-adapter.interface';
-
+/**
+ * Adapter de auth do Mercado Livre — PRIMITIVAS HTTP puras do OAuth.
+ *
+ * Multi-client: as credenciais (clientId/secret) chegam via `additionalData`/
+ * `options`/`credentials` quando o broker as fornece; se ausentes, caem no env
+ * (single-client legado / seed). Não guarda nem renova estado — quem orquedstra
+ * é o MarketplaceTokenBrokerService.
+ */
 @Injectable()
 export class MercadoLivreAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit {
   private readonly logger = new Logger(MercadoLivreAuthAdapter.name);
@@ -14,162 +21,163 @@ export class MercadoLivreAuthAdapter implements IMarketplaceAuthAdapter, OnModul
   public readonly tag = 'mercadolivre';
 
   constructor(
-    @Inject(forwardRef(() => MarketplaceAuthService))
-    private authService: MarketplaceAuthService,
-  ) { }
+    private readonly registry: MarketplaceAdapterRegistry,
+    private readonly marketplaceRegistry: MarketplaceRegistryService,
+    private readonly tokenManager: TokenManagerService,
+  ) {}
 
   onModuleInit() {
-    this.authService.registerAdapter(this);
+    this.registry.registerAuthAdapter(this);
+  }
+
+  // ── Helpers de consumo de token (usados pelos sub-adapters ML) ─────────────
+  // Resolvem token via TokenManager (oauth2 → broker), sem depender do
+  // MarketplaceAuthService (evita ciclo).
+
+  /**
+   * Access token válido (já renovado) do ML. `selector` aceita string (domain,
+   * legado/saída) ou { accountId } para resolução de entrada (webhook/order).
+   */
+  async getValidToken(marketplaceName: string, selector?: string | { domain?: string; accountId?: string }): Promise<string> {
+    const marketplace = await this.marketplaceRegistry.findByName(marketplaceName);
+    if (!marketplace) throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);
+    const resolved = await this.tokenManager.resolveToken(String(marketplace._id), selector);
+    return resolved.accessToken;
+  }
+
+  /** userId do ML (additionalData) por nome do marketplace. */
+  async getUserId(marketplaceName: string, selector?: string | { domain?: string; accountId?: string }): Promise<string> {
+    const marketplace = await this.marketplaceRegistry.findByName(marketplaceName);
+    if (!marketplace) throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);
+    const resolved = await this.tokenManager.resolveToken(String(marketplace._id), selector);
+    const userId = resolved.additionalData?.userId;
+    if (!userId) throw new Error(`userId não encontrado no token do marketplace "${marketplaceName}"`);
+    return String(userId);
+  }
+
+  /** GET /users/me autenticado. */
+  async me(marketplaceName: string, selector?: string | { domain?: string; accountId?: string }): Promise<any> {
+    const token = await this.getValidToken(marketplaceName, selector);
+    const response = await axios.get(`${this.baseUrl}/users/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.data;
   }
 
   /**
-   * Autentica e retorna a estrutura de token (delegando para o auth service se possível,
-   * mas aqui mantemos a lógica de "cliente HTTP" se necessário, ou usamos o service).
-   * 
-   * Na verdade, o MarketplaceAuthService já tem authenticateMercadoLivre.
-   * Se este método for chamado externamente, podemos redirecionar ou manter a lógica pura de HTTP.
-   * Para compatibilidade, mantemos a lógica HTTP aqui mas o correto seria o Service orquestrar.
+   * Perfil da conta para exibir o nome real na tela: GET /users/me com o token
+   * RECÉM-EMITIDO (não resolve via registry/broker — é chamado no authorize,
+   * antes do token estar persistido). Best-effort: erro → {} (não quebra o OAuth).
    */
-  async authenticate(code: string, additionalData: any): Promise<any> {
+  async fetchAccountProfile(token: any): Promise<{ nickname?: string; [key: string]: any }> {
+    const accessToken = token?.accessToken;
+    if (!accessToken) return {};
     try {
-      const appId = process.env.MERCADO_LIVRE_APP_ID;
-      const clientSecret = process.env.MERCADO_LIVRE_CLIENT_SECRET || process.env[`MERCADO_LIVRE_CLIENT_SECRET_${appId}`];
-
-      if (!appId || !clientSecret) {
-        this.logger.error(`Credenciais do Mercado Livre enviadas: AppID=${appId}, ClientSecret=${clientSecret ? '***' : 'MISSING'}`);
-        throw new InternalServerErrorException('Credenciais do Mercado Livre (App ID ou Client Secret) não configuradas.');
-      }
-
-      const params = new URLSearchParams();
-      params.append('grant_type', 'authorization_code');
-      params.append('client_id', appId);
-      params.append('client_secret', clientSecret);
-      params.append('code', code);
-      params.append('redirect_uri', additionalData.redirectUri);
-
-      const response = await axios.post(`${this.baseUrl}/oauth/token`, params, {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Accept': 'application/json',
-        },
+      const { data } = await axios.get(`${this.baseUrl}/users/me`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
+      // Conta migrada ao modelo User Products carrega a tag `user_product_seller`
+      // no array `tags` do /users/me. É o sinal de verdade da CONTA: nesse modelo
+      // o POST /items exige `family_name` e rejeita `title`. Persistimos a flag no
+      // additionalData para o worker rotear o payload sem adivinhar.
+      const isUserProductSeller = Array.isArray(data?.tags)
+        && data.tags.includes('user_product_seller');
+      return { nickname: data?.nickname, userId: data?.id, isUserProductSeller };
+    } catch (error: any) {
+      this.logger.warn(`fetchAccountProfile (ML /users/me) falhou: ${error.message}`);
+      return {};
+    }
+  }
 
+  /** clientId/secret das credenciais fornecidas → fallback ao env. */
+  private resolveCreds(credentials?: AdapterAccountCredentials): { clientId: string; clientSecret: string } {
+    const clientId = credentials?.clientId
+      || process.env.MP_MERCADOLIVRE_CLIENTID
+      || process.env.MERCADO_LIVRE_APP_ID
+      || '';
+    const clientSecret = credentials?.clientSecret
+      || process.env.MP_MERCADOLIVRE_CLIENTSECRET
+      || process.env.MERCADO_LIVRE_CLIENT_SECRET
+      || (clientId ? process.env[`MERCADO_LIVRE_CLIENT_SECRET_${clientId}`] : undefined)
+      || '';
+    if (!clientId || !clientSecret) {
+      throw new InternalServerErrorException('Credenciais do Mercado Livre (App ID / Client Secret) não configuradas.');
+    }
+    return { clientId, clientSecret };
+  }
+
+  async generateAuthUrl(
+    redirectUri?: string,
+    options?: { state?: string; credentials?: AdapterAccountCredentials },
+  ): Promise<{ authUrl: string }> {
+    const { clientId } = this.resolveCreds(options?.credentials);
+    const stateParam = options?.state ? `&state=${encodeURIComponent(options.state)}` : '';
+    const authUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri ?? '')}&scope=offline_access%20read%20write${stateParam}`;
+    return { authUrl };
+  }
+
+  async authenticate(code: string, additionalData?: any): Promise<any> {
+    const { clientId, clientSecret } = this.resolveCreds(additionalData?.credentials);
+    const params = new URLSearchParams();
+    params.append('grant_type', 'authorization_code');
+    params.append('client_id', clientId);
+    params.append('client_secret', clientSecret);
+    params.append('code', code);
+    params.append('redirect_uri', additionalData?.redirectUri ?? '');
+
+    try {
+      const response = await axios.post(`${this.baseUrl}/oauth/token`, params, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      });
       return {
         accessToken: response.data.access_token,
         refreshToken: response.data.refresh_token,
         expiresAt: new Date(Date.now() + response.data.expires_in * 1000),
         tokenType: response.data.token_type,
-        additionalData: {
-          scope: response.data.scope,
-          userId: response.data.user_id,
-          clientId: appId, // Store for refresh usage
-          clientSecret: clientSecret, // Store for refresh usage if needed, though better from env
-        },
+        additionalData: { scope: response.data.scope, userId: response.data.user_id, clientId },
         isActive: true,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Falha na autenticação do Mercado Livre: ${error.message}`, error.response?.data);
-      if (error.response) {
-        throw new InternalServerErrorException(error.response.data);
-      }
-      throw new InternalServerErrorException(`Falha na autenticação do Mercado Livre: ${error.message}`);
+      throw new InternalServerErrorException(error.response?.data ?? `Falha na autenticação do Mercado Livre: ${error.message}`);
     }
   }
 
-  async refreshToken(token: any): Promise<any> {
+  async refreshToken(token: any, credentials?: AdapterAccountCredentials): Promise<any> {
+    const { clientId, clientSecret } = this.resolveCreds({
+      clientId: credentials?.clientId ?? token?.additionalData?.clientId,
+      clientSecret: credentials?.clientSecret ?? token?.additionalData?.clientSecret,
+    });
     try {
-      // Prefer stored credentials, fallback to env (dynamic or static)
-      const clientId = token.additionalData.clientId || process.env.MERCADO_LIVRE_APP_ID;
-      const clientSecret = token.additionalData.clientSecret ||
-        process.env.MERCADO_LIVRE_CLIENT_SECRET ||
-        process.env[`MERCADO_LIVRE_CLIENT_SECRET_${clientId}`];
-
-      if (!clientId || !clientSecret) {
-        throw new InternalServerErrorException('Client ID ou Secret não encontrados para renovação de token.');
-      }
-
       const response = await axios.post(`${this.baseUrl}/oauth/token`, {
         grant_type: 'refresh_token',
         client_id: clientId,
         client_secret: clientSecret,
         refresh_token: token.refreshToken,
       }, {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Accept': 'application/json'
-        }
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
       });
-
       return {
         accessToken: response.data.access_token,
         refreshToken: response.data.refresh_token,
         expiresAt: new Date(Date.now() + response.data.expires_in * 1000),
         tokenType: response.data.token_type,
-        additionalData: {
-          ...token.additionalData,
-          scope: response.data.scope,
-          userId: response.data.user_id,
-        },
+        additionalData: { ...(token.additionalData ?? {}), scope: response.data.scope, userId: response.data.user_id, clientId },
         isActive: true,
       };
-    } catch (error) {
-      throw new Error(`Falha na renovação do token do Mercado Livre: ${error.message}`);
+    } catch (error: any) {
+      // A causa raiz do ML vem em response.data ({error, error_description}),
+      // não em error.message ("Request failed with status code 400"). Sem isto
+      // o "Falha ao renovar token" some o motivo (invalid_grant vs creds).
+      const apiErr = error.response?.data;
+      const detail = apiErr
+        ? `${apiErr.error ?? ''}: ${apiErr.message ?? apiErr.error_description ?? ''}`.trim()
+        : error.message;
+      this.logger.error(
+        `Falha na renovação do token do Mercado Livre (clientId=${clientId}): ${detail}`,
+        apiErr,
+      );
+      throw new Error(`Falha na renovação do token do Mercado Livre: ${detail}`);
     }
-  }
-
-  async me(marketplaceName: string): Promise<any> {
-    const token = await this.getValidToken(marketplaceName);
-    const response = await axios.get(`${this.baseUrl}/users/me`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
-    return response.data;
-  }
-
-  async getValidToken(marketplaceName: string): Promise<string> {
-    try {
-      // Usa o AuthService para buscar o marketplace e garantir token válido
-      const marketplace = await this.authService.findByName(marketplaceName);
-      if (!marketplace) {
-        throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);
-      }
-
-      const validToken = await this.authService.ensureValidToken(marketplace._id);
-      return validToken.accessToken;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async getUserId(marketplaceName: string): Promise<string> {
-    const marketplace = await this.authService.findByName(marketplaceName);
-    if (!marketplace) throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);
-    const activeToken = (marketplace.tokens ?? []).find((t: any) => t.isActive);
-    const userId = activeToken?.additionalData?.userId;
-    if (!userId) throw new Error(`userId não encontrado no token do marketplace "${marketplaceName}"`);
-    return String(userId);
-  }
-
-  async forceRefreshAccessToken(marketplaceName: string): Promise<string> {
-    const marketplace = await this.authService.findByName(marketplaceName);
-    if (!marketplace) throw new Error(`Marketplace "${marketplaceName}" não encontrado.`);
-
-    // Usa o método específico de refresh do AuthService
-    const existingToken = await this.authService.getToken(marketplace._id);
-    if (!existingToken) throw new Error(`Nenhum token encontrado para ${marketplaceName}`);
-    const newToken = await this.authService.refreshToken(marketplace._id, existingToken);
-    return newToken.accessToken;
-  }
-
-  async generateAuthUrl(redirectUri: string): Promise<{ authUrl: string }> {
-    const appId = process.env.MERCADO_LIVRE_APP_ID;
-    if (!appId) {
-      this.logger.error('MERCADO_LIVRE_APP_ID não configurado nas variáveis de ambiente');
-      throw new InternalServerErrorException('Configuração do Mercado Livre incompleta (App ID ausente)');
-    }
-    const authUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=offline_access%20read%20write`;
-    return { authUrl };
   }
 }
-

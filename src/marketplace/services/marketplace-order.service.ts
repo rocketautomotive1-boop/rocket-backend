@@ -5,7 +5,9 @@ import { MarketplaceRegistryService } from './marketplace-registry.service';
 import { MarketplaceAdapterRegistry } from '../registries/marketplace-adapter.registry';
 import { MarketplaceAuthService } from '../auth/services/marketplace-auth.service';
 import { StandardOrder } from '../model/order.interface';
-import { OrderRepository } from '../../order/order.repository';
+// Direct OrderModel access (schema-only import, NOT the order module) so marketplace does not
+// depend on OrderModule — breaks the marketplace<->order cycle.
+import { OrderModel, OrderDocument } from '../../order/schemas/order.schema';
 import { ProductService } from '../../product/product.service';
 import { ProductRepository } from '../../product/product.repository';
 import { IgnoredOrderModel, IgnoredOrderDocument } from '../schemas/ignored-order.schema';
@@ -18,9 +20,9 @@ export class MarketplaceOrderService {
     constructor(
         private readonly registryService: MarketplaceRegistryService,
         private readonly adapterRegistry: MarketplaceAdapterRegistry,
-        @Inject(forwardRef(() => MarketplaceAuthService))
         private readonly authService: MarketplaceAuthService,
-        private readonly orderRepository: OrderRepository,
+        @InjectModel(OrderModel.name)
+        private readonly orderModel: Model<OrderDocument>,
         @Inject(forwardRef(() => ProductService))
         private readonly productService: ProductService,
         private readonly productRepository: ProductRepository,
@@ -107,7 +109,7 @@ export class MarketplaceOrderService {
                 // If offset=0 (first page), we search local.
                 // If the user provided a search term, we prioritize finding matches.
                 // Repo method: findAll(offset, limit, search)
-                const localMatches = await this.orderRepository.findAll(0, 50, params.q);
+                const localMatches = await this.findLocalOrders(params.q);
                 const localOrders = localMatches.filter(Boolean).map(o => this.normalizeToStandardOrder(o));
 
                 // Merge Live + Local (Deduplicate by ID or ExternalID)
@@ -218,7 +220,10 @@ export class MarketplaceOrderService {
         const externalIds = orders.map(o => String(o.id));
 
         // Check actual Order Collection (covers both Stock-Synced and Admin-Synced)
-        const existingOrders = await this.orderRepository.findExistingExternalIds(externalIds);
+        const existingOrders = await this.orderModel.find(
+            { externalId: { $in: externalIds } },
+            { externalId: 1, syncedAt: 1, marketplaceId: 1, status: 1 },
+        ).exec();
 
         // Create existence map
         const existingMap = new Map<string, any>();
@@ -262,118 +267,13 @@ export class MarketplaceOrderService {
         return ignored.save();
     }
 
-    async syncOrdersToMovements(
-        marketplaceId: string,
-        params?: { status?: string; limit?: number; offset?: number; batchSize?: number; orderIds?: string[]; orders?: any[] }
-    ): Promise<any> {
-        const marketplace = await this.registryService.findOne(marketplaceId);
-        if (!marketplace) throw new BadRequestException(`Marketplace ID ${marketplaceId} não encontrado`);
-
-        if (params?.orders && Array.isArray(params.orders) && params.orders.length > 0) {
-            return this.processOrdersSync(params.orders, marketplace, params.batchSize);
-        }
-
-        const adapter = this.adapterRegistry.getOrderAdapter(marketplace.name);
-        let orders: StandardOrder[] = [];
-
-        if (params?.orderIds && params.orderIds.length > 0) {
-            for (const orderId of params.orderIds) {
-                try {
-                    const detail = await adapter.getOrderDetails(orderId);
-                    if (detail) orders.push(detail);
-                } catch (e) {
-                    this.logger.error(`Failed to fetch ${marketplace.name} order detail for ${orderId}: ${e.message}`);
-                }
-            }
-        } else {
-            orders = await adapter.getOrders({
-                status: params?.status,
-                limit: params?.limit,
-                offset: params?.offset
-            });
-        }
-
-        return this.processOrdersSync(orders, marketplace, params?.batchSize);
-    }
-
     hasOrderAdapter(marketplaceName: string): boolean {
         return this.adapterRegistry.hasOrderAdapter(marketplaceName);
     }
 
-    private async processOrdersSync(orders: any[], marketplace: any, batchSizeParam?: number) {
-        const results: any[] = [];
-        let movementsCreated = 0;
-        const mId = marketplace._id;
-
-        const flatItems: Array<{ orderId: string; externalId: string; qty: number }> = [];
-        for (const order of orders) {
-            const orderId = String(order.id || '');
-            // Order-level check for skipping already processed orders
-            const alreadySynced = await this.productRepository.existsMovementReference(orderId);
-            if (alreadySynced) {
-                results.push({ orderId, status: 'skipped', reason: 'already_synced' });
-                continue;
-            }
-
-            const items = order.items || [];
-            for (const item of items) {
-                let externalId = item.id;
-                if (!externalId && item.item?.id) externalId = item.item.id;
-
-                const qty = Number(item.quantity || 0);
-                if (externalId && qty) flatItems.push({ orderId, externalId, qty });
-            }
-        }
-
-        if (flatItems.length === 0) return { marketplace: marketplace.name, ordersCount: orders.length, movementsCreated: 0, results };
-
-        const externalIds = [...new Set(flatItems.map(i => i.externalId))];
-
-        // [REF] Fetch Listings directly
-        const listings = await this.listingService.listingModel.find({
-            externalId: { $in: externalIds },
-            marketplaceId: mId
-        }).lean().exec();
-
-        // Map listings by externalId for item enrichment
-        const ptMap = new Map<string, any>();
-        for (const l of listings) {
-            if (l.productId) {
-                ptMap.set(l.externalId, { ...l, productSku: String(l.productId) });
-            }
-        }
-
-        for (const item of flatItems) {
-            const pt = ptMap.get(item.externalId);
-            if (!pt) {
-                results.push({ orderId: item.orderId, externalId: item.externalId, status: 'failed', reason: 'product_not_mapped' });
-                continue;
-            }
-
-            try {
-                // Individual item creation with built-in compound index for safety
-                await this.productService.createMovement(pt.productSku, {
-                    type: 'outbound',
-                    quantity: item.qty,
-                    reference: item.orderId,
-                    reason: `Venda ${marketplace.name}`,
-                    status: 'completed'
-                });
-                movementsCreated++;
-                results.push({ orderId: item.orderId, externalId: item.externalId, productId: pt.productSku, status: 'created', quantity: item.qty });
-            } catch (error) {
-                if (error.code === 11000) { // MongoDB duplicate key error
-                    results.push({ orderId: item.orderId, externalId: item.externalId, status: 'skipped', reason: 'duplicate_detected' });
-                } else {
-                    this.logger.error(`Failed to sync item ${item.externalId} for order ${item.orderId}: ${error.message}`);
-                    results.push({ orderId: item.orderId, externalId: item.externalId, status: 'failed', reason: error.message });
-                }
-            }
-        }
-
-        const batchSize = Math.max(1, Number(batchSizeParam ?? 20));
-        return { marketplace: marketplace.name, ordersCount: orders.length, movementsCreated, batchSize, results };
-    }
+    // syncOrdersToMovements/processOrdersSync (bulk-sync legado, dedução manual de movimentos
+    // pré-StockModule) foram removidos. A reconciliação de pedidos perdidos pelo webhook vive
+    // no OrderReconciler (cursor + delta) → OrderIngestService.ingest → OrderSyncPipeline.
 
     async getBillingInfo(billingId: string, marketplaceId: string): Promise<any> {
         const marketplace = await this.registryService.findOne(marketplaceId);
@@ -420,28 +320,16 @@ export class MarketplaceOrderService {
             status: raw.status || 'unknown'
         };
     }
-    private async saveOrdersToDb(orders: StandardOrder[]): Promise<void> {
-        const dbOrders = orders.map(o => ({
-            externalId: o.id,
-            marketplaceId: o.marketplaceId,
-            status: o.status,
-            totalAmount: o.total_amount,
-            createdAt: new Date(o.date_created),
-            customer: {
-                name: o.buyer?.name || 'Comprador',
-                document: '',
-                email: '',
-                phone: ''
-            },
-            items: (o.items || []).map((i: any) => ({
-                sku: i.sku,
-                title: i.title,
-                quantity: i.quantity,
-                unitPrice: i.unit_price,
-                productId: i.id
-            })),
-            syncedAt: new Date(),
-        }));
-        await this.orderRepository.upsertBatch(dbOrders);
+    /** Local order lookup for hybrid search (direct model query, no order module dependency). */
+    private async findLocalOrders(search: string): Promise<OrderDocument[]> {
+        const regex = new RegExp(search, 'i');
+        return this.orderModel.find({
+            $or: [
+                { externalId: regex },
+                { 'customer.name': regex },
+                { 'customer.email': regex },
+                { 'items.title': regex },
+            ],
+        }).sort({ createdAt: -1 }).limit(50).exec();
     }
 }

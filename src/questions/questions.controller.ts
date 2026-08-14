@@ -37,17 +37,4 @@ export class QuestionsController {
         this.logger.log(`POST /questions/${id}/answer`);
         return this.questionsService.answerQuestion(id, body.text, body.aiSuggestionUsed);
     }
-
-    @Post('sync')
-    async sync() {
-        this.logger.log('POST /questions/sync - Starting Manual Sync');
-        try {
-            const result = await this.questionsService.syncQuestions();
-            this.logger.log('Sync completed successfully');
-            return result;
-        } catch (error) {
-            this.logger.error(`Sync failed: ${error.message}`, error.stack);
-            throw error;
-        }
-    }
 }

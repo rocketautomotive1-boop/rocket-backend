@@ -13,6 +13,7 @@ import { ProductModel, ProductDocument } from '../schemas/product.schema';
 import { AiService } from '../../ai/ai.service';
 import { MarketplaceService } from '../../marketplace/services/marketplace.service';
 import { CategorySyncService } from '../../marketplace/services/category/category-sync.service';
+import { MercadoLivreCategoryAdapter } from '../../marketplace/adapters/mercado-livre/mercado-livre-category.adapter';
 
 @Injectable()
 export class ProductCategoryService {
@@ -32,6 +33,8 @@ export class ProductCategoryService {
     @Inject(forwardRef(() => CategoryDiscoveryService)) private readonly categoryDiscoveryService: CategoryDiscoveryService,
     private readonly marketplaceService: MarketplaceService,
     private readonly categorySyncService: CategorySyncService,
+    @Inject(forwardRef(() => MercadoLivreCategoryAdapter))
+    private readonly mlCategoryAdapter: MercadoLivreCategoryAdapter,
   ) { }
 
   private async generateBreadcrumbs(category: CategoryDocument): Promise<string> {
@@ -241,6 +244,7 @@ export class ProductCategoryService {
   async importMarketplaceExternalCategoryWithAiRefactor(
     marketplaceTag: string,
     externalCategoryId: string,
+    domain: string = 'autopecas',
   ): Promise<{
     marketplaceTag: string;
     marketplaceId: Types.ObjectId;
@@ -280,7 +284,7 @@ export class ProductCategoryService {
       return { name: cat.name, path };
     });
 
-    const aiMapping = await this.aiService.mapMarketplaceCategoryToInternal(marketplacePath, treeContext);
+    const aiMapping = await this.aiService.mapMarketplaceCategoryToInternal(marketplacePath, treeContext, domain);
 
     if (!aiMapping.suggestedTree?.length) {
       throw new BadRequestException('A IA não retornou uma árvore de categorias válida (suggestedTree vazio).');
@@ -316,6 +320,111 @@ export class ProductCategoryService {
       internalCategory: refreshed || leaf,
       createdPath,
     };
+  }
+
+  /**
+   * Garante uma categoria interna para um `externalCategoryId` (ex.: "MLB264201"):
+   * - Se já existe mapping (`marketplaceMappings.externalId`), retorna o id (IDEMPOTENTE,
+   *   NÃO chama a IA).
+   * - Senão, importa a categoria do marketplace e mapeia via IA
+   *   (importMarketplaceExternalCategoryWithAiRefactor), retornando o id criado.
+   *
+   * Robusto: valida entrada, é idempotente, e isola falhas (ML/IA/timeout) num erro
+   * estruturado — NUNCA lança para fora sem contexto. Usado pelo auto-save de
+   * categoria do frontend quando o discovery traz o MLB mas não há categoria mapeada.
+   */
+  async ensureCategoryFromMl(
+    marketplaceTag: string,
+    externalCategoryId: string,
+    domain: string = 'autopecas',
+  ): Promise<{
+    categoryId: string | null;
+    status: 'existing' | 'created' | 'failed';
+    error?: string;
+  }> {
+    const tag = (marketplaceTag || '').trim();
+    const ext = (externalCategoryId || '').trim();
+
+    if (!tag) {
+      return { categoryId: null, status: 'failed', error: 'marketplaceTag é obrigatório.' };
+    }
+    if (!/^MLB\d+$/i.test(ext)) {
+      // Só ML por ora; o id de categoria do ML é "MLB" + dígitos (sem prefixo MLBU de catálogo).
+      return { categoryId: null, status: 'failed', error: `externalCategoryId inválido para ML: "${ext}".` };
+    }
+
+    // 1) Idempotência: já mapeado? Retorna sem tocar na IA.
+    try {
+      const existing = await this.categoryModel
+        .findOne({ 'marketplaceMappings.externalId': ext, active: true })
+        .select('_id')
+        .lean()
+        .exec();
+      if (existing) {
+        return { categoryId: String((existing as any)._id), status: 'existing' };
+      }
+    } catch (e: any) {
+      this.logger.warn(`ensureCategoryFromMl lookup failed for ${ext}: ${e?.message}`);
+      // segue para tentar criar — o lookup falho não deve impedir a criação
+    }
+
+    // 2) Não existe → importa + mapeia via IA. Isola qualquer falha.
+    try {
+      const result = await this.importMarketplaceExternalCategoryWithAiRefactor(tag, ext, domain);
+      const id = (result?.internalCategory as any)?._id;
+      if (!id) {
+        return { categoryId: null, status: 'failed', error: 'Import via IA não retornou categoria.' };
+      }
+      this.logger.log(`ensureCategoryFromMl created category ${id} for ${tag}/${ext}`);
+      return { categoryId: String(id), status: 'created' };
+    } catch (e: any) {
+      const msg = e?.message ?? 'Falha ao importar/mapear a categoria via IA.';
+      this.logger.error(`ensureCategoryFromMl create failed for ${tag}/${ext}: ${msg}`);
+      return { categoryId: null, status: 'failed', error: msg };
+    }
+  }
+
+  /**
+   * Resolve a categoria ML FOLHA publicável para um produto e garante a categoria
+   * interna mapeada. Usado quando a categoria escolhida mapeia para um nó ML não-folha
+   * (não publicável): pedimos ao ML o predictor (domain_discovery) a partir do texto do
+   * produto — que SEMPRE devolve uma folha — e reusamos ensureCategoryFromMl (idempotente)
+   * para materializar/mapear a categoria interna. Fonte única: o ML decide a folha.
+   */
+  async resolveMlLeafForProduct(
+    productId: string,
+    domain: string = 'autopecas',
+  ): Promise<{ categoryId: string | null; externalCategoryId: string | null; status: 'existing' | 'created' | 'failed'; error?: string }> {
+    if (!Types.ObjectId.isValid(productId)) {
+      return { categoryId: null, externalCategoryId: null, status: 'failed', error: 'productId inválido.' };
+    }
+    const product = await this.productModel.findById(productId).populate('brand', 'name').lean().exec();
+    if (!product) {
+      return { categoryId: null, externalCategoryId: null, status: 'failed', error: 'Produto não encontrado.' };
+    }
+
+    const title = [product.name, (product as any).brand?.name, (product as any).partNumber]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    if (!title) {
+      return { categoryId: null, externalCategoryId: null, status: 'failed', error: 'Produto sem título para prever a categoria.' };
+    }
+
+    let leafMlId: string;
+    try {
+      const predicted = await this.mlCategoryAdapter.discoverCategory(title);
+      leafMlId = String(predicted?.category_id ?? '').trim();
+      if (!leafMlId) {
+        return { categoryId: null, externalCategoryId: null, status: 'failed', error: 'ML não previu uma categoria folha.' };
+      }
+    } catch (e: any) {
+      return { categoryId: null, externalCategoryId: null, status: 'failed', error: e?.message ?? 'Falha no predictor de categoria do ML.' };
+    }
+
+    // A folha prevista é materializada/mapeada de forma idempotente.
+    const ensured = await this.ensureCategoryFromMl('mercadolivre', leafMlId, domain);
+    return { ...ensured, externalCategoryId: leafMlId };
   }
 
   /**
@@ -758,6 +867,10 @@ export class ProductCategoryService {
         ));
 
         this.logger.log('Re-indexing complete.');
+      }
+
+      if (bulkOps.length > 0) {
+        this.categorySearchService.invalidateTreeCache();
       }
 
       return {

@@ -17,7 +17,6 @@ export class PublicationTriggerListener {
       await this.orchestratorPublisher.requestSync({
         productId: event.productId,
         reason: 'auto_complete',
-        force: false,
       });
       this.logger.log(`Auto-publish enqueued for product ${event.productId} (completedAt: ${event.completedAt.toISOString()})`);
     } catch (err) {

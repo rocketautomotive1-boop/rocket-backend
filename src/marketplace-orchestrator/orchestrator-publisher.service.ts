@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
+import { ClientSession } from 'mongoose';
+import { OutboxRepository } from '../outbox/outbox.repository';
 
 export interface SyncRequestedEvent {
     productId: string;
     reason?: string;
-    force?: boolean;
     requesterId?: string;
     resolutionSignal?: string;
     targetMarketplaceIds?: string[];
@@ -15,10 +15,13 @@ export interface SyncRequestedEvent {
 export class OrchestratorPublisherService {
     private readonly logger = new Logger(OrchestratorPublisherService.name);
 
-    constructor(private readonly amqp: AmqpConnection) {}
+    constructor(private readonly outbox: OutboxRepository) {}
 
-    async requestSync(event: SyncRequestedEvent): Promise<void> {
-        await this.amqp.publish('rocket.orchestrator', 'product.sync.requested', event);
-        this.logger.log(`Published sync.requested for product ${event.productId} (reason: ${event.reason})`);
+    async requestSync(event: SyncRequestedEvent, session?: ClientSession): Promise<void> {
+        await this.outbox.enqueue(
+            { exchange: 'rocket.orchestrator', routingKey: 'product.sync.requested', payload: event },
+            { session },
+        );
+        this.logger.log(`Outboxed sync.requested for product ${event.productId} (reason: ${event.reason})`);
     }
 }

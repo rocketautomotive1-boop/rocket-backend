@@ -15,6 +15,24 @@ export interface MlAttributePayloadDto {
   valueType?: string;
 }
 
+/**
+ * Valida um GTIN (EAN-8/12/13/14 / UPC) pelo dígito verificador GS1.
+ * Aceita só dígitos nos comprimentos válidos e confere o check digit.
+ */
+export function isValidGtin(raw: any): boolean {
+  const code = String(raw ?? '').trim();
+  if (!/^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/.test(code)) return false;
+  const digits = code.split('').map(Number);
+  const check = digits.pop()!;
+  // Pesos 3/1 alternados a partir do dígito mais à direita (antes do verificador).
+  let sum = 0;
+  for (let i = digits.length - 1, mult = 3; i >= 0; i--, mult = mult === 3 ? 1 : 3) {
+    sum += digits[i] * mult;
+  }
+  const expected = (10 - (sum % 10)) % 10;
+  return expected === check;
+}
+
 @Injectable()
 export class MlAttributeHydrationService {
   clampMlDimension(val: string, min: number, unit: string): string {
@@ -50,6 +68,17 @@ export class MlAttributeHydrationService {
     if (!values.PART_NUMBER && product?.partNumber) values.PART_NUMBER = String(product.partNumber);
     if (!values.OEM       && product?.partNumber) values.OEM       = String(product.partNumber);
     if (!values.MODEL     && product?.partNumber) values.MODEL     = String(product.partNumber);
+    // Fluxo general (saúde/beleza/alimentos): produtos não têm partNumber, só EAN.
+    // O ML ainda exige MODEL, então usamos o barcode (EAN) como modelo.
+    if (!values.MODEL && product?.domain === 'general' && product?.barcode) {
+      values.MODEL = String(product.barcode);
+    }
+    // GTIN: muitas categorias do ML exigem (item.attribute.missing_conditional_required).
+    // Fornecemos a partir do barcode quando ele for um GTIN válido (check digit GS1) —
+    // vale para qualquer domínio. Barcode inválido/ausente cai no fluxo de exemption.
+    if (!values.GTIN && isValidGtin(product?.barcode)) {
+      values.GTIN = String(product.barcode);
+    }
     if (!values.SELLER_SKU && product?._id)      values.SELLER_SKU = String(product._id);
     if (!values.BRAND) {
       const brandName = product?.brand?.name || product?.brands?.name;
@@ -94,7 +123,7 @@ export class MlAttributeHydrationService {
 
   buildMlAttributesPayload(hydratedValues: Record<string, string>, rawSchema: any[]): MlAttributePayloadDto[] {
     const validIds = new Set<string>([
-      'SELLER_SKU', 'BRAND', 'MODEL', 'PART_NUMBER', 'OEM',
+      'SELLER_SKU', 'BRAND', 'MODEL', 'PART_NUMBER', 'OEM', 'GTIN',
       'SELLER_PACKAGE_HEIGHT', 'SELLER_PACKAGE_WIDTH', 'SELLER_PACKAGE_LENGTH', 'SELLER_PACKAGE_WEIGHT',
     ]);
     rawSchema.forEach((a: any) => validIds.add(String(a.id)));

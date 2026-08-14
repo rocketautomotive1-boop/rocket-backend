@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { RabbitSubscribe } from '@golevelup/nestjs-rabbitmq';
 import { MarketplaceService } from '../../marketplace/services/marketplace.service';
 import { ProductRepository } from '../product.repository';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
 
 @Injectable()
 export class StockSyncConsumer {
@@ -9,7 +10,8 @@ export class StockSyncConsumer {
 
     constructor(
         private readonly marketplaceService: MarketplaceService,
-        private readonly productRepository: ProductRepository
+        private readonly productRepository: ProductRepository,
+        @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
     ) { }
 
     @RabbitSubscribe({
@@ -26,7 +28,7 @@ export class StockSyncConsumer {
         // Implementation TODO: MarketplaceService needs to support updating specific or all markets
 
         // 1. Get Current Real Stock
-        const currentStock = await this.productRepository.calculateStock(productId);
+        const currentStock = (await this.stockQuery.getProductStock(productId)).onHand;
 
         // 2. Broadcast Update
         // If source is 'order_sync', we pass the 'marketplaceId' to Exclude

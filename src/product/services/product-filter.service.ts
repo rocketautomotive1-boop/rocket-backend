@@ -8,6 +8,10 @@ import { ListingModel, ListingDocument } from '../../listing/schemas/listing.sch
 import { CategoryModel, CategoryDocument } from '../schemas/category.schema';
 import { ProductService } from '../product.service';
 import { ProductRepository } from '../product.repository';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
+import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
+import { ProductVehicleSearchService } from './product-vehicle-search.service';
+import { normalizeCode } from '../utils/code-key.util';
 import {
   ProductFilterDto,
   PaginatedResponseDto,
@@ -19,11 +23,10 @@ import {
   AttributeFilterDto,
   MarketplaceFilterDto,
   ImageFilterDto,
-  CompatibilityFilterDto,
   SortDto,
-  PaginationDto
+  PaginationDto,
+  CompatibilitySearchResponseDto
 } from '../dto/product-filter.dto';
-import { SearchService } from '../../search/search.service';
 
 @Injectable()
 export class ProductFilterService {
@@ -36,10 +39,11 @@ export class ProductFilterService {
     private readonly categoryModel: Model<CategoryDocument>,
     @Inject(forwardRef(() => ProductService))
     private readonly productService: ProductService,
-    @Inject(forwardRef(() => SearchService))
-    private readonly searchService: SearchService,
     @InjectModel(ListingModel.name) private listingModel: Model<ListingDocument>,
     private readonly productRepository: ProductRepository,
+    @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+    private readonly productVehicleSearchService: ProductVehicleSearchService,
+    @Inject(PRICING_PORT) private readonly pricingPort: PricingPort,
   ) { }
 
   async findProducts(filters: ProductFilterDto): Promise<PaginatedResponseDto<ProductModel>> {
@@ -52,7 +56,6 @@ export class ProductFilterService {
     await this.applyMarketplaceFilters(query, filters.marketplace);
     this.applyImageFilters(query, filters.images);
     this.applyAttributeFilters(query, filters.attributes);
-    this.applyCompatibilityFilters(query, filters.compatibilities);
     await this.applySearchFilter(query, filters.search);
 
     const sort = this.getSortOptions(filters);
@@ -81,6 +84,24 @@ export class ProductFilterService {
       });
     }
 
+    // price vive no PricingModule (product_pricing), não em ProductModel — join em lote pra
+    // evitar N+1 e devolver o preço de fato pro consumidor da listagem.
+    if (data.length > 0) {
+      const priceById = await this.pricingPort.getBasePrices(data.map(p => String(p._id)));
+      data.forEach(p => {
+        (p as any).price = priceById.get(String(p._id)) ?? 0;
+      });
+    }
+
+    // estoque vive no StockModule (ledger+lots), não em ProductModel — mesmo join em lote
+    // usado por product-rails/product-vehicle-search, pra listagem não cair em "esgotado" à toa.
+    if (data.length > 0) {
+      const stockById = await this.stockQuery.getAvailableBulk(data.map(p => String(p._id)));
+      data.forEach(p => {
+        (p as any).stockQuantity = stockById.get(String(p._id)) ?? 0;
+      });
+    }
+
     return {
       data,
       pagination: {
@@ -105,7 +126,7 @@ export class ProductFilterService {
       query.name = { $regex: filters.name, $options: 'i' };
     }
     if (filters.partNumber) {
-      query.partNumber = filters.partNumber;
+      query.partNumberKey = normalizeCode(filters.partNumber);
     }
     if (filters.gtin) {
       query.gtin = filters.gtin;
@@ -159,10 +180,10 @@ export class ProductFilterService {
   private async applyInventoryFilters(query: any, inventoryFilter?: InventoryFilterDto): Promise<void> {
     if (!inventoryFilter) return;
     if (inventoryFilter.hasStock) {
-      const ids = await this.productRepository.getProductIdsWithMinStock(1);
+      const ids = await this.stockQuery.getProductIdsWithMinStock(1);
       query._id = { ...(query._id || {}), $in: ids };
     } else if (inventoryFilter.minStock !== undefined) {
-      const ids = await this.productRepository.getProductIdsWithMinStock(inventoryFilter.minStock);
+      const ids = await this.stockQuery.getProductIdsWithMinStock(inventoryFilter.minStock);
       query._id = { ...(query._id || {}), $in: ids };
     }
   }
@@ -210,37 +231,31 @@ export class ProductFilterService {
     });
   }
 
-  private applyCompatibilityFilters(query: any, compFilter?: CompatibilityFilterDto): void {
-    if (!compFilter) return;
-    const criteria: any = {};
-    if (compFilter.vehicleBrands?.length) criteria.vehicleBrand = { $in: compFilter.vehicleBrands };
-    if (compFilter.vehicleModels?.length) criteria.vehicleModel = { $in: compFilter.vehicleModels };
-    if (compFilter.vehicleYears?.length) criteria.vehicleYear = { $in: compFilter.vehicleYears };
-    if (compFilter.syncedWithMarketplace !== undefined) criteria.syncedWithMarketplace = compFilter.syncedWithMarketplace;
-
-    if (Object.keys(criteria).length > 0) {
-      query.compatibilities = { $elemMatch: criteria };
-    }
-    if (compFilter.hasCompatibilities) {
-      query.compatibilities = { $exists: true, $not: { $size: 0 } };
-    }
-  }
-
   private async applySearchFilter(query: any, search?: string): Promise<void> {
     if (!search) return;
-    const regex = new RegExp(search, 'i');
+    const term = search.trim();
+    const regex = new RegExp(term, 'i');
 
     // Find matching categories
     const matchingCategories = await this.categoryModel.find({ name: regex }).select('_id');
     const categoryIds = matchingCategories.map(c => c._id);
 
     query.$or = [
-      { name: regex },
+      { titleText: regex },
+      { titleSynonyms: regex },
+      { subtitle: regex },
       { partNumber: regex },
+      { partNumberKey: normalizeCode(term) },
+      { oemCodesKeys: normalizeCode(term) },
+      { barcode: regex },
       { 'brand.name': regex },
       { category: { $in: categoryIds } },
-      { compatibilityKeywords: regex }
     ];
+
+    // Admin pode colar o _id direto na busca (não é um caso do storefront)
+    if (Types.ObjectId.isValid(term)) {
+      query.$or.push({ _id: new Types.ObjectId(term) });
+    }
   }
 
   private applyNumericRangeFilter(query: any, field: string, range?: NumericRangeDto): void {
@@ -260,85 +275,69 @@ export class ProductFilterService {
   }
 
   private getSortOptions(filters: ProductFilterDto): any {
-    const field = filters.sort?.field || filters.sortField || 'updatedAt';
+    const field = filters.sort?.field || filters.sortField || 'relevanceScore';
     const direction = (filters.sort?.direction || filters.sortDirection || 'DESC').toUpperCase() === 'ASC' ? 1 : -1;
     const fieldMap: any = {
       id: 'sku',
       name: 'name',
       price: 'price',
       createdAt: 'createdAt',
-      updatedAt: 'updatedAt'
+      updatedAt: 'updatedAt',
+      relevanceScore: 'relevanceScore'
     };
-    return { [fieldMap[field] || 'updatedAt']: direction };
-  }
-
-  async updateProductCompatibilityKeywords(productId: string): Promise<void> {
-    const product = await this.productService.findOne(productId);
-    // product.compatibilities check removed, fetching from service
-    if (!product) return;
-
-    const keywords = new Set<string>();
-    const compatibilities = await this.productService.getProductCompatibilities(productId);
-    compatibilities.forEach(comp => {
-      if (comp.vehicleBrand) keywords.add(comp.vehicleBrand);
-      if (comp.vehicleModel) keywords.add(comp.vehicleModel);
-    });
-    // save logic if needed
+    return { [fieldMap[field] || 'relevanceScore']: direction };
   }
 
   async findSimilarProductsByCompatibility(id: number, options: any): Promise<ProductModel[]> {
     return [];
   }
 
+  /** Resumo de compatibilidade do produto — lido de compatibilitySummary (denormalizado). */
   async getProductCompatibilityStats(id: string): Promise<any> {
-    return { total: 0, brands: [] };
+    const product = await this.productModel.findById(id).select('compatibilitySummary').lean().exec();
+    const summary = (product as any)?.compatibilitySummary;
+    if (!summary) return { total: 0, brands: [], models: [] };
+    return {
+      total: summary.vehicleCount ?? 0,
+      brands: summary.makes ?? [],
+      models: summary.models ?? [],
+    };
   }
 
-  async findProductsByCompatibilityKeywords(keywords: string, options: any): Promise<PaginatedResponseDto<ProductModel>> {
-    return { data: [], pagination: { page: 1, limit: options.limit || 10, total: 0, totalPages: 0, hasNext: false, hasPrev: false } };
+  /** Busca combinada produto+veículo em texto livre (ex.: "palheta toro 2025") — sem parsing determinístico. */
+  async findProductsByCompatibilityKeywords(keywords: string, options: any): Promise<CompatibilitySearchResponseDto> {
+    return this.productVehicleSearchService.searchByText(keywords, {
+      page: options.page,
+      limit: options.limit,
+      brandNames: options.brandNames,
+      categoryNames: options.categoryNames,
+      priceMin: options.priceMin,
+      priceMax: options.priceMax,
+      vehicleId: options.vehicleId,
+      sort: options.sort,
+    });
   }
 
   async findProductsIntelligent(term: string, options: any): Promise<PaginatedResponseDto<ProductModel>> {
-    try {
-      this.logger.log(`Performing intelligent search for: ${term}`);
+    // Delega pro pipeline de ranking (Atlas Search + ProductSearchRankingService) já usado
+    // por /products/search/compatibility — ver docs/superpowers/specs/
+    // 2026-07-24-rocket-admin-product-search-and-detail-refactor-design.md. Antes caía direto
+    // em findProducts (regex $or), sem nenhuma relação com os índices Atlas Search criados
+    // no mesmo dia.
+    const result = await this.productVehicleSearchService.searchByText(term, {
+      page: options.page,
+      limit: options.limit,
+    });
 
-      // ES returns mapped objects that look like ProductModel
-      // ES returns mapped objects that look like ProductModel
-      const searchResult: any = await this.searchService.search(term);
-      const esResults = searchResult.data || [];
-
-      if (!esResults || esResults.length === 0) {
-        return {
-          data: [],
-          pagination: {
-            page: options.page || 1, // 1-indexed
-            limit: options.limit || 10,
-            total: 0,
-            totalPages: 0,
-            hasNext: false,
-            hasPrev: false
-          }
-        };
-      }
-
-      // Return ES results directly (Already sorted by relevance/score)
-      // Note: This bypasses MongoDB completely for speed.
-      return {
-        data: esResults,
-        pagination: {
-          page: 1, // ES simple search usually returns top hits
-          limit: esResults.length,
-          total: esResults.length,
-          totalPages: 1,
-          hasNext: false,
-          hasPrev: false
-        }
-      };
-
-    } catch (error) {
-      this.logger.error(`Intelligent search failed: ${error.message}, falling back to Regex`);
-      return this.findProducts({ search: term, page: options.page, limit: options.limit });
+    if (options.includeTitles !== false && result.data.length > 0) {
+      const productIds = result.data.map((p: any) => p._id);
+      const listings = await this.listingModel.find({ productId: { $in: productIds } }).lean().exec();
+      (result.data as any[]).forEach(p => {
+        p.titles = listings.filter(l => String(l.productId) === String(p._id));
+      });
     }
+
+    return result;
   }
 
   async findProductsByAttributes(attributes: any): Promise<ProductModel[]> {
@@ -349,8 +348,8 @@ export class ProductFilterService {
   }
 
   async findLowStockProducts(threshold: number): Promise<ProductModel[]> {
-    const lowStockIds = await this.productRepository.getProductIdsWithMaxStock(threshold);
-    return this.productModel.find({ _id: { $in: lowStockIds.map(id => id.toString()) } as any }).lean().exec();
+    const lowStockIds = await this.stockQuery.getProductIdsWithMaxStock(threshold);
+    return this.productModel.find({ _id: { $in: lowStockIds } as any }).lean().exec();
   }
 
   async findProductsWithoutImages(): Promise<ProductModel[]> {
@@ -360,7 +359,7 @@ export class ProductFilterService {
   async getProductStats(): Promise<any> {
     const total = await this.productModel.countDocuments();
     const active = await this.productModel.countDocuments({ active: true });
-    const lowStockIds = await this.productRepository.getProductIdsWithMaxStock(5);
+    const lowStockIds = await this.stockQuery.getProductIdsWithMaxStock(5);
     const lowStock = lowStockIds.length;
     const noImages = await this.productModel.countDocuments({ images: { $size: 0 } });
     return { total, active, lowStock, noImages };

@@ -1,28 +1,27 @@
 import { Injectable, Logger, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
-import axios from 'axios';
 import { IMarketplaceProductAdapter } from '../../interfaces/marketplace-product-adapter.interface';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
 import { MarketplaceDescriptionService } from '../../services/marketplace-description.service';
-import { TikTokShopAuthAdapter } from './tiktok-shop-auth.adapter';
-import { getTikTokShopBaseUrl, buildSignedParams, buildHeaders } from './tiktok-shop-utils';
+import { TikTokShopHttpClient } from './tiktok-shop-http-client';
+import { HttpAuthContext } from '../shared/marketplace-http-client';
 import { ProductDocument } from '../../../product/product-types';
 import { MarketplaceDocument } from '../../schemas/marketplace.schema';
 import { ProductRepository } from '../../../product/product.repository';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../../../stock/ports/stock-query.port';
 
 @Injectable()
 export class TikTokShopProductAdapter implements IMarketplaceProductAdapter, OnModuleInit {
   private readonly logger = new Logger(TikTokShopProductAdapter.name);
-  private readonly baseUrl = getTikTokShopBaseUrl();
   readonly name = 'TikTok Shop';
 
   constructor(
     @Inject(forwardRef(() => MarketplaceAdapterRegistry))
     private readonly registry: MarketplaceAdapterRegistry,
-    @Inject(forwardRef(() => TikTokShopAuthAdapter))
-    private readonly authAdapter: TikTokShopAuthAdapter,
     @Inject(forwardRef(() => MarketplaceDescriptionService))
     private readonly descriptionService: MarketplaceDescriptionService,
     private readonly productRepository: ProductRepository,
+    @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+    private readonly http: TikTokShopHttpClient,
   ) {}
 
   onModuleInit() {
@@ -45,14 +44,16 @@ export class TikTokShopProductAdapter implements IMarketplaceProductAdapter, OnM
     action?: string;
     title?: string;
   }> {
+    // Token/shopCipher e auth-retry vivem no TikTokShopHttpClient.
+    const ctx: HttpAuthContext = {
+      context: externalId ? 'updateProduct' : 'createProduct',
+      accountId: (product as any).accountId,
+    };
     try {
-      const token = await this.authAdapter.getValidToken('TikTok Shop');
-      const shopCipher = token.additionalData?.shopCipher;
-
       if (externalId) {
-        return await this.updateProduct(product, marketplace, externalId, token, shopCipher);
+        return await this.updateProduct(product, marketplace, externalId, ctx);
       } else {
-        return await this.createProduct(product, marketplace, token, shopCipher);
+        return await this.createProduct(product, marketplace, ctx);
       }
     } catch (error: any) {
       const errorMsg = error.response?.data ? JSON.stringify(error.response.data) : error.message;
@@ -69,11 +70,10 @@ export class TikTokShopProductAdapter implements IMarketplaceProductAdapter, OnM
   private async createProduct(
     product: ProductDocument,
     marketplace: MarketplaceDocument,
-    token: any,
-    shopCipher?: string,
+    ctx: HttpAuthContext,
   ): Promise<any> {
     // 1. Upload images
-    const imageUris = await this.uploadProductImages(product, token, shopCipher);
+    const imageUris = await this.uploadProductImages(product, ctx);
 
     // 2. Generate description
     let description = '';
@@ -90,27 +90,18 @@ export class TikTokShopProductAdapter implements IMarketplaceProductAdapter, OnM
     const payload = await this.buildCreatePayload(product, description, imageUris);
 
     // 4. Send to TikTok Shop
-    const path = '/product/202309/products';
-    const timestamp = Math.floor(Date.now() / 1000);
-    const bodyStr = JSON.stringify(payload);
-    const params = buildSignedParams(path, timestamp, token.accessToken, shopCipher, undefined, bodyStr);
-
     this.logger.log(`[TikTok Shop] Creating product: ${(product as any).name}`);
+    const data = await this.http.post('/product/202309/products', { ...ctx, context: 'createProduct' }, payload);
 
-    const response = await axios.post(`${this.baseUrl}${path}`, payload, {
-      headers: buildHeaders(token.accessToken),
-      params,
-    });
-
-    if (response.data?.code !== 0) {
-      throw new Error(`TikTok Shop API Error: ${response.data?.message || JSON.stringify(response.data)}`);
+    if (data?.code !== 0) {
+      throw new Error(`TikTok Shop API Error: ${data?.message || JSON.stringify(data)}`);
     }
 
-    const productId = response.data?.data?.product_id;
+    const productId = data?.data?.product_id;
 
     // 5. Activate the product
     if (productId) {
-      await this.activateProduct(productId, token, shopCipher);
+      await this.activateProduct(productId, ctx);
     }
 
     return {
@@ -119,7 +110,7 @@ export class TikTokShopProductAdapter implements IMarketplaceProductAdapter, OnM
       action: 'CREATE',
       title: (product as any).name || '',
       requestPayload: payload,
-      responsePayload: response.data,
+      responsePayload: data,
     };
   }
 
@@ -127,11 +118,10 @@ export class TikTokShopProductAdapter implements IMarketplaceProductAdapter, OnM
     product: ProductDocument,
     marketplace: MarketplaceDocument,
     externalId: string,
-    token: any,
-    shopCipher?: string,
+    ctx: HttpAuthContext,
   ): Promise<any> {
     // 1. Upload new images if any
-    const imageUris = await this.uploadProductImages(product, token, shopCipher);
+    const imageUris = await this.uploadProductImages(product, ctx);
 
     // 2. Generate description
     let description = '';
@@ -148,20 +138,15 @@ export class TikTokShopProductAdapter implements IMarketplaceProductAdapter, OnM
     const payload = this.buildUpdatePayload(product, description, imageUris);
 
     // 4. Send update
-    const path = `/product/202309/products/${externalId}`;
-    const timestamp = Math.floor(Date.now() / 1000);
-    const bodyStr = JSON.stringify(payload);
-    const params = buildSignedParams(path, timestamp, token.accessToken, shopCipher, undefined, bodyStr);
-
     this.logger.log(`[TikTok Shop] Updating product ${externalId}`);
+    const data = await this.http.request({
+      method: 'PUT',
+      path: `/product/202309/products/${externalId}`,
+      body: payload,
+    }, { ...ctx, context: 'updateProduct' }).then(r => r.data);
 
-    const response = await axios.put(`${this.baseUrl}${path}`, payload, {
-      headers: buildHeaders(token.accessToken),
-      params,
-    });
-
-    if (response.data?.code !== 0) {
-      throw new Error(`TikTok Shop Update Error: ${response.data?.message || JSON.stringify(response.data)}`);
+    if (data?.code !== 0) {
+      throw new Error(`TikTok Shop Update Error: ${data?.message || JSON.stringify(data)}`);
     }
 
     return {
@@ -170,30 +155,22 @@ export class TikTokShopProductAdapter implements IMarketplaceProductAdapter, OnM
       action: 'UPDATE',
       title: (product as any).name || '',
       requestPayload: payload,
-      responsePayload: response.data,
+      responsePayload: data,
     };
   }
 
   async unpublishProduct(externalId: string, marketplace: MarketplaceDocument): Promise<any> {
     try {
-      const token = await this.authAdapter.getValidToken('TikTok Shop');
-      const shopCipher = token.additionalData?.shopCipher;
-
-      const path = '/product/202309/products/deactivate';
-      const timestamp = Math.floor(Date.now() / 1000);
-      const body = { product_ids: [externalId] };
-      const bodyStr = JSON.stringify(body);
-      const params = buildSignedParams(path, timestamp, token.accessToken, shopCipher, undefined, bodyStr);
-
-      const response = await axios.post(`${this.baseUrl}${path}`, body, {
-        headers: buildHeaders(token.accessToken),
-        params,
-      });
+      const data = await this.http.post(
+        '/product/202309/products/deactivate',
+        { context: 'unpublishProduct' },
+        { product_ids: [externalId] },
+      );
 
       return {
-        success: response.data?.code === 0,
-        error: response.data?.code !== 0 ? response.data?.message : undefined,
-        result: response.data,
+        success: data?.code === 0,
+        error: data?.code !== 0 ? data?.message : undefined,
+        result: data,
       };
     } catch (error: any) {
       return {
@@ -203,44 +180,31 @@ export class TikTokShopProductAdapter implements IMarketplaceProductAdapter, OnM
     }
   }
 
-  private async activateProduct(productId: string, token: any, shopCipher?: string): Promise<void> {
+  private async activateProduct(productId: string, ctx: HttpAuthContext): Promise<void> {
     try {
-      const path = '/product/202309/products/activate';
-      const timestamp = Math.floor(Date.now() / 1000);
-      const body = { product_ids: [productId] };
-      const bodyStr = JSON.stringify(body);
-      const params = buildSignedParams(path, timestamp, token.accessToken, shopCipher, undefined, bodyStr);
-
-      await axios.post(`${this.baseUrl}${path}`, body, {
-        headers: buildHeaders(token.accessToken),
-        params,
+      await this.http.post('/product/202309/products/activate', { ...ctx, context: 'activateProduct' }, {
+        product_ids: [productId],
       });
-
       this.logger.log(`[TikTok Shop] Product ${productId} activated`);
     } catch (error: any) {
       this.logger.warn(`[TikTok Shop] Could not activate product ${productId}: ${error.message}`);
     }
   }
 
-  async uploadImage(imageUrl: string, token: any, shopCipher?: string): Promise<string | null> {
-    const path = '/product/202309/images/upload';
-    const timestamp = Math.floor(Date.now() / 1000);
-    const body = { image_url: imageUrl };
-    const bodyStr = JSON.stringify(body);
-    const params = buildSignedParams(path, timestamp, token.accessToken, shopCipher, undefined, bodyStr);
-
+  async uploadImage(imageUrl: string, ctx: HttpAuthContext): Promise<string | null> {
     try {
-      const response = await axios.post(`${this.baseUrl}${path}`, body, {
-        headers: buildHeaders(token.accessToken),
-        params,
-        timeout: 15000,
-      });
+      const data = await this.http.request({
+        method: 'POST',
+        path: '/product/202309/images/upload',
+        body: { image_url: imageUrl },
+        axiosConfig: { timeout: 15000 },
+      }, { ...ctx, context: 'uploadImage' }).then(r => r.data);
 
-      if (response.data?.code === 0 && response.data?.data?.uri) {
-        return response.data.data.uri;
+      if (data?.code === 0 && data?.data?.uri) {
+        return data.data.uri;
       }
 
-      this.logger.warn(`[TikTok Shop] Image upload failed: ${JSON.stringify(response.data)}`);
+      this.logger.warn(`[TikTok Shop] Image upload failed: ${JSON.stringify(data)}`);
       return null;
     } catch (error: any) {
       this.logger.warn(`[TikTok Shop] Image upload error for ${imageUrl}: ${error.message}`);
@@ -248,14 +212,14 @@ export class TikTokShopProductAdapter implements IMarketplaceProductAdapter, OnM
     }
   }
 
-  private async uploadProductImages(product: ProductDocument, token: any, shopCipher?: string): Promise<string[]> {
+  private async uploadProductImages(product: ProductDocument, ctx: HttpAuthContext): Promise<string[]> {
     const images = (product as any).images || [];
     const uniqueImages = [...new Set(images as string[])].slice(0, 9);
     const uris: string[] = [];
 
     for (const img of uniqueImages) {
       if (!img) continue;
-      const uri = await this.uploadImage(img, token, shopCipher);
+      const uri = await this.uploadImage(img, ctx);
       if (uri) uris.push(uri);
     }
 
@@ -266,7 +230,7 @@ export class TikTokShopProductAdapter implements IMarketplaceProductAdapter, OnM
     const p = product as any;
     const price = p.price || 0;
     const productId = (p._id || p.id)?.toString();
-    const stock = Math.max(0, await this.productRepository.calculateStock(productId));
+    const stock = Math.max(0, (await this.stockQuery.getProductStock(productId)).onHand);
 
     return {
       title: (p.name || '').slice(0, 255),

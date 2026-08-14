@@ -9,13 +9,13 @@ import { OLXReconciliationService } from './services/olx-reconciliation.service'
 import { MarketplaceIssuesService } from './services/marketplace-issues.service';
 import { PublicationFlowService } from './services/publication-flow.service';
 import { OperationalIssuesService } from './services/operational-issues.service';
-import { OrchestratorPublisherService } from './orchestrator-publisher.service';
+import { OutboxModule } from '../outbox/outbox.module';
 
 import { CategoryModel, CategorySchema } from '../product/schemas/category.schema';
 import { MarketplaceModel, MarketplaceSchema } from '../marketplace/schemas/marketplace.schema';
 import { ListingModel, ListingSchema } from '../listing/schemas/listing.schema';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
-import { StockMovementModel, StockMovementSchema } from '../product/schemas/stock-movement.schema';
+import { StockMovementModel, StockMovementSchema } from '../stock/schemas/stock-movement.schema';
 
 import { MarketplaceOrchestratorController } from './marketplace-orchestrator.controller';
 import { PublicationLogService } from '../marketplace/services/publication-log.service';
@@ -26,7 +26,28 @@ import { ProductCompatibilityModel, ProductCompatibilitySchema } from '../produc
 import { ProductModule } from '../product/product.module';
 import { GatewaysModule } from '../gateways/gateways.module';
 import { SyncResultConsumer } from './sync-result.consumer';
+import { ModerationModule } from '../moderation/moderation.module';
+import { ModerationRemovalWorker } from './workers/moderation-removal.worker';
+import { ListingModule } from '../listing/listing.module';
 
+/**
+ * Backend half of the marketplace-sync contract. This module is NOT the orchestrator itself —
+ * publication execution lives in `microservices/orchestrator` (RabbitMQ-only, no HTTP). This
+ * module owns the pieces the backend must keep because it owns the data and the HTTP surface:
+ *
+ *  - OrchestratorPublisherService  → publishes `product.sync.requested` (outbound contract).
+ *  - SyncResultConsumer            → consumes `rocket.marketplace.results`, writes ListingModel
+ *                                    + emits websocket. The data owner writes the data
+ *                                    (no shared-DB-write from the microservice).
+ *  - MarketplaceOrchestratorController + PublicationFlow/MarketplaceIssues/OperationalIssues
+ *                                    → HTTP APIs (/marketplace-orchestrator/*) consumed by the
+ *                                    mobile app; the microservice exposes no HTTP equivalent.
+ *  - OLXReconciliationService      → backend-only cron reconciling OLX imports in ListingModel.
+ *  - ListingRemovalService         → listing removal (used by product-title controller).
+ *
+ * Moderation (infractions/wrong-category/removal) lives entirely in `microservices/moderations`.
+ * The route prefix `/marketplace-orchestrator` is intentionally kept stable (frontend depends on it).
+ */
 @Module({
     imports: [
         RabbitMqModule,
@@ -44,6 +65,9 @@ import { SyncResultConsumer } from './sync-result.consumer';
         ]),
         UserProductivityModule,
         GatewaysModule,
+        OutboxModule,
+        ModerationModule,
+        ListingModule,
     ],
     controllers: [MarketplaceOrchestratorController],
     providers: [
@@ -54,14 +78,14 @@ import { SyncResultConsumer } from './sync-result.consumer';
         OLXReconciliationService,
         MarketplaceIssuesService,
         OperationalIssuesService,
-        OrchestratorPublisherService,
         SyncResultConsumer,
+        ModerationRemovalWorker,
     ],
     exports: [
         ListingRemovalService,
         MarketplaceIssuesService,
         OperationalIssuesService,
-        OrchestratorPublisherService,
+        OutboxModule,
     ],
 })
 export class MarketplaceOrchestratorModule { }

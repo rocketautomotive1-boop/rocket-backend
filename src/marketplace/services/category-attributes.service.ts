@@ -8,6 +8,7 @@ import { MarketplaceCategoryModel, MarketplaceCategoryDocument } from '../schema
 import { MarketplaceModel, MarketplaceDocument } from '../schemas/marketplace.schema';
 import { MercadoLivreService } from './mercado-livre.service';
 import { MercadoLivreAttributesService } from './mercado-livre-attributes.service';
+import { MarketplaceConfigCacheService } from './marketplace-config-cache.service';
 
 @Injectable()
 export class CategoryAttributesService {
@@ -20,10 +21,9 @@ export class CategoryAttributesService {
     private readonly marketplaceAuthService: MarketplaceAuthService,
     @InjectModel(MarketplaceCategoryModel.name)
     private marketplaceCategoryModel: Model<MarketplaceCategoryDocument>,
-    @InjectModel(MarketplaceModel.name)
-    private marketplaceModel: Model<MarketplaceDocument>,
     private mercadoLivreService: MercadoLivreService,
     private readonly mercadoLivreAttributesService: MercadoLivreAttributesService,
+    private readonly configCache: MarketplaceConfigCacheService,
   ) { }
 
   async getCategoryAttributes(categoryId: string, marketplaceId: string): Promise<any> {
@@ -32,7 +32,7 @@ export class CategoryAttributesService {
       let marketplace;
       // Check if valid ObjectId to prevent CastError if legacy ID is passed
       if (/^[0-9a-fA-F]{24}$/.test(marketplaceId)) {
-        marketplace = await this.marketplaceModel.findById(marketplaceId);
+        marketplace = await this.configCache.getById(marketplaceId);
       } else {
         // Fallback/Log for legacy
         this.logger.warn(`Invalid Hex ObjectId received: ${marketplaceId}`);

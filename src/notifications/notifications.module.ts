@@ -1,101 +1,81 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
-import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { NotificationsController } from './notifications.controller';
-import { NotificationsService } from './notifications.service';
-import { NotificationBusService } from './notification-bus.service';
-import { EmailService } from './email.service';
+import { DiscoveryModule } from '@nestjs/core';
+
 import { UserModel, UserSchema } from '../auth/schemas/user.schema';
-import { NotificationModel, NotificationSchema } from './schemas/notification.schema';
 import { AuthModule } from '../auth/auth.module';
-import { OrderModule } from '../order/order.module';
-import { MarketplaceModule } from '../marketplace/marketplace.module';
+import { NotificationModel, NotificationSchema } from './schemas/notification.schema';
+import { EmailService } from './email.service';
 
-// Order model
-import { OrderModel, OrderSchema } from '../order/schemas/order.schema';
+// Core pipeline
+import { NotificationPipelineService } from './core/notification-pipeline.service';
+import { NotificationDedupService } from './core/notification-dedup.service';
+import { AudienceResolver } from './core/audience-resolver.service';
 
-// New imports for WhatsApp
-import { PartnerModel, PartnerSchema } from './schemas/partner.schema';
-import { NotificationLogModel, NotificationLogSchema } from './schemas/notification-log.schema';
-import { BaileysWhatsAppProvider } from './providers/baileys-whatsapp.provider';
-import { WhatsAppNotificationService } from './services/whatsapp-notification.service';
-import { WhatsAppNotificationListener } from './listeners/whatsapp-notification.listener';
-import { WhatsAppCancellationListener } from './listeners/whatsapp-cancellation.listener';
-import { WhatsAppQueueWorker } from './workers/whatsapp-queue.worker';
-import { WhatsAppController } from './controllers/whatsapp.controller';
+// Channels
+import { NotificationChannelRegistry } from './channels/notification-channel.registry';
+import { PushChannel } from './channels/push.channel';
+import { WebsocketChannel } from './channels/websocket.channel';
+import { EmailChannel } from './channels/email.channel';
+import { WhatsappChannel } from './channels/whatsapp.channel';
 
-// Bot
-import { WhatsAppCommandRouter }     from './bot/whatsapp-command.router';
+// Delivery
+import { DeliveryStatusService } from './delivery/delivery-status.service';
+import { DeliveryRetryWorker } from './delivery/delivery-retry.worker';
+
+// Gateway / read / device / ingest
+import { NotificationsGateway } from './gateway/notifications.gateway';
+import { NotificationReadService } from './read/notification-read.service';
+import { NotificationsController } from './read/notifications.controller';
+import { DeviceTokenService } from './device/device-token.service';
+import { DeviceController } from './device/device.controller';
+import { OrderNotificationTranslator } from './ingest/order-notification.translator';
+
+// WhatsApp transport (port-only consumer — no Baileys/queue knowledge here)
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+
+// Bot (broker side): router + dispatcher + session + inbound listener. Consome read-ports
+// (SALES/BALANCE/PRODUCT_INFO) implementados por Order/MarketplaceAuth/Product — importados
+// só para receber os tokens. NÃO injeta OrderModel/ProductModel nem serviços concretos.
+import { WhatsAppCommandRouter } from './bot/whatsapp-command.router';
 import { WhatsAppCommandDispatcher } from './bot/whatsapp-command.dispatcher';
-import { WhatsAppCommandListener }   from './bot/whatsapp-command.listener';
-import { BalanceMlQuery }            from './bot/queries/balance-ml.query';
-import { SalesQuery }                from './bot/queries/sales.query';
-import { PendingOrdersQuery }        from './bot/queries/pending-orders.query';
-import { MovementsMlQuery }          from './bot/queries/movements-ml.query';
-import { ProductSearchQuery } from './bot/queries/product-search.query';
 import { WhatsAppCommandSession } from './bot/whatsapp-command.session';
-import { NotificationReconcilerService } from './services/notification-reconciler.service';
-import { DailyReportService } from './services/daily-report.service';
-import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
-import { StockMovementModel, StockMovementSchema } from '../product/schemas/stock-movement.schema';
+import { WhatsAppCommandListener } from './bot/whatsapp-command.listener';
+import { OrderModule } from '../order/order.module';
+import { ProductModule } from '../product/product.module';
+import { MarketplaceAuthModule } from '../marketplace/auth/marketplace-auth.module';
 
 @Module({
   imports: [
     ConfigModule,
+    DiscoveryModule,
+    AuthModule,
+    WhatsAppModule, // WHATSAPP_PORT (canal WhatsApp + bot reply)
+    // Read-ports do bot (tokens exportados por estes módulos). Acíclico: nenhum deles
+    // importa NotificationsModule de volta.
+    OrderModule,
+    ProductModule,
+    MarketplaceAuthModule,
     MongooseModule.forFeature([
       { name: UserModel.name, schema: UserSchema },
       { name: NotificationModel.name, schema: NotificationSchema },
-      { name: OrderModel.name, schema: OrderSchema },
-      { name: PartnerModel.name, schema: PartnerSchema },
-      { name: NotificationLogModel.name, schema: NotificationLogSchema },
-      { name: ProductModel.name, schema: ProductSchema },
-      { name: StockMovementModel.name, schema: StockMovementSchema },
     ]),
-    AuthModule,
-    OrderModule,
-    MarketplaceModule,
   ],
-  controllers: [NotificationsController, WhatsAppController],
+  controllers: [NotificationsController, DeviceController],
   providers: [
-    NotificationsService,
-    NotificationBusService,
+    // Core
+    NotificationPipelineService, NotificationDedupService, AudienceResolver,
+    // Channels
+    NotificationChannelRegistry, PushChannel, WebsocketChannel, EmailChannel, WhatsappChannel,
+    // Delivery
+    DeliveryStatusService, DeliveryRetryWorker,
+    // Gateway / read / device / ingest
+    NotificationsGateway, NotificationReadService, DeviceTokenService, OrderNotificationTranslator,
     EmailService,
-    // WhatsApp provider (conditional based on WHATSAPP_ENABLED)
-    {
-      provide: BaileysWhatsAppProvider,
-      useFactory: (configService: ConfigService, eventEmitter: EventEmitter2) => {
-        const enabled = configService.get<string>('WHATSAPP_ENABLED', 'true') !== 'false';
-        if (!enabled) {
-          return {
-            isConnected: () => false,
-            sendMessage: async () => {},
-            getStatus: async () => ({ connected: false, message: 'WhatsApp disabled' }),
-            listGroups: async () => [],
-          } as any;
-        }
-        return new BaileysWhatsAppProvider(configService, eventEmitter);
-      },
-      inject: [ConfigService, EventEmitter2],
-    },
-    WhatsAppNotificationService,
-    WhatsAppNotificationListener,
-    WhatsAppCancellationListener,
-    WhatsAppQueueWorker,
-    // Bot providers
-    WhatsAppCommandRouter,
-    WhatsAppCommandDispatcher,
-    WhatsAppCommandSession,
-    WhatsAppCommandListener,
-    BalanceMlQuery,
-    SalesQuery,
-    PendingOrdersQuery,
-    MovementsMlQuery,
-    ProductSearchQuery,
-    NotificationReconcilerService,
-    DailyReportService,
+    // Bot (broker side)
+    WhatsAppCommandRouter, WhatsAppCommandDispatcher, WhatsAppCommandSession, WhatsAppCommandListener,
   ],
-  exports: [NotificationsService, NotificationBusService, EmailService, WhatsAppNotificationService],
+  exports: [NotificationReadService, EmailService],
 })
-export class NotificationsModule { }
+export class NotificationsModule {}

@@ -5,14 +5,15 @@ import {
   MicroserviceHealthIndicator,
   MongooseHealthIndicator,
   HttpHealthIndicator,
-  //ElasticsearchHealthIndicator,
   MemoryHealthIndicator,
   DiskHealthIndicator,
 } from '@nestjs/terminus';
 import { Transport } from '@nestjs/microservices';
 import { ConfigService } from '@nestjs/config';
 import { S3HealthIndicator } from './indicators/s3.health';
+import { SkipJwtAuth } from '../auth/decorators/skip-jwt-auth.decorator';
 
+@SkipJwtAuth()
 @Controller('health')
 export class HealthController {
   constructor(
@@ -20,12 +21,21 @@ export class HealthController {
     private microservice: MicroserviceHealthIndicator,
     private mongoose: MongooseHealthIndicator,
     private http: HttpHealthIndicator,
-  // private elasticsearch: ElasticsearchHealthIndicator,
     private memory: MemoryHealthIndicator,
     private disk: DiskHealthIndicator,
     private s3: S3HealthIndicator,
     private configService: ConfigService,
   ) {}
+
+  /** Checagem leve — só confirma que o processo está de pé e respondendo.
+   *  Não depende de Mongo/RabbitMQ/S3/APIs externas, então não reflete
+   *  degradação de integrações (isso é o que o check() completo faz).
+   *  Usado pelo boot do app mobile como "servidor alcançável", que não deve
+   *  falhar por causa de credenciais de marketplace ainda não configuradas. */
+  @Get('ping')
+  ping() {
+    return { status: 'ok' };
+  }
 
   @Get()
   @HealthCheck()
@@ -43,10 +53,7 @@ export class HealthController {
           },
         }),
 
-      // 3. Mecanismo de Busca (Elasticsearch)
-      //() => this.elasticsearch.pingCheck('elasticsearch'),
-
-      // 4. Armazenamento de Arquivos (AWS S3)
+      // 3. Armazenamento de Arquivos (AWS S3)
       () => this.s3.isHealthy('aws-s3'),
 
       // 5. APIs Externas (Marketplaces)

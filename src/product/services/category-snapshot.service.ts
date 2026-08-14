@@ -3,10 +3,13 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { MlAttributeHydrationService } from '../../marketplace/services/ml-attribute-hydration.service';
 import { CategoryService } from '../../marketplace/services/category.service';
+import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
 import type {
   CategorySnapshotDto,
   HydratedCategoryDto,
   MlSnapshotStateDto,
+  MlPublishPayloadDto,
+  MlResolutionDto,
 } from '../dto/category-snapshot.dto';
 
 @Injectable()
@@ -16,10 +19,10 @@ export class CategorySnapshotService {
   constructor(
     @InjectModel('ProductModel') private readonly productModel: Model<any>,
     @InjectModel('CategoryModel') private readonly categoryModel: Model<any>,
-    @InjectModel('MarketplaceModel') private readonly marketplaceModel: Model<any>,
     @InjectModel('ProductDiscoveryModel') private readonly discoveryModel: Model<any>,
     private readonly mlHydration: MlAttributeHydrationService,
     private readonly categoryService: CategoryService,
+    private readonly configCache: MarketplaceConfigCacheService,
   ) {}
 
   async buildForProduct(productId: string): Promise<CategorySnapshotDto> {
@@ -35,7 +38,7 @@ export class CategorySnapshotService {
         .sort({ createdAt: -1 })
         .lean()
         .exec(),
-      this.marketplaceModel.findOne({ name: 'Mercado Livre' }).lean().exec(),
+      this.configCache.getByName('Mercado Livre'),
     ]);
     if (!product) throw new NotFoundException(`Product not found: ${productId}`);
 
@@ -46,17 +49,90 @@ export class CategorySnapshotService {
     const resolvedCategory = resolvedCategoryId
       ? await this.hydrateInternalCategory(new Types.ObjectId(resolvedCategoryId))
       : null;
+    // category_id do ML (do discovery) — permite o auto-cadastro da categoria via IA
+    // quando não há categoria interna nem resolvedCategoryId.
+    const mlCategoryId: string | null = discoveryDoc?.final?.mlCategoryId ?? null;
 
-    const ml = internalCategory && mlMarketplace
-      ? await this.buildMlState(product, internalCategory, String(mlMarketplace._id))
-      : null;
+    const { ml, resolution } = internalCategory && mlMarketplace
+      ? await this.resolveMl(product, internalCategory, String(mlMarketplace._id))
+      : { ml: null, resolution: { status: 'no_category' as const, mlCategoryId: null } };
 
     return {
       productId: String(productId),
       product,
       internalCategory,
-      discovery: { resolvedCategoryId, resolvedCategory },
+      discovery: { resolvedCategoryId, resolvedCategory, mlCategoryId },
       ml,
+      mlResolution: resolution,
+    };
+  }
+
+  /**
+   * Resolve o estado ML da categoria interna E o diagnóstico de resolução num só
+   * passo. O diagnóstico é a fonte de verdade para o fluxo centralizado saber o que
+   * fazer quando não há atributos (sem mapping / mapping não-folha / pronto).
+   */
+  private async resolveMl(
+    product: any,
+    hydratedCategory: HydratedCategoryDto,
+    marketplaceId: string,
+  ): Promise<{ ml: MlSnapshotStateDto | null; resolution: MlResolutionDto }> {
+    const mapping = (hydratedCategory.marketplaceMappings ?? []).find(
+      (m: any) => String(m.marketplaceId) === marketplaceId,
+    );
+    const externalCategoryId = String(
+      mapping?.externalId ?? mapping?.id ?? mapping?.categoryResult?.category_id ?? '',
+    ).trim();
+
+    // Sem nenhum mapping ML → categoria interna não é publicável até resolver.
+    if (!externalCategoryId) {
+      return { ml: null, resolution: { status: 'unmapped', mlCategoryId: null } };
+    }
+
+    // Mapping é nó NÃO-folha (ML só publica em folha) → precisa descer até a folha.
+    // `isLeaf === false` é sinal explícito; `listingAllowed === false` idem.
+    const isNonLeaf = mapping?.isLeaf === false || mapping?.listingAllowed === false;
+    if (isNonLeaf) {
+      return { ml: null, resolution: { status: 'needs_leaf', mlCategoryId: externalCategoryId } };
+    }
+
+    const ml = await this.buildMlState(product, externalCategoryId, marketplaceId);
+    if (!ml) {
+      // Tinha externalId folha mas o schema não carregou (falha ML transitória) →
+      // trata como needs_leaf p/ o fluxo tentar resolver/reprocessar, não como pronto.
+      return { ml: null, resolution: { status: 'needs_leaf', mlCategoryId: externalCategoryId } };
+    }
+    return { ml, resolution: { status: 'ready', mlCategoryId: externalCategoryId } };
+  }
+
+  /**
+   * Payload canônico de publicação ML para o orchestrator. Resolve o schema ML da
+   * categoria interna e hidrata TODOS os atributos (incl. obrigatórios: PART_NUMBER,
+   * BRAND, GTIN, dimensões) a partir do estado atual do produto — a mesma lógica que
+   * alimenta o snapshot do app. Resolvido na leitura, nada materializado (zero stale).
+   * Retorna `null` quando não há categoria interna ou schema ML (fail-closed no worker).
+   */
+  async resolveMlPublish(
+    productId: string,
+    marketplaceId: string,
+  ): Promise<MlPublishPayloadDto | null> {
+    if (!Types.ObjectId.isValid(productId)) return null;
+    const product = await this.productModel
+      .findById(new Types.ObjectId(productId))
+      .lean()
+      .exec();
+    if (!product) return null;
+
+    const internalCategory = await this.hydrateInternalCategory(product.category);
+    if (!internalCategory) return null;
+
+    const { ml } = await this.resolveMl(product, internalCategory, marketplaceId);
+    if (!ml) return null;
+
+    return {
+      externalCategoryId: ml.externalCategoryId,
+      attributes: ml.attributesPayload,
+      missing: ml.missing,
     };
   }
 
@@ -81,18 +157,9 @@ export class CategorySnapshotService {
 
   private async buildMlState(
     product: any,
-    hydratedCategory: HydratedCategoryDto,
+    externalCategoryId: string,
     marketplaceId: string,
   ): Promise<MlSnapshotStateDto | null> {
-    const mapping = (hydratedCategory.marketplaceMappings ?? []).find(
-      (m: any) => String(m.marketplaceId) === marketplaceId,
-    );
-    const externalCategoryId = String(
-      mapping?.externalId
-        ?? mapping?.id
-        ?? mapping?.categoryResult?.category_id
-        ?? '',
-    ).trim();
     if (!externalCategoryId) return null;
 
     let mlSchema: any[] | null = null;

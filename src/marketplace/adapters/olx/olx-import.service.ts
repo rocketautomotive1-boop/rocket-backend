@@ -222,7 +222,7 @@ export class OLXImportService {
           },
           phone: 81996518865,
           type: 's',
-          price: (product as any).price || (product as any).costPrice,
+          price: (product as any).price, // never publish at cost
           zipcode: '50720110',
           phone_hidden: true,
           images: product.images?.map(img => img.url) || [],

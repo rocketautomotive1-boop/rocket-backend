@@ -2,7 +2,7 @@ import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { MarketplaceModel, MarketplaceDocument } from '../schemas/marketplace.schema';
-import { MarketplaceToken, MarketplaceTokenDocument } from '../schemas/marketplace-token.schema';
+import { MarketplaceConfigCacheService } from './marketplace-config-cache.service';
 
 @Injectable()
 export class MarketplaceRegistryService {
@@ -10,11 +10,16 @@ export class MarketplaceRegistryService {
 
     constructor(
         @InjectModel(MarketplaceModel.name) private marketplaceModel: Model<MarketplaceDocument>,
-        @InjectModel(MarketplaceToken.name) private tokenModel: Model<MarketplaceTokenDocument>,
+        private readonly cache: MarketplaceConfigCacheService,
     ) { }
 
+    /**
+     * Leituras servem da camada de cache de config (POJOs congelados, sem token).
+     * NÃO use o retorno destes métodos para mutar+`.save()` — os métodos de
+     * escrita abaixo buscam o doc mongoose vivo direto do model.
+     */
     async findAll(): Promise<MarketplaceDocument[]> {
-        return this.marketplaceModel.find().exec();
+        return (await this.cache.getAll()) as unknown as MarketplaceDocument[];
     }
 
     /**
@@ -43,43 +48,33 @@ export class MarketplaceRegistryService {
             return null;
         }
 
-        const marketplace = await this.marketplaceModel.findById(id).exec();
-
-        if (marketplace) {
-            // We might want to separate token fetching, but keeping it here for now to match legacy behavior
-            const tokens = await this.tokenModel.find({ marketplaceId: marketplace._id as any }).sort({ createdAt: -1 }).exec();
-            (marketplace as any).tokens = tokens;
-        }
-
-        return marketplace;
+        // Token/credenciais vêm embarcados no próprio doc (marketplaces.accounts[]).
+        // Servido do cache de config (sem token volátil); leitura de token tem
+        // caminho próprio ao vivo no TokenBrokerService.
+        return (await this.cache.getById(id)) as unknown as MarketplaceDocument;
     }
 
 
     async findByTag(tag: string): Promise<MarketplaceDocument> {
-        const marketplace = await this.marketplaceModel.findOne({ tag }).exec();
-
-        if (marketplace) {
-            const tokens = await this.tokenModel.find({ marketplaceId: marketplace._id as any }).sort({ createdAt: -1 }).exec();
-            (marketplace as any).tokens = tokens;
-        }
-
-        return marketplace;
+        return (await this.cache.getByTag(tag)) as unknown as MarketplaceDocument;
     }
 
     async findByName(name: string): Promise<MarketplaceDocument> {
-        const marketplace = await this.marketplaceModel.findOne({ name }).exec();
+        return (await this.cache.getByName(name)) as unknown as MarketplaceDocument;
+    }
 
-        if (marketplace) {
-            const tokens = await this.tokenModel.find({ marketplaceId: marketplace._id as any }).sort({ createdAt: -1 }).exec();
-            (marketplace as any).tokens = tokens;
-        }
-
+    /** Doc mongoose VIVO (não cacheado) — para os caminhos de escrita que mutam+salvam. */
+    private async findLiveOrThrow(id: string): Promise<MarketplaceDocument> {
+        const marketplace = await this.marketplaceModel.findById(id).exec();
+        if (!marketplace) throw new BadRequestException('Marketplace not found');
         return marketplace;
     }
 
     async create(data: any): Promise<MarketplaceDocument> {
         const marketplace = new this.marketplaceModel(data);
-        return marketplace.save();
+        const saved = await marketplace.save();
+        this.cache.invalidate();
+        return saved;
     }
 
     async update(id: string, data: any): Promise<MarketplaceDocument> {
@@ -91,41 +86,43 @@ export class MarketplaceRegistryService {
             throw new BadRequestException('Marketplace not found');
         }
 
+        this.cache.invalidate();
         return marketplace;
     }
 
     async remove(id: string): Promise<void> {
         await this.marketplaceModel.findByIdAndDelete(id).exec();
+        this.cache.invalidate();
     }
 
     async addRequirement(marketplaceId: string, data: any): Promise<any> {
-        const marketplace = await this.findOne(marketplaceId);
-        if (!marketplace) throw new BadRequestException('Marketplace not found');
+        const marketplace = await this.findLiveOrThrow(marketplaceId);
 
         if (!marketplace.requirements) marketplace.requirements = [];
         marketplace.requirements.push(data);
         await marketplace.save();
+        this.cache.invalidate();
         return marketplace.requirements[marketplace.requirements.length - 1];
     }
 
     async updateRequirement(marketplaceId: string, fieldName: string, data: any): Promise<any> {
-        const marketplace = await this.findOne(marketplaceId);
-        if (!marketplace) throw new BadRequestException('Marketplace not found');
+        const marketplace = await this.findLiveOrThrow(marketplaceId);
 
         const index = marketplace.requirements.findIndex((r: any) => r.fieldName === fieldName);
         if (index === -1) throw new BadRequestException('Requirement not found');
 
         marketplace.requirements[index] = { ...(marketplace.requirements[index] as any).toObject(), ...data };
         await marketplace.save();
+        this.cache.invalidate();
         return marketplace.requirements[index];
     }
 
     async removeRequirement(marketplaceId: string, fieldName: string): Promise<void> {
-        const marketplace = await this.findOne(marketplaceId);
-        if (!marketplace) throw new BadRequestException('Marketplace not found');
+        const marketplace = await this.findLiveOrThrow(marketplaceId);
 
         marketplace.requirements = marketplace.requirements.filter((r: any) => r.fieldName !== fieldName);
         await marketplace.save();
+        this.cache.invalidate();
     }
 
     async getRequirements(marketplaceId: string): Promise<any[]> {

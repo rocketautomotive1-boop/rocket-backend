@@ -14,7 +14,6 @@ export class MarketplaceIntegrationHelperService {
   private readonly logger = new Logger(MarketplaceIntegrationHelperService.name);
 
   constructor(
-    @Inject(forwardRef(() => MarketplaceAuthService))
     private readonly marketplaceAuthService: MarketplaceAuthService,
     private readonly marketplaceRegistry: MarketplaceRegistryService,
 

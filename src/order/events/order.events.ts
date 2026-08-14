@@ -19,9 +19,73 @@ export const ORDER_EVENTS = {
     CANCELLED: 'order.cancelled',
     PROCESSED: 'order.processed',
     PRICING_CALCULATED: 'order.pricing.calculated',
-    SYNC_COMPLETED: 'order.sync.completed',
-    SYNC_FAILED: 'order.sync.failed',
+    /**
+     * Venda pronta para notificação: financeiro já resolvido e snapshot persistido
+     * pelo domínio (order/). Payload autocontido — o broker (notifications) só formata
+     * e roteia para os canais. Mantém o transporte/canal sem acoplamento a order.
+     */
+    SALE_NOTIFICATION: 'order.sale.notification',
+    /**
+     * Envio do pedido avançou para um MARCO de logística (shipped/out_for_delivery/
+     * delivered/not_delivered/returning_to_sender). Emitido pelo pipeline em UPDATE_SHIPPING.
+     * Payload autocontido — notifications só monta o NotificationRequested (canal sino/app).
+     */
+    SHIPPING_UPDATED: 'order.shipping.updated',
 };
+
+/** Marcos de envio que geram notificação. Outras transições são persistidas mas silenciosas. */
+export const SHIPPING_MILESTONES = new Set([
+    'shipped',
+    'out_for_delivery',
+    'delivered',
+    'not_delivered',
+    'returning_to_sender',
+]);
+
+export class OrderShippingUpdatedEvent {
+    constructor(
+        public readonly orderId: string,
+        public readonly externalId: string,
+        public readonly marketplaceId: string,
+        public readonly marketplaceName: string,
+        public readonly substatus: string,
+        public readonly trackingCode: string | null,
+        public readonly triggeredBy: 'webhook' | 'reconcile' | 'gap-detector' | 'sync' | 'retry' | 'manual',
+    ) {}
+}
+
+export interface OrderSaleNotificationFinancial {
+    gross: number;
+    saleFee: number;
+    freight: number;
+    taxes: number;
+    coupon: number;
+    net: number;
+    costTotal: number;
+    grossProfit: number;
+    marginPct: number;
+}
+
+/**
+ * Evento autocontido de venda para notificação. Tudo que o formatter precisa já
+ * vem resolvido — notifications NÃO lê OrderModel nem chama serviços de order.
+ */
+export class OrderSaleNotificationEvent {
+    constructor(
+        public readonly orderId: string,
+        public readonly externalId: string,
+        public readonly marketplace: string,
+        public readonly createdAt: string,
+        public readonly buyerName: string,
+        public readonly firstItemTitle: string,
+        public readonly extraItemsCount: number,
+        public readonly firstQty: number,
+        public readonly firstUnitPrice: number,
+        public readonly itemsTotal: number,
+        public readonly financial: OrderSaleNotificationFinancial,
+        public readonly triggeredBy: 'webhook' | 'sync' | 'retry' | 'manual' = 'sync',
+    ) {}
+}
 
 export class OrderCancelledEvent {
     constructor(
@@ -33,7 +97,14 @@ export class OrderCancelledEvent {
         public readonly cancelReason: string | null,
         public readonly cancelledBy: string | null, // 'buyer' | 'seller' | 'system'
         public readonly stockReverted: boolean,
-        public readonly triggeredBy: 'webhook' | 'sync',
+        // Fonte da detecção. 'webhook'/'reconcile'/'gap-detector' = real-time (notifica
+        // WhatsApp); 'sync' = fix em massa (silencioso). Mantido como string ampla.
+        public readonly triggeredBy: 'webhook' | 'reconcile' | 'gap-detector' | 'sync',
+        // Contexto autocontido p/ a mensagem (notifications não lê OrderModel).
+        public readonly firstItemTitle?: string,
+        public readonly firstQty?: number,
+        public readonly extraItemsCount?: number,
+        public readonly soldAt?: string | null, // marketplaceCreatedAt (data real da venda)
     ) {}
 }
 

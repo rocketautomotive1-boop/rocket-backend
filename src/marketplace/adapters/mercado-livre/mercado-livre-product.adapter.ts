@@ -1,9 +1,4 @@
-import { forwardRef, Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import axios from 'axios';
-import { MercadoLivreAuthAdapter } from './mercado-livre-auth.adapter';
-import { ProductService } from '../../../product/product.service';
-import { MarketplaceService } from '../../services/marketplace.service';
-import { MarketplaceIntegrationHelperService } from '../../services/marketplace-integration-helper.service';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { MarketplaceDescriptionService } from '../../services/marketplace-description.service';
 import { IMarketplaceProductAdapter } from '../../interfaces/marketplace-product-adapter.interface';
 import { MarketplaceDocument } from '../../schemas/marketplace.schema';
@@ -11,6 +6,8 @@ import { ProductDocument } from '../../../product/product-types';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
 import { MercadoLivreListingAdapter } from './mercado-livre-listing.adapter';
 import { ListingService } from '../../../listing/listing.service'; // [NEW] Import
+import { MlHttpClient } from './ml-http-client';
+import { HttpAuthContext } from '../shared/marketplace-http-client';
 
 interface InventoryData {
   priceSale?: number;
@@ -24,23 +21,19 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
   private readonly logger = new Logger(MercadoLivreProductAdapter.name);
 
   constructor(
-    @Inject(forwardRef(() => MercadoLivreAuthAdapter))
-    private readonly authAdapter: MercadoLivreAuthAdapter,
-    @Inject(forwardRef(() => ProductService))
-    private readonly productService: ProductService,
-    @Inject(forwardRef(() => MarketplaceService))
-    private readonly marketplaceService: MarketplaceService,
-    @Inject(forwardRef(() => MarketplaceIntegrationHelperService))
-    private readonly helperService: MarketplaceIntegrationHelperService,
-    @Inject(forwardRef(() => MarketplaceDescriptionService))
     private readonly descriptionService: MarketplaceDescriptionService,
     private readonly registry: MarketplaceAdapterRegistry,
     private readonly listingAdapter: MercadoLivreListingAdapter,
     private readonly listingService: ListingService, // [NEW] Inject ListingService
+    private readonly http: MlHttpClient,
   ) { }
 
-  private baseUrl = 'https://api.mercadolibre.com';
   private name = 'Mercado Livre';
+
+  /** Contexto de auth p/ o MlHttpClient. Publicação é saída → roteia por domínio. */
+  private ctx(context: string, domain?: string): HttpAuthContext {
+    return { context, domain };
+  }
 
   /** Log de resposta da API ML (envio); trunca payloads muito grandes. */
   private logMlSendResponse(
@@ -84,53 +77,20 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
   }
 
   async getListingDetail(externalId: string): Promise<any> {
-    const token = await this.authAdapter.getValidToken(this.name);
-    return this.getItem(externalId, token);
+    return this.getItem(externalId);
   }
 
-
-  async getItem(externalId: string, accessToken: string): Promise<any> {
+  async getItem(externalId: string): Promise<any> {
     try {
-      const response = await axios.get(
-        `${this.baseUrl}/items/${externalId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
-        }
-      );
-
-      return response.data;
+      return await this.http.get<any>(`/items/${externalId}`, this.ctx('getItem'));
     } catch (error) {
-      // Enhanced Error Logging
       const errorData = error.response?.data;
       const status = error.response?.status;
-
       if (status === 403) {
-        // Return detailed error for 403 without retry
         throw new Error(`Falha ao consultar item no Mercado Livre (403): ${JSON.stringify(errorData || error.message)}`);
       }
-
-      if (status === 401) {
-        try {
-          const mlMarketplace = await this.marketplaceService.findByName('Mercado Livre');
-          if (mlMarketplace) {
-            const newToken = await this.marketplaceService.refreshToken(mlMarketplace.id);
-            const retryResponse = await axios.get(
-              `${this.baseUrl}/items/${externalId}`,
-              {
-                headers: {
-                  'Authorization': `Bearer ${newToken.accessToken}`,
-                  'Content-Type': 'application/json',
-                },
-              }
-            );
-            return retryResponse.data;
-          }
-        } catch (refreshError) {
-          // Silent fail
-        }
-      }
+      // 401 já foi tratado (refresh+retry) pelo MlHttpClient; se chegou aqui, propaga.
+      if (status === 401) throw error;
       throw new Error(`Falha ao consultar item no Mercado Livre: ${JSON.stringify(errorData || error.message)}`);
     }
   }
@@ -194,12 +154,12 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
   }
 
   async updateProductConditional(externalId: string, mlData: any): Promise<any> {
-    const token = mlData.accessToken;
+    const ctx = this.ctx('updateProductConditional', mlData?.domain);
     const dataToUpdate = { ...mlData };
     delete dataToUpdate.accessToken;
 
     try {
-      const itemData = await this.getItem(externalId, token);
+      const itemData = await this.getItem(externalId);
       const { restrictions } = this.canUpdateItem(itemData);
       const filteredData = this.filterUpdatableFields(dataToUpdate, restrictions);
 
@@ -223,16 +183,14 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
         };
       }
 
-      const updateResponse = await axios.put(`${this.baseUrl}/items/${externalId}`, filteredData, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      const updateResponse = await this.http.request<any>(
+        { method: 'PUT', path: `/items/${externalId}`, body: filteredData },
+        ctx,
+      );
 
       this.logMlSendResponse(
         'PUT /items/:id (updateProductConditional)',
-        { externalId, url: `${this.baseUrl}/items/${externalId}` },
+        { externalId, url: `/items/${externalId}` },
         updateResponse.status,
         updateResponse.data,
       );
@@ -252,14 +210,7 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
           `[ML API erro] PUT /items/:id updateProductConditional externalId=${externalId} status=${error.response.status} data=${JSON.stringify(error.response.data)}`,
         );
       }
-      if (error.response?.status === 401) {
-        const mlMarketplace = await this.marketplaceService.findByName(this.name);
-        if (mlMarketplace) {
-          const newToken = await this.marketplaceService.refreshToken(mlMarketplace.id);
-          mlData.accessToken = newToken.accessToken;
-          return this.updateProductConditional(externalId, mlData);
-        }
-      }
+      // 401 → propaga p/ o auth-retry (updateProductConditional) renovar e retentar.
       throw error;
     }
   }
@@ -377,11 +328,6 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
 
   async publishProduct(product: ProductDocument, marketplace: MarketplaceDocument, externalId?: string): Promise<any> {
     try {
-      const token = await this.authAdapter.getValidToken(this.name);
-      if (!token) {
-        throw new Error('Token de acesso não disponível para o Mercado Livre');
-      }
-
       const results = [];
 
       // [REF] Fetch listings from service instead of embedded array
@@ -397,21 +343,21 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
         titles.push({ title: product.name, marketplaceId: marketplace.id } as any);
       }
 
+      // Publicação é SAÍDA → roteia a conta pelo domínio do produto. Token/
+      // refresh/retry ficam no MlHttpClient (via ctx com domain).
+      const ctx = this.ctx('publishProduct', (product as any).domain);
+
       for (const title of titles) {
         try {
-          let result;
-
           let finalExternalId = title.externalId;
 
           if (!finalExternalId && titles.length === 1 && externalId) {
             finalExternalId = externalId;
           }
 
-          if (finalExternalId) {
-            result = await this.updateExistingProduct({ ...title, externalId: finalExternalId }, product, token);
-          } else {
-            result = await this.createNewProduct(title, product, token);
-          }
+          const result = finalExternalId
+            ? await this.updateExistingProduct({ ...title, externalId: finalExternalId }, product, ctx)
+            : await this.createNewProduct(title, product, ctx);
           results.push(result);
         } catch (error: any) {
           results.push({ success: false, error: error.message, title: title.title });
@@ -435,8 +381,8 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
     }
   }
 
-  private async updateExistingProduct(title: any, product: any, token: string): Promise<any> {
-    const itemData = await this.getItem(title.externalId, token);
+  private async updateExistingProduct(title: any, product: any, ctx: HttpAuthContext): Promise<any> {
+    const itemData = await this.getItem(title.externalId);
     const { restrictions } = this.canUpdateItem(itemData);
     const mlData = this.buildMercadoLivreUpdateData(title, product);
     let filteredData = this.filterUpdatableFields(mlData, restrictions);
@@ -461,21 +407,19 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
     }
 
     try {
-      const updateResponse = await axios.put(`${this.baseUrl}/items/${title.externalId}`, filteredData, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      const updateResponse = await this.http.request<any>(
+        { method: 'PUT', path: `/items/${title.externalId}`, body: filteredData },
+        ctx,
+      );
 
       this.logMlSendResponse(
         'PUT /items/:id (updateExistingProduct)',
-        { externalId: title.externalId, url: `${this.baseUrl}/items/${title.externalId}` },
+        { externalId: title.externalId, url: `/items/${title.externalId}` },
         updateResponse.status,
         updateResponse.data,
       );
 
-      await this.updateProductDescription(title.externalId, product, title, token);
+      await this.updateProductDescription(title.externalId, product, title, ctx);
 
       return {
         success: true,
@@ -490,13 +434,9 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
           `[ML API erro] PUT /items/:id updateExistingProduct externalId=${title.externalId} status=${error.response.status} data=${JSON.stringify(error.response.data)}`,
         );
       }
-      if (error.response?.status === 401) {
-        const mlMarketplace = await this.marketplaceService.findByName('Mercado Livre');
-        if (mlMarketplace) {
-          const newToken = await this.marketplaceService.refreshToken(mlMarketplace.id);
-          return this.updateExistingProduct(title, product, newToken.accessToken);
-        }
-      }
+      // 401 → o auth-retry canônico (em publishProduct) já força refresh da
+      // conta do domínio e retenta; aqui só reportamos o erro.
+      if (error.response?.status === 401) throw error;
 
       return {
         success: false,
@@ -508,24 +448,22 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
     }
   }
 
-  private async createNewProduct(title: any, product: any, token: string): Promise<any> {
+  private async createNewProduct(title: any, product: any, ctx: HttpAuthContext): Promise<any> {
     const mlData = this.buildMercadoLivreCreateData(title, product);
     try {
-      const createResponse = await axios.post(`${this.baseUrl}/items`, mlData, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      const createResponse = await this.http.request<any>(
+        { method: 'POST', path: `/items`, body: mlData },
+        ctx,
+      );
 
       this.logMlSendResponse(
         'POST /items (createNewProduct)',
-        { url: `${this.baseUrl}/items` },
+        { url: `/items` },
         createResponse.status,
         createResponse.data,
       );
 
-      await this.updateProductDescription(createResponse.data.id, product, title, token);
+      await this.updateProductDescription(createResponse.data.id, product, title, ctx);
 
       return {
         success: true,
@@ -540,17 +478,8 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
           `[ML API erro] POST /items createNewProduct status=${error.response.status} data=${JSON.stringify(error.response.data)}`,
         );
       }
-      if (error.response?.status === 401) {
-        try {
-          const mlMarketplace = await this.marketplaceService.findByName('Mercado Livre');
-          if (mlMarketplace) {
-            const newToken = await this.marketplaceService.refreshToken(mlMarketplace.id);
-            return this.createNewProduct(title, product, newToken.accessToken);
-          }
-        } catch (refreshError: any) {
-          // Silent fail
-        }
-      }
+      // 401 → tratado pelo auth-retry canônico (em publishProduct); só reporta.
+      if (error.response?.status === 401) throw error;
 
       return {
         success: false,
@@ -591,7 +520,7 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
 
   private buildMercadoLivreCreateData(title: any, product: any): any {
     const availableQty = Number(product.quantity ?? 0);
-    const finalPrice = this.validateAndConvertPrice(product.price || (product as any).costPrice || 0);
+    const finalPrice = this.validateAndConvertPrice(product.price || 0); // never publish at cost
 
     return {
       title: title.title,
@@ -610,7 +539,7 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
 
   private buildMercadoLivreUpdateData(title: any, product: any): any {
     const availableQty = Number(product.quantity ?? 0);
-    const finalPrice = this.validateAndConvertPrice(product.price || (product as any).costPrice || 0);
+    const finalPrice = this.validateAndConvertPrice(product.price || 0); // never publish at cost
     const finalTitle = title.title || product.name;
 
     const updateData = {
@@ -633,22 +562,18 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
     return this.buildMercadoLivreCreateData(title, product);
   }
 
-  private async updateProductDescription(externalId: string, product: any, title: any, token: string): Promise<void> {
+  private async updateProductDescription(externalId: string, product: any, title: any, ctx: HttpAuthContext): Promise<void> {
     try {
       product.name = title.title;
       const description = await this.descriptionService.generateDescription(product, this.name);
 
-      const descRes = await axios.put(`${this.baseUrl}/items/${externalId}/description`, {
-        plain_text: description
-      }, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      const descRes = await this.http.request<any>(
+        { method: 'PUT', path: `/items/${externalId}/description`, body: { plain_text: description } },
+        ctx,
+      );
       this.logMlSendResponse(
         'PUT /items/:id/description',
-        { externalId, url: `${this.baseUrl}/items/${externalId}/description` },
+        { externalId, url: `/items/${externalId}/description` },
         descRes.status,
         descRes.data,
       );
@@ -687,27 +612,16 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
       throw new Error(errorMessage);
     }
   }
+
   // Interface Implementation
   async createProduct(context: any): Promise<any> {
-    const token = context.token?.accessToken;
-    if (!token) throw new Error('Token not found in context');
-
-    // transform context to format expected by createNewProduct/buildMercadoLivreCreateData
-    // The generic strategy passes { ...productPayload, name: title.title } as context.
-    // buildMercadoLivreCreateData expects (title, product).
-    // context is actually the product with some overrides.
-
-    // We need to reconstruct the "title" object expected by internal methods
+    // context é o produto (com overrides); buildMercadoLivreCreateData espera (title, product).
     const titleObj = { title: context.name, externalId: null };
-
-    return this.createNewProduct(titleObj, context, token);
+    return this.createNewProduct(titleObj, context, this.ctx('createProduct', context?.domain));
   }
 
   async updateProduct(externalId: string, context: any): Promise<any> {
-    const token = context.token?.accessToken;
-    if (!token) throw new Error('Token not found in context');
-
     const titleObj = { title: context.name, externalId };
-    return this.updateExistingProduct(titleObj, context, token);
+    return this.updateExistingProduct(titleObj, context, this.ctx('updateProduct', context?.domain));
   }
 }

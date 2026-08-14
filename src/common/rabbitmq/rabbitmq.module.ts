@@ -37,12 +37,14 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
                             type: 'topic',
                         },
                         {
-                            name: 'rocket.rembg',
-                            type: 'topic',
-                        },
-                        {
                             name: 'rocket.orchestrator',
                             type: 'topic',
+                            options: { durable: true },
+                        },
+                        {
+                            // Declarado pelo scraper Python como DIRECT durable — precisa casar.
+                            name: 'rocket.scraper',
+                            type: 'direct',
                             options: { durable: true },
                         },
                     ],

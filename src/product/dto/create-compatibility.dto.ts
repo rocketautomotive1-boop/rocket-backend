@@ -11,35 +11,11 @@ export class CreateCompatibilityDto {
 
   @IsOptional()
   @IsString()
+  mlVehicleId?: string;
+
+  @IsOptional()
+  @IsString()
   vehicleName?: string;
-
-  @IsOptional()
-  @IsString()
-  vehicleBrand?: string;
-
-  @IsOptional()
-  @IsString()
-  vehicleModel?: string;
-
-  @IsOptional()
-  @IsString()
-  vehicleYear?: string;
-
-  @IsOptional()
-  @IsString()
-  vehicleVersion?: string;
-
-  @IsOptional()
-  @IsString()
-  vehicleEngine?: string;
-
-  @IsOptional()
-  @IsString()
-  vehicleFuelType?: string;
-
-  @IsOptional()
-  @IsString()
-  vehicleTransmission?: string;
 
   @IsOptional()
   @IsString()
@@ -64,13 +40,7 @@ export class CreateMultipleCompatibilitiesDto {
   @IsArray()
   vehicleDetails?: Array<{
     id: string;
+    mlVehicleId?: string;
     name?: string;
-    brand?: string;
-    model?: string;
-    year?: string;
-    version?: string;
-    engine?: string;
-    fuelType?: string;
-    transmission?: string;
   }>;
 }

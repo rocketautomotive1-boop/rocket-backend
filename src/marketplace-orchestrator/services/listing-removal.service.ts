@@ -2,10 +2,12 @@ import { Injectable, Logger, NotFoundException, ConflictException } from '@nestj
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { ListingModel, ListingDocument } from '../../listing/schemas/listing.schema';
-import { MarketplaceModel, MarketplaceDocument } from '../../marketplace/schemas/marketplace.schema';
 import { PublicationLogService } from '../../marketplace/services/publication-log.service';
+import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
+import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
+import { StoreService } from '../../store/services/store.service';
 import { MarketplaceSyncPayload } from '../dto/marketplace-sync.dto';
 
 @Injectable()
@@ -14,9 +16,11 @@ export class ListingRemovalService {
 
     constructor(
         @InjectModel(ListingModel.name) private readonly listingModel: Model<ListingDocument>,
-        @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceDocument>,
+        private readonly configCache: MarketplaceConfigCacheService,
         private readonly amqpConnection: AmqpConnection,
         private readonly publicationLogService: PublicationLogService,
+        private readonly auth: MarketplaceAuthService,
+        private readonly storeService: StoreService,
     ) { }
 
     /**
@@ -43,20 +47,38 @@ export class ListingRemovalService {
         }
 
         // Published listing — need to unpublish from marketplace first
-        const marketplace = await this.marketplaceModel.findById(listing.marketplaceId).exec();
+        const marketplace = await this.configCache.getById(String(listing.marketplaceId));
         if (!marketplace) {
             throw new NotFoundException(`Marketplace ${listing.marketplaceId} not found for listing ${listingId}`);
         }
 
-        // Check for active token
-        const hasActiveToken = marketplace.tokens?.some(t => t.isActive);
-        if (!hasActiveToken) {
+        // accountId é resolvido a partir da loja DONA do listing (storeId), nunca da
+        // conta ativa/padrão do marketplace — mesma correção do fluxo de publish (ver
+        // docs/superpowers/specs/2026-08-14-publish-account-routing-fallback-design.md).
+        // Fechar um anúncio usando a credencial errada é pior que não fechar: pode
+        // devolver 403/erro, ou pior, operar sob a conta errada.
+        if (!listing.storeId) {
+            throw new ConflictException(
+                `Listing ${listingId} sem loja resolvida (storeId ausente) — não é possível determinar a conta dona para excluir no marketplace.`,
+            );
+        }
+        const accountId = await this.storeService.resolveAccountId(String(listing.storeId), marketplace.tag);
+        if (!accountId) {
+            throw new ConflictException(
+                `Loja ${String(listing.storeId)} sem conta configurada para ${marketplace.tag} — não é possível excluir o anúncio ${listing.externalId}.`,
+            );
+        }
+
+        const ownerToken = await this.auth
+            .ensureValidToken(String(marketplace._id), { accountId })
+            .catch(() => null);
+        if (!ownerToken?.accessToken) {
             // No token — can't call marketplace API. Remove locally with warning.
             await this.listingModel.findByIdAndUpdate(listingId, {
                 $set: { status: 'removed', publishingAt: null },
             }).exec();
-            this.logger.warn(`Listing ${listingId} marked as removed locally — no active token for ${marketplace.name}`);
-            return { removed: true, warning: `No active token for ${marketplace.name}. Listing removed locally but may still be live on the marketplace.` };
+            this.logger.warn(`Listing ${listingId} marked as removed locally — no active token for account ${accountId} on ${marketplace.name}`);
+            return { removed: true, warning: `No active token for account ${accountId} on ${marketplace.name}. Listing removed locally but may still be live on the marketplace.` };
         }
 
         // Atomic lock — same pattern as publishListing
@@ -78,8 +100,7 @@ export class ListingRemovalService {
             throw new ConflictException(`Listing ${listingId} has an in-flight operation. Try again later.`);
         }
 
-        const jobId = uuidv4();
-        const activeToken = marketplace.tokens.find(t => t.isActive);
+        const jobId = randomUUID();
 
         // Create publication attempt log
         const attempt = await this.publicationLogService.createAttempt(
@@ -102,10 +123,10 @@ export class ListingRemovalService {
             marketplace: {
                 tag: marketplace.tag,
                 credentials: {
-                    accessToken: activeToken.accessToken,
-                    refreshToken: activeToken.refreshToken,
-                    expiresAt: activeToken.expiresAt?.toISOString(),
-                    ...activeToken.additionalData,
+                    accessToken: ownerToken.accessToken,
+                    refreshToken: ownerToken.refreshToken,
+                    expiresAt: ownerToken.expiresAt ? new Date(ownerToken.expiresAt).toISOString() : undefined,
+                    ...ownerToken.additionalData,
                 },
                 settings: marketplace.settings,
             },

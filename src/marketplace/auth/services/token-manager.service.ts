@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { MarketplaceModel, MarketplaceDocument, TokenStrategy } from '../../schemas/marketplace.schema';
+import { MarketplaceTokenBrokerService } from './marketplace-token-broker.service';
 
 export interface ResolvedToken {
     accessToken: string | null;
@@ -20,13 +21,27 @@ export class TokenManagerService {
     constructor(
         @InjectModel(MarketplaceModel.name)
         private readonly marketplaceModel: Model<MarketplaceDocument>,
+        private readonly broker: MarketplaceTokenBrokerService,
     ) { }
 
     /**
      * Resolve o token para um marketplace conforme sua estratégia configurada.
      * Nunca lança erro por "token não encontrado" para estratégias que não usam DB.
+     *
+     * Seletor de conta (só relevante para oauth2/hybrid — multi-client):
+     *  - `accountId` → resolução de ENTRADA (webhook/order): a conta já está
+     *    determinada pelo marketplace; tem PRECEDÊNCIA sobre domain.
+     *  - `domain` → resolução de SAÍDA (publicação): escolhe a conta pelo domínio
+     *    do produto.
+     * Aceita string (domain, legado posicional) ou objeto { domain?, accountId? }.
      */
-    async resolveToken(marketplaceId: string): Promise<ResolvedToken> {
+    async resolveToken(
+        marketplaceId: string,
+        selector?: string | { domain?: string; accountId?: string },
+    ): Promise<ResolvedToken> {
+        const { domain, accountId } =
+            typeof selector === 'string' ? { domain: selector, accountId: undefined } : (selector ?? {});
+
         const marketplace = await this.marketplaceModel.findById(marketplaceId).exec();
         if (!marketplace) {
             throw new Error(`Marketplace ${marketplaceId} não encontrado`);
@@ -45,11 +60,11 @@ export class TokenManagerService {
                 return this.resolveAwsCredentials(marketplace);
 
             case 'hybrid':
-                return this.resolveHybridToken(marketplace);
+                return this.resolveHybridToken(marketplace, domain);
 
             case 'oauth2':
             default:
-                return this.resolveOAuthToken(marketplace);
+                return this.resolveOAuthToken(marketplace, domain, accountId);
         }
     }
 
@@ -93,14 +108,19 @@ export class TokenManagerService {
      * Se não há token LWA, retorna null para accessToken mas não lança erro —
      * o adapter decide se precisa do LWA ou pode usar apenas SigV4.
      */
-    private resolveHybridToken(marketplace: MarketplaceDocument): ResolvedToken {
+    private async resolveHybridToken(marketplace: MarketplaceDocument, domain?: string): Promise<ResolvedToken> {
         const awsBase = this.resolveAwsCredentials(marketplace);
 
-        const activeToken = marketplace.tokens?.find(t => t.isActive);
+        // Token LWA (oauth) resolvido pela via única (broker → accounts[]). Pode
+        // não existir (Amazon sem LWA) — nesse caso seguimos só com SigV4 (env).
+        const activeToken = await this.broker
+            .accountFor(String(marketplace._id), domain)
+            .then((a) => a?.token)
+            .catch(() => undefined);
 
-        if (!activeToken) {
+        if (!activeToken?.accessToken) {
             this.logger.warn(
-                `${marketplace.name}: nenhum token LWA ativo no DB. ` +
+                `${marketplace.name}: nenhum token LWA ativo. ` +
                 `Operações que exigem LWA (ex: listagem de pedidos PII) vão falhar. ` +
                 `Complete o fluxo OAuth em /auth/${marketplace.tag}/url`
             );
@@ -111,7 +131,7 @@ export class TokenManagerService {
             refreshToken: activeToken?.refreshToken,
             expiresAt: activeToken?.expiresAt,
             strategy: 'hybrid',
-            fromDatabase: !!activeToken,
+            fromDatabase: !!activeToken?.accessToken,
             additionalData: {
                 ...awsBase.additionalData,
                 ...(activeToken?.additionalData ?? {}),
@@ -121,23 +141,38 @@ export class TokenManagerService {
         };
     }
 
-    private resolveOAuthToken(marketplace: MarketplaceDocument): ResolvedToken {
-        const activeToken = marketplace.tokens?.find(t => t.isActive);
+    /** Força a renovação do token oauth2 (ignora buffer) e devolve o renovado. */
+    async forceRefresh(
+        marketplaceId: string,
+        selector?: string | { domain?: string; accountId?: string },
+    ): Promise<ResolvedToken> {
+        const { domain, accountId } =
+            typeof selector === 'string' ? { domain: selector, accountId: undefined } : (selector ?? {});
 
-        if (!activeToken) {
-            throw new Error(
-                `Nenhum token OAuth ativo para ${marketplace.name}. ` +
-                `Complete a autenticação em /auth/${marketplace.tag ?? marketplace.name}/url`
-            );
+        // accountId tem PRECEDÊNCIA (conta de entrada já determinada); senão resolve por domínio.
+        const account = accountId
+            ? await this.broker.accountById(marketplaceId, accountId)
+            : await this.broker.accountFor(marketplaceId, domain);
+
+        if (account?.accountId) {
+            await this.broker.refreshToken(marketplaceId, account.accountId, domain);
         }
+        return this.resolveToken(marketplaceId, accountId ? { accountId, domain } : domain);
+    }
 
+    private async resolveOAuthToken(marketplace: MarketplaceDocument, domain?: string, accountId?: string): Promise<ResolvedToken> {
+        // Delega ao broker unificado. accountId (entrada/webhook) tem precedência:
+        // a conta já está determinada, não se escolhe por domínio.
+        const resolved = accountId
+            ? await this.broker.ensureValidTokenByAccount(String(marketplace._id), accountId)
+            : await this.broker.ensureValidToken(String(marketplace._id), domain);
         return {
-            accessToken: activeToken.accessToken,
-            refreshToken: activeToken.refreshToken,
-            expiresAt: activeToken.expiresAt,
+            accessToken: resolved.accessToken,
+            refreshToken: resolved.refreshToken,
+            expiresAt: resolved.expiresAt,
             strategy: 'oauth2',
             fromDatabase: true,
-            additionalData: activeToken.additionalData ?? {},
+            additionalData: resolved.additionalData ?? {},
         };
     }
 

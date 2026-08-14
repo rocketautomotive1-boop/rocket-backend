@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Req, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Req, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { ProductTitleService } from '../services/product-title.service';
 import { CreateProductTitleDto, UpdateProductTitleDto, CreateProductTitlesBatchDto } from '../dto/product-title.dto';
 import { ProductTitle } from '../product-types';
@@ -16,11 +16,30 @@ export class ProductTitleController {
     private readonly listingRemovalService: ListingRemovalService,
   ) { }
 
+  private requireStoreId(req: any): string {
+    const storeId = req?.user?.storeId;
+    if (!storeId) {
+      throw new BadRequestException('Usuário sem loja configurada — não é possível acessar títulos.');
+    }
+    return storeId;
+  }
+
+  /**
+   * Título pertence à loja do usuário? Listings sem storeId gravado (anteriores ao
+   * isolamento por loja) são tratados como sem dono determinável — bloqueiam a ação,
+   * não permitem silenciosamente (ver docs/superpowers/specs/2026-08-14-titles-store-isolation-design.md).
+   */
+  private assertOwnedByStore(listing: any, storeId: string) {
+    if (!listing?.storeId || String(listing.storeId) !== String(storeId)) {
+      throw new ForbiddenException('Este título pertence a outra loja.');
+    }
+  }
+
   @Get()
   @ApiOperation({ summary: 'Listar todos os títulos de um produto' })
   @ApiResponse({ status: 200, description: 'Lista de títulos retornada com sucesso' })
-  async findAll(@Query('productId') productId: number | string): Promise<ProductTitle[]> {
-    return this.productTitleService.findByProductId(productId as any);
+  async findAll(@Query('productId') productId: number | string, @Req() req: any): Promise<ProductTitle[]> {
+    return this.productTitleService.findByProductIdAndStore(productId as any, this.requireStoreId(req));
   }
 
   @Get(':id')
@@ -40,40 +59,48 @@ export class ProductTitleController {
     @Req() req: any
   ): Promise<ProductTitle> {
     const userId = req?.user?.id || req?.user?.sub;
-    return this.productTitleService.create(productId as any, { ...createProductTitleDto, userId } as any);
+    const storeId = req?.user?.storeId ?? null;
+    return this.productTitleService.create(productId as any, { ...createProductTitleDto, userId, storeId } as any);
   }
 
   @Post('batch')
   async updateTitles(@Body() updateTitlesDto: UpdateTitlesDto, @Req() req: any) {
     const userId = req?.user?.id || req?.user?.sub;
-    console.log('ProductTitleController.updateTitles - Payload:', JSON.stringify(updateTitlesDto));
-    console.log('ProductTitleController.updateTitles - userId:', userId, 'User:', req.user);
+    const storeId = req?.user?.storeId ?? null;
     return this.productTitleService.updateTitles(
       updateTitlesDto.productId as any,
       updateTitlesDto.titles as any,
-      userId
+      userId,
+      storeId
     );
   }
 
   @Put(':id')
   @ApiOperation({ summary: 'Atualizar um título' })
   @ApiResponse({ status: 200, description: 'Título atualizado com sucesso' })
+  @ApiResponse({ status: 403, description: 'Título pertence a outra loja' })
   @ApiResponse({ status: 404, description: 'Título não encontrado' })
   async update(
     @Param('id') id: number | string,
-    @Body() updateProductTitleDto: UpdateProductTitleDto
+    @Body() updateProductTitleDto: UpdateProductTitleDto,
+    @Req() req: any,
   ): Promise<ProductTitle> {
+    const storeId = this.requireStoreId(req);
+    const listing = await this.productTitleService.findOne(id as any);
+    this.assertOwnedByStore(listing, storeId);
     return this.productTitleService.update(id as any, updateProductTitleDto as any);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Remover um título' })
   @ApiResponse({ status: 200, description: 'Título removido com sucesso' })
-  @ApiResponse({ status: 403, description: 'Apenas admins podem remover títulos publicados' })
+  @ApiResponse({ status: 403, description: 'Apenas admins podem remover títulos publicados / título pertence a outra loja' })
   @ApiResponse({ status: 404, description: 'Título não encontrado' })
   async remove(@Param('id') id: number | string, @Req() req: any): Promise<{ success: boolean; message: string; queued?: boolean; jobId?: string; warning?: string }> {
+    const storeId = this.requireStoreId(req);
     // Check if listing is published — if so, require admin role and use removal service
     const listing = await this.productTitleService.findOne(id as any);
+    this.assertOwnedByStore(listing, storeId);
     if (listing && (listing as any).externalId) {
       const isAdmin = req.user?.roles?.includes('admin');
       if (!isAdmin) {

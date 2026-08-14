@@ -1,5 +1,5 @@
 
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CartModel, CartDocument } from './schemas/cart.schema';
@@ -7,19 +7,41 @@ import { ProductService } from '../product/product.service';
 import { ProductRepository } from '../product/product.repository';
 import { AddToCartDto } from './dto/add-to-cart.dto';
 import { CouponModel, CouponDocument } from './schemas/coupon.schema';
+import { CouponRedemptionModel, CouponRedemptionDocument } from './schemas/coupon-redemption.schema';
 import { CustomerService } from '../customer/customer.service'; // Assuming path for CustomerService
+import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
+import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 
 @Injectable()
 export class CartService {
     constructor(
         @InjectModel(CartModel.name) private cartModel: Model<CartDocument>,
         @InjectModel('CouponModel') private couponModel: Model<CouponDocument>, // Corrected type and name
+        @InjectModel(CouponRedemptionModel.name) private couponRedemptionModel: Model<CouponRedemptionDocument>,
         private readonly productService: ProductService,
         private readonly productRepository: ProductRepository,
         private readonly customerService: CustomerService,
+        @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+        @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     ) { }
 
-    async applyCoupon(customerId: number | null, sessionId: string | null, code: string): Promise<CartDocument> {
+    /** true se o produto do item cai no escopo do cupom (categoryIds/productIds vazios = elegível). */
+    private isItemEligibleForCoupon(coupon: CouponDocument, item: any, categoryIdByProduct: Map<string, string>): boolean {
+        const hasProductScope = !!coupon.productIds?.length;
+        const hasCategoryScope = !!coupon.categoryIds?.length;
+        if (!hasProductScope && !hasCategoryScope) return true;
+
+        if (hasProductScope && coupon.productIds!.includes(String(item.productId))) return true;
+
+        if (hasCategoryScope) {
+            const categoryId = categoryIdByProduct.get(String(item.productId));
+            if (categoryId && coupon.categoryIds!.includes(categoryId)) return true;
+        }
+
+        return false;
+    }
+
+    async applyCoupon(customerId: string | null, sessionId: string | null, code: string): Promise<CartDocument> {
         const coupon = await this.couponModel.findOne({ code: code.toUpperCase(), isActive: true });
         if (!coupon) {
             throw new BadRequestException('Cupom inválido ou expirado.');
@@ -33,14 +55,29 @@ export class CartService {
             throw new BadRequestException('Este cupom atingiu o limite de uso.');
         }
 
-        const cart = await this.getCart(customerId, sessionId);
+        const cart = await this.findOrCreateCart(customerId || undefined, sessionId || undefined);
 
-        // Calculate Total
+        const categoryIdByProduct = new Map<string, string>();
+        if (coupon.categoryIds?.length) {
+            for (const item of cart.items) {
+                const product = await this.productService.findOne(String(item.productId)).catch(() => null);
+                const categoryId = (product as any)?.category ? String((product as any).category) : undefined;
+                if (categoryId) categoryIdByProduct.set(String(item.productId), categoryId);
+            }
+        }
+
         let subtotal = 0;
+        let eligibleSubtotal = 0;
         for (const item of cart.items) {
-            // We need to resolve prices correctly if not stored purely.
-            // Assuming unitPrice is correct.
-            subtotal += Number(item.unitPrice) * item.quantity;
+            const itemTotal = Number(item.unitPrice) * item.quantity;
+            subtotal += itemTotal;
+            if (this.isItemEligibleForCoupon(coupon, item, categoryIdByProduct)) {
+                eligibleSubtotal += itemTotal;
+            }
+        }
+
+        if (eligibleSubtotal === 0) {
+            throw new BadRequestException('Nenhum item do carrinho é elegível para este cupom.');
         }
 
         if (coupon.minPurchase && subtotal < coupon.minPurchase) {
@@ -49,13 +86,13 @@ export class CartService {
 
         let discount = 0;
         if (coupon.type === 'PERCENTAGE') {
-            discount = (subtotal * coupon.value) / 100;
+            discount = (eligibleSubtotal * coupon.value) / 100;
         } else {
             discount = coupon.value;
         }
 
-        // Cap discount at subtotal
-        if (discount > subtotal) discount = subtotal;
+        // Desconto nunca ultrapassa o subtotal elegível (mesmo cupom FIXED "generoso" demais).
+        if (discount > eligibleSubtotal) discount = eligibleSubtotal;
 
         cart.couponCode = coupon.code;
         cart.discountAmount = discount;
@@ -63,7 +100,7 @@ export class CartService {
         return cart.save();
     }
 
-    async findOrCreateCart(customerId?: number, sessionId?: string): Promise<CartDocument> {
+    async findOrCreateCart(customerId?: string, sessionId?: string): Promise<CartDocument> {
         let query: any = {};
         if (customerId) {
             query.customerId = customerId;
@@ -97,7 +134,7 @@ export class CartService {
         return cart;
     }
 
-    async addToCart(customerId: number | null, sessionId: string | null, addToCartDto: AddToCartDto): Promise<any> {
+    async addToCart(customerId: string | null, sessionId: string | null, addToCartDto: AddToCartDto): Promise<any> {
         const cart = await this.findOrCreateCart(customerId || undefined, sessionId || undefined);
 
         // Check product stock
@@ -115,7 +152,7 @@ export class CartService {
         }
 
         // Validate Stock (real-time from stock_movements)
-        const stock = await this.productRepository.calculateStock(productId);
+        const stock = (await this.stockQuery.getProductStock(productId)).available;
         if (newTotalQuantity > stock) {
             throw new BadRequestException(`Apenas ${stock} unidades disponíveis.`);
         }
@@ -126,7 +163,7 @@ export class CartService {
             cart.items.push({
                 productId: productId,
                 quantity: addToCartDto.quantity,
-                unitPrice: product.price || Types.Decimal128.fromString('0')
+                unitPrice: Types.Decimal128.fromString(String(await this.pricing.getBasePrice(productId)))
             });
         }
 
@@ -137,7 +174,7 @@ export class CartService {
         return cartObj;
     }
 
-    async updateItemQuantity(customerId: number | null, sessionId: string | null, dto: { productId: string | number, quantity: number }): Promise<any> {
+    async updateItemQuantity(customerId: string | null, sessionId: string | null, dto: { productId: string | number, quantity: number }): Promise<any> {
         const cart = await this.findOrCreateCart(customerId || undefined, sessionId || undefined);
         const productId = String(dto.productId);
 
@@ -152,7 +189,7 @@ export class CartService {
         }
 
         // Validate Stock (real-time from stock_movements)
-        const stock = await this.productRepository.calculateStock(productId);
+        const stock = (await this.stockQuery.getProductStock(productId)).available;
         if (dto.quantity > stock) {
             throw new BadRequestException(`Apenas ${stock} unidades disponíveis.`);
         }
@@ -189,7 +226,7 @@ export class CartService {
         }
     }
 
-    async removeItem(customerId: number | null, sessionId: string | null, itemId: string): Promise<any> {
+    async removeItem(customerId: string | null, sessionId: string | null, itemId: string): Promise<any> {
         const cart = await this.findOrCreateCart(customerId || undefined, sessionId || undefined);
 
         // Filter out the item
@@ -204,7 +241,7 @@ export class CartService {
         return cartObj;
     }
 
-    async getCart(customerId: number | null, sessionId: string | null): Promise<any> {
+    async getCart(customerId: string | null, sessionId: string | null): Promise<any> {
         const cart = await this.findOrCreateCart(customerId || undefined, sessionId || undefined);
         const cartObj = cart.toObject();
         await this.populateCartItemsWithProducts(cartObj);
@@ -223,6 +260,37 @@ export class CartService {
             minPurchase: 100
         });
         return coupon.save();
+    }
+
+    /**
+     * Revalida o cupom já aplicado ao carrinho no momento do checkout — cupom pode ter sido
+     * desativado/esgotado/vencido entre a aplicação e a confirmação do pedido. Checa também o
+     * limite por cliente (não checado em applyCoupon, só aqui). Retorna null se não há cupom.
+     */
+    async revalidateCouponForCheckout(customerId: string | null, couponCode?: string): Promise<CouponDocument | null> {
+        if (!couponCode) return null;
+
+        const coupon = await this.couponModel.findOne({ code: couponCode.toUpperCase(), isActive: true });
+        if (!coupon) throw new BadRequestException('Cupom inválido ou expirado.');
+        if (coupon.expirationDate && new Date() > coupon.expirationDate) {
+            throw new BadRequestException('Este cupom expirou.');
+        }
+        if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
+            throw new BadRequestException('Este cupom atingiu o limite de uso.');
+        }
+        if (coupon.usageLimitPerCustomer && customerId) {
+            const used = await this.couponRedemptionModel.countDocuments({ couponId: coupon._id, customerId });
+            if (used >= coupon.usageLimitPerCustomer) {
+                throw new BadRequestException('Você já utilizou este cupom o número máximo de vezes permitido.');
+            }
+        }
+        return coupon;
+    }
+
+    /** Registra o uso confirmado (pedido criado) e incrementa o contador global — atômico. */
+    async redeemCoupon(coupon: CouponDocument, customerId: string, orderId: string): Promise<void> {
+        await this.couponRedemptionModel.create({ couponId: coupon._id, customerId, orderId });
+        await this.couponModel.updateOne({ _id: coupon._id }, { $inc: { usedCount: 1 } });
     }
 }
 

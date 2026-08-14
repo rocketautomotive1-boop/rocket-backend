@@ -74,12 +74,11 @@ export class BrandFilterDto {
 
 // DTO para filtros de categoria
 export class CategoryFilterDto {
-  @ApiPropertyOptional({ description: 'IDs das categorias', type: [Number] })
+  @ApiPropertyOptional({ description: 'IDs das categorias (Mongo ObjectId)', type: [String] })
   @IsOptional()
   @IsArray()
-  @IsNumber({}, { each: true })
-  @Type(() => Number)
-  ids?: number[];
+  @IsString({ each: true })
+  ids?: string[];
 
   @ApiPropertyOptional({ description: 'Nomes das categorias', type: [String] })
   @IsOptional()
@@ -228,62 +227,6 @@ export class ImageFilterDto {
   imageStatus?: string[];
 }
 
-export class CompatibilityFilterDto {
-  @ApiPropertyOptional({ description: 'IDs dos veículos', type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  vehicleIds?: string[];
-
-  @ApiPropertyOptional({ description: 'Marcas dos veículos', type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  vehicleBrands?: string[];
-
-  @ApiPropertyOptional({ description: 'Modelos dos veículos', type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  vehicleModels?: string[];
-
-  @ApiPropertyOptional({ description: 'Anos dos veículos', type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  vehicleYears?: string[];
-
-  @ApiPropertyOptional({ description: 'Tipos de combustível', type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  vehicleFuelTypes?: string[];
-
-  @ApiPropertyOptional({ description: 'Tipos de transmissão', type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  vehicleTransmissions?: string[];
-
-  @ApiPropertyOptional({ description: 'Status das compatibilidades', type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  status?: string[];
-
-  @ApiPropertyOptional({ description: 'Apenas compatibilidades sincronizadas com marketplace' })
-  @IsOptional()
-  @IsBoolean()
-  @Transform(({ value }) => value === 'true' || value === true)
-  syncedWithMarketplace?: boolean;
-
-  @ApiPropertyOptional({ description: 'Apenas produtos com compatibilidades' })
-  @IsOptional()
-  @IsBoolean()
-  @Transform(({ value }) => value === 'true' || value === true)
-  hasCompatibilities?: boolean;
-}
-
 // DTO para ordenação
 export class SortDto {
   @ApiPropertyOptional({
@@ -415,12 +358,6 @@ export class ProductFilterDto {
   @Type(() => ImageFilterDto)
   images?: ImageFilterDto;
 
-  @ApiPropertyOptional({ description: 'Filtros de compatibilidades', type: CompatibilityFilterDto })
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => CompatibilityFilterDto)
-  compatibilities?: CompatibilityFilterDto;
-
   // Filtros de atributos (array para múltiplos atributos)
   @ApiPropertyOptional({ description: 'Filtros de atributos', type: [AttributeFilterDto] })
   @IsOptional()
@@ -538,6 +475,33 @@ export class PaginatedResponseDto<T> {
     hasNext: boolean;
     hasPrev: boolean;
   };
+}
+
+// DTO para valor de facet (contagem por marca/categoria)
+export class FacetValueDto {
+  @ApiPropertyOptional({ description: 'Nome do valor da faceta' })
+  name: string;
+
+  @ApiPropertyOptional({ description: 'Quantidade de produtos com esse valor' })
+  count: number;
+}
+
+// DTO para facets de busca (marcas, categorias e faixa de preço do resultado)
+export class SearchFacetsDto {
+  @ApiPropertyOptional({ description: 'Marcas presentes no resultado, com contagem', type: [FacetValueDto] })
+  brands: FacetValueDto[];
+
+  @ApiPropertyOptional({ description: 'Categorias presentes no resultado, com contagem', type: [FacetValueDto] })
+  categories: FacetValueDto[];
+
+  @ApiPropertyOptional({ description: 'Faixa de preço do resultado' })
+  price: { min: number; max: number; avg: number };
+}
+
+// DTO de resposta da busca por compatibilidade, com facets
+export class CompatibilitySearchResponseDto extends PaginatedResponseDto<any> {
+  @ApiPropertyOptional({ description: 'Facets do resultado (marcas, categorias, preço)', type: SearchFacetsDto })
+  facets: SearchFacetsDto;
 }
 
 // DTO específico para resposta de produtos

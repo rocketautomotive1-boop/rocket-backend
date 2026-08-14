@@ -8,7 +8,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { computeDiscoveryDedupFields, normalizePartNumberForDedup } from '../utils/discovery-dedup.util';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DiscoveryAppData, DiscoveryAppDocument, DiscoveryVehicleSuggestion } from '../dto/discovery-app.dto';
+import { DiscoveryAppData, DiscoveryAppDocument } from '../dto/discovery-app.dto';
+import { mapDiscoveryDocToAppData } from '../dto/discovery-app.mapper';
 import { DiscoveryRealtimeEvent } from '../types/discovery-realtime-event';
 
 @Injectable()
@@ -100,12 +101,19 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
     }
 
     async startDiscovery(params: {
-        partNumber: string;
+        partNumber?: string;
         brand?: string;
         productId?: string;
+        barcode?: string;
+        domain?: string;
     }): Promise<string> {
-        const { partNumber, brand, productId } = params;
-        const dedup = computeDiscoveryDedupFields({ partNumber, brand, isGenuine: false });
+        const { brand, productId, barcode, domain } = params;
+        const isGeneral = domain === 'general';
+        // Itens gerais buscam por barcode (não têm partNumber). Usamos o barcode
+        // como "partNumber" interno para reaproveitar dedup/intent/status sem
+        // tocar o caminho de autopeças.
+        const partNumber = isGeneral ? (barcode ?? '').trim() : (params.partNumber ?? '');
+        const dedup = computeDiscoveryDedupFields({ partNumber, brand: isGeneral ? '' : brand, isGenuine: false });
         const { partNumberNorm, brandNorm } = dedup;
         const productObjectId = productId ? new Types.ObjectId(productId) : undefined;
 
@@ -143,7 +151,8 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
 
             const nextIntentVersion = Number(latestByProduct?.intentVersion ?? 0) + 1;
             const jobId = uuidv4();
-            const query = `${partNumber} ${brand || ''}`.trim();
+            // general → busca pelo barcode; autopeças → partNumber + marca (igual ao atual).
+            const query = isGeneral ? partNumber : `${partNumber} ${brand || ''}`.trim();
 
             await this.discoveryModel.updateMany(
                 { productId: productObjectId, isActiveIntent: true },
@@ -179,6 +188,9 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
                     brand,
                     productId,
                     intentVersion: nextIntentVersion,
+                    // Roteamento por domínio no microserviço (autoparts/general).
+                    domain: domain ?? 'autoparts',
+                    barcode: isGeneral ? partNumber : barcode,
                 });
                 this.logger.log(`Published message to RabbitMQ: ${published ? 'YES' : 'NO'}`);
             } catch (err: any) {
@@ -210,7 +222,7 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
         }).sort({ createdAt: -1 }).exec();
 
         if (existing) {
-            const isStuckPending = existing.status === 'pending' && existing.updatedAt < new Date(Date.now() - 2 * 60 * 1000); // 2 min timeout
+            const isStuckPending = existing.status === 'pending' && existing.updatedAt < new Date(Date.now() - this.stalePendingMinutes * 60 * 1000);
 
             if ((existing.status === 'pending' && !isStuckPending) || existing.status === 'done') {
                 this.logger.log(`Reusing discovery [${existing.status}] ${existing.batchId} for PN=${partNumberNorm}`);
@@ -244,7 +256,7 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
             { upsert: true, new: true }
         ).exec();
 
-        this.logger.log(`🚀 Dispatching discovery to MS: ${query} (JobId: ${jobId})`);
+        this.logger.log(`Dispatching discovery to MS: ${query} (JobId: ${jobId})`);
 
         try {
             const published = await this.amqpConnection.publish('rocket.inventory', 'discovery.scraper.request', {
@@ -253,9 +265,9 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
                 partNumber,
                 brand,
             });
-            this.logger.log(`📤 Published message to RabbitMQ: ${published ? 'YES' : 'NO'}`);
+            this.logger.log(`Published message to RabbitMQ: ${published ? 'YES' : 'NO'}`);
         } catch (err) {
-            this.logger.error(`❌ FAILED to publish to RabbitMQ: ${err.message}`);
+            this.logger.error(`FAILED to publish to RabbitMQ: ${err.message}`);
             // Update status to failed so it doesn't stay pending
             await this.discoveryModel.updateOne({ batchId: jobId }, { $set: { status: 'failed', error: 'MQ_PUBLISH_ERROR' } });
             throw err;
@@ -332,57 +344,7 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
     }
 
     private toDiscoveryAppDocument(doc: any): DiscoveryAppDocument {
-        const finalPayload = (doc?.final && typeof doc.final === 'object') ? doc.final : (doc?.data ?? {});
-        const sources = (doc?.sources && typeof doc.sources === 'object') ? doc.sources : {};
-        const mlSource = (sources?.mercadolivre && typeof sources.mercadolivre === 'object') ? sources.mercadolivre : {};
-        const serpSource = (sources?.serp && typeof sources.serp === 'object') ? sources.serp : {};
-
-        const rawVehicles = Array.isArray(finalPayload?.vehicles) ? finalPayload.vehicles : [];
-        const vehicles: DiscoveryVehicleSuggestion[] = rawVehicles
-            .map((v: any) => {
-                if (typeof v === 'string') return { label: v.trim() };
-                if (v && typeof v === 'object') {
-                    const label = v.label ?? [v.brand, v.model].filter(Boolean).join(' ').trim();
-                    if (label) return { label };
-                }
-                return null;
-            })
-            .filter((v: DiscoveryVehicleSuggestion | null): v is DiscoveryVehicleSuggestion => !!v && !!v.label);
-
-        const breadcrumbPath = String(finalPayload?.breadcrumb ?? finalPayload?.breadcrumbPath ?? finalPayload?.breadCrumbPath ?? '');
-        const categoryPath = finalPayload?.categoryPath ?? (breadcrumbPath || null);
-
-        const rawAttributes = Array.isArray(finalPayload?.attributes) ? finalPayload.attributes : [];
-        const attributes = rawAttributes
-            .map((a: any) => ({
-                id: typeof a?.id === 'string' ? a.id : undefined,
-                key: String(a?.key ?? a?.name ?? '').trim(),
-                value: String(a?.value ?? a?.value_name ?? '').trim(),
-            }))
-            .filter((a: { key: string; value: string }) => !!a.key && !!a.value);
-
-        const data: DiscoveryAppData = {
-            titles: Array.isArray(finalPayload?.titles) ? finalPayload.titles : [],
-            prices: finalPayload?.prices ?? null,
-            description: String(finalPayload?.description ?? ''),
-            details: String(finalPayload?.details ?? ''),
-            attributes,
-            oemCodes: Array.isArray(finalPayload?.oemCodes) ? finalPayload.oemCodes : [],
-            vehicles,
-            categoryPath: categoryPath ? String(categoryPath) : null,
-            breadcrumbPath,
-            suggestedImages: Array.isArray(finalPayload?.suggestedImages) ? finalPayload.suggestedImages : [],
-            winningSource: finalPayload?.preferredSource === 'mercadolivre' || finalPayload?.preferredSource === 'serp'
-                ? finalPayload.preferredSource
-                : null,
-            confidence: finalPayload?.confidence ? String(finalPayload.confidence) : null,
-            partNumber: String(finalPayload?.partNumber ?? doc?.partNumberNorm ?? ''),
-            rawItems: Array.isArray(mlSource?.items)
-                ? mlSource.items
-                : (Array.isArray(serpSource?.items) ? serpSource.items : []),
-            resolvedCategoryId: doc?.resolvedCategoryId ? String(doc.resolvedCategoryId) : null,
-            timing: finalPayload?.timing ?? null,
-        };
+        const data: DiscoveryAppData = mapDiscoveryDocToAppData(doc);
 
         return {
             id: String(doc?._id),

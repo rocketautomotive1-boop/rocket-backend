@@ -1,8 +1,11 @@
-import { Injectable, Logger, HttpException, Inject, forwardRef, OnModuleInit, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, HttpException, OnModuleInit, InternalServerErrorException } from '@nestjs/common';
 import axios from 'axios';
-import { getShopeeBaseUrl, buildSignedParams, getPartnerId, buildHeaders, buildAuthUrl, getSignatureBaseString, generateSignature, getShopeeHost } from './shopee-utils'
-import { MarketplaceAuthService } from '../../auth/services/marketplace-auth.service';
+import { getShopeeBaseUrl, buildHeaders, getShopeeHost } from './shopee-utils'
+import { ShopeeSignerService } from './shopee-signer.service'
 import { IMarketplaceAuthAdapter } from '../../interfaces/marketplace-auth-adapter.interface';
+import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
+import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
+import { TokenManagerService } from '../../auth/services/token-manager.service';
 
 @Injectable()
 export class ShopeeAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit {
@@ -12,12 +15,24 @@ export class ShopeeAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
   readonly tag = 'shopee';
 
   constructor(
-    @Inject(forwardRef(() => MarketplaceAuthService))
-    private marketplaceAuthService: MarketplaceAuthService,
+    private readonly registry: MarketplaceAdapterRegistry,
+    private readonly marketplaceRegistry: MarketplaceRegistryService,
+    private readonly tokenManager: TokenManagerService,
+    private readonly signer: ShopeeSignerService,
   ) { }
 
   onModuleInit() {
-    this.marketplaceAuthService.registerAdapter(this);
+    this.registry.registerAuthAdapter(this);
+  }
+
+  /**
+   * Params Shopee assinados (sem token) via ShopeeSignerService — fonte única de
+   * assinatura Shopee (partnerId/partnerKey resolvidos do DB cifrado → env fallback).
+   */
+  private async signedParams(path: string, timestamp: number): Promise<{ partnerId: string; params: Record<string, any> }> {
+    const partnerId = await this.signer.getPartnerId();
+    const params = await this.signer.buildSignedParams(path, timestamp);
+    return { partnerId, params };
   }
 
   async authenticate(code: string, additionalData?: any): Promise<any> {
@@ -29,24 +44,18 @@ export class ShopeeAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
       throw new Error('Parâmetros inválidos: informe code e shopId (ou configure SHOPEE_SHOP_ID)');
     }
 
-    // ... rest of logic
-    this.logger.log(`Autenticando na Shopee com partner_id: ${getPartnerId()} host: ${getShopeeHost()}`);
-
     try {
       const timestamp = Math.floor(Date.now() / 1000);
       const path = '/auth/token/get';
-      const params = buildSignedParams(path, timestamp)
-      if (process.env.SHOPEE_DEBUG === 'true') {
-        const base = getSignatureBaseString(path, timestamp)
-        const sign = generateSignature(path, timestamp)
-        this.logger.log(`Shopee sign debug (auth token): path=${path} ts=${timestamp} base_len=${base.length} sign_len=${sign.length}`)
-      }
+      // Credenciais (partnerId/partnerKey) resolvidas via CredentialsService
+      // (marketplaces.credentials cifrado → env fallback) — sem ler env direto.
+      const { partnerId, params } = await this.signedParams(path, timestamp);
+      this.logger.log(`Autenticando na Shopee com partner_id: ${partnerId} host: ${getShopeeHost()}`);
 
-      // Simulação da chamada de autenticação
       const response = await axios.post(`${this.baseUrl}${path}`, {
         code: code,
         shop_id: parseInt(shopId),
-        partner_id: parseInt(getPartnerId()),
+        partner_id: parseInt(partnerId),
       }, {
         headers: buildHeaders(),
         params,
@@ -54,7 +63,6 @@ export class ShopeeAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
 
       this.logger.log('Autenticação na Shopee realizada com sucesso');
 
-      // Usando unknown para evitar erro de tipagem
       return {
         accessToken: response.data.access_token,
         refreshToken: response.data.refresh_token,
@@ -62,8 +70,7 @@ export class ShopeeAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
         tokenType: 'Bearer',
         additionalData: {
           shopId: shopId,
-          partnerId: getPartnerId(),
-          partnerSecret: process.env.SHOPEE_PARTNER_KEY,
+          partnerId,
           merchantId: response.data.merchant_id,
           shopName: response.data.shop_name,
         },
@@ -82,11 +89,10 @@ export class ShopeeAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
   }
 
   async getValidToken(marketplaceName: string): Promise<any> {
-    const marketplace = await this.marketplaceAuthService.findByName(marketplaceName);
+    const marketplace = await this.marketplaceRegistry.findByName(marketplaceName);
     if (!marketplace) throw new Error(`Marketplace ${marketplaceName} não encontrado`);
-
-    // In Shopee, the "token" in DB is usually the full object with accessToken and additionalData
-    return await this.marketplaceAuthService.ensureValidToken(marketplace._id as any);
+    // Token completo (accessToken + additionalData) resolvido via broker (accounts[]).
+    return await this.tokenManager.resolveToken(String(marketplace._id));
   }
 
   async refreshToken(token: any): Promise<any> {
@@ -95,10 +101,10 @@ export class ShopeeAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
     try {
       const timestamp = Math.floor(Date.now() / 1000);
       const path = '/auth/access_token/get';
-      const params = buildSignedParams(path, timestamp)
+      const { partnerId, params } = await this.signedParams(path, timestamp);
 
       const shopIdToUse = parseInt(String(token.additionalData.shopId));
-      const partnerIdToUse = parseInt(getPartnerId());
+      const partnerIdToUse = parseInt(partnerId);
 
       this.logger.log(`[ShopeeAuth] Refreshing with shop_id=${shopIdToUse}, partner_id=${partnerIdToUse}`);
 
@@ -156,7 +162,17 @@ export class ShopeeAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
 
   async generateAuthUrl(redirectUri?: string): Promise<{ authUrl: string }> {
     const defaultRedirect = process.env.SHOPEE_REDIRECT_URL || `${process.env.API_BASE_URL}/auth/shopee/callback`;
-    const url = buildAuthUrl(redirectUri || defaultRedirect);
-    return { authUrl: url };
+    const redirect = redirectUri || defaultRedirect;
+    const path = '/api/v2/shop/auth_partner';
+    const timestamp = Math.floor(Date.now() / 1000);
+    // partnerId/partnerKey via CredentialsService (DB cifrado → env fallback).
+    const { partnerId, params } = await this.signedParams(path, timestamp);
+    const qs = new URLSearchParams({
+      partner_id: partnerId,
+      timestamp: String(timestamp),
+      sign: String(params.sign),
+      redirect,
+    });
+    return { authUrl: `${getShopeeHost()}${path}?${qs.toString()}` };
   }
 }

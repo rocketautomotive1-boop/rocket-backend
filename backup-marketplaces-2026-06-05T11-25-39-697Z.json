@@ -1,0 +1,657 @@
+[
+  {
+    "_id": "6955b688dfe7143a30376b78",
+    "name": "Yampi",
+    "appId": null,
+    "enabled": false,
+    "logoUrl": "https://www.yampi.com.br/share-og.png",
+    "description": "Integração com Yampi",
+    "tokens": [],
+    "requirements": [
+      {
+        "fieldName": "price",
+        "displayName": "Preço",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376b79"
+      },
+      {
+        "fieldName": "available_quantity",
+        "displayName": "Quantidade (Estoque)",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376b7a"
+      }
+    ],
+    "createdAt": "2025-12-31T23:49:28.066Z",
+    "updatedAt": "2025-12-31T23:49:28.066Z",
+    "__v": 0,
+    "tag": "yampi",
+    "tokenStrategy": "api_key"
+  },
+  {
+    "_id": "6955b688dfe7143a30376b7e",
+    "name": "Shopee",
+    "appId": "2013835",
+    "enabled": true,
+    "logoUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fe/Shopee.svg/1200px-Shopee.svg.png",
+    "description": "Integração com Shopee\n",
+    "settings": {
+      "nfeSeries": "4"
+    },
+    "tokens": [
+      {
+        "accessToken": "eyJhbGciOiJIUzI1NiJ9.CIv1ehABGJzCn9sFIAEo6cnt0AYw3KPq1AE4AUABSAk.WwJvjT7p5WD0A7kelcXeWy8RXbI8qa4z6ehIg_WnRkM",
+        "refreshToken": "eyJhbGciOiJIUzI1NiJ9.CIv1ehABGJzCn9sFIAIo6cnt0AYw-57s4Ak4AUABSAk.jQ1B5MgKx8oGHI9uzJ2vd4fP1IjxoFCizyD-TAsiAUg",
+        "expiresAt": "2026-05-31T02:30:01.370Z",
+        "tokenType": "Bearer",
+        "additionalData": {
+          "shopId": 1533534492,
+          "partnerId": 2013835,
+          "partnerSecret": "shpk5477616967755056735279634b654f6665734d774b6379464e6c78616c46"
+        },
+        "isActive": true,
+        "_id": "6a1b64e9c83d87a5e83eb752"
+      }
+    ],
+    "requirements": [
+      {
+        "fieldName": "price",
+        "displayName": "Preço",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376d27",
+        "schemaField": "price"
+      },
+      {
+        "fieldName": "weight",
+        "displayName": "Peso",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376d28",
+        "validationRules": {
+          "min": "0"
+        },
+        "schemaField": "weight"
+      },
+      {
+        "fieldName": "height",
+        "displayName": "Altura",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376d29",
+        "schemaField": "dimensions.height",
+        "validationRules": {
+          "min": "0"
+        }
+      },
+      {
+        "fieldName": "width",
+        "displayName": "Largura",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376d2a",
+        "schemaField": "dimensions.width",
+        "validationRules": {
+          "min": "0"
+        }
+      },
+      {
+        "fieldName": "length",
+        "displayName": "Comprimento",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376d2b",
+        "schemaField": "dimensions.length",
+        "validationRules": {
+          "min": "0"
+        }
+      },
+      {
+        "fieldName": "Quantity",
+        "displayName": "Quantidade (Estoque)",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376d2c",
+        "schemaField": "stock"
+      },
+      {
+        "fieldName": "Images",
+        "displayName": "Imagens do produto",
+        "description": null,
+        "isRequired": true,
+        "dataType": "array",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376d2d",
+        "schemaField": "images"
+      },
+      {
+        "fieldName": "category",
+        "displayName": "Categoria do produto",
+        "description": null,
+        "isRequired": true,
+        "dataType": "object",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376d2e",
+        "schemaField": "category"
+      }
+    ],
+    "createdAt": "2025-12-31T23:49:28.092Z",
+    "updatedAt": "2026-05-30T22:30:01.425Z",
+    "__v": 381,
+    "tag": "shopee",
+    "templates": [
+      {
+        "name": "Template Shopee v1",
+        "title": "{produto} - {marca} {modelo}",
+        "template": "{produto}\nMarca: {marca} | Código: {modelo}\nCondição: {condicao}\n\n[DESCRICAO_SECTION]\n{descricao}\n[/DESCRICAO_SECTION]\n\n[ATRIBUTOS_SECTION]\n📋 Especificações:\n{atributos}\n[/ATRIBUTOS_SECTION]\n\n[DETALHES_SECTION]\n📝 Detalhes:\n{detalhes}\n[/DETALHES_SECTION]\n\n[GENUINO_SECTION]\n✅ Produto 100% Original\nPeça genuína com garantia de fábrica.\n[/GENUINO_SECTION]\n\n📦 Dimensões: {comprimento}cm x {largura}cm x {altura}cm | Peso: {peso}kg\n\n🚚 Envio rápido! Compras confirmadas até 15h são enviadas no mesmo dia útil.\n🔒 Compra segura com garantia Shopee.",
+        "isActive": true,
+        "isDefault": false,
+        "sections": [
+          {
+            "content": "[DESCRICAO_SECTION]\n{descricao}\n[/DESCRICAO_SECTION]",
+            "condition": "description != ''"
+          },
+          {
+            "content": "[ATRIBUTOS_SECTION]\n📋 Especificações:\n{atributos}\n[/ATRIBUTOS_SECTION]",
+            "condition": "atributos_count > 0"
+          },
+          {
+            "content": "[DETALHES_SECTION]\n📝 Detalhes:\n{detalhes}\n[/DETALHES_SECTION]",
+            "condition": "details != ''"
+          },
+          {
+            "content": "[GENUINO_SECTION]\n✅ Produto 100% Original\nPeça genuína com garantia de fábrica.\n[/GENUINO_SECTION]",
+            "condition": "isGenuine == 1"
+          }
+        ]
+      },
+      {
+        "name": "Template Shopee v2",
+        "title": "{produto} - {marca} {modelo} | {descricao_curta}",
+        "template": "{produto}\nCódigo da peça: {modelo}\nMarca: {marca}\nCondição: {condicao}\n\n[DESCRICAO_SECTION]\nSobre o produto:\n{descricao}\n[/DESCRICAO_SECTION]\n\n[ATRIBUTOS_SECTION]\nEspecificações técnicas:\n{atributos}\n[/ATRIBUTOS_SECTION]\n\n[DETALHES_SECTION]\nDetalhes adicionais:\n{detalhes}\n[/DETALHES_SECTION]\n\n[GENUINO_SECTION]\nProduto 100% original (garantia de qualidade)\n* Peca genuína, mesmo padrao utilizado pela montadora\n* Durabilidade superior e ajuste perfeito no seu veiculo\n* Evite problemas com pecas paralelas ou falsificadas\n[/GENUINO_SECTION]\n\n[AVARIADO_SECTION]\nATENCAO - PRODUTO COM AVARIA/DEFEITO\nAnalise as fotos e a descrição cuidadosamente antes de efetuar a compra.\n{observacao}\n[/AVARIADO_SECTION]\n\nDimensões: {comprimento}cm x {largura}cm x {altura}cm | Peso: {peso}kg\n\nEnvio rápido e seguro:\n* Compras confirmadas ate 15h são enviadas no mesmo dia útil\n* Produto em estoque e pronto para despacho\n\nCompra segura:\n* Proteção ao comprador pela Shopee\n\n* Em caso de dúvida, use o campo de perguntas",
+        "isActive": true,
+        "isDefault": true,
+        "placeholders": {
+          "garantia": "Garantia de fabrica"
+        },
+        "sections": [
+          {
+            "content": "[DESCRICAO_SECTION]\nSobre o produto:\n{descricao}\n[/DESCRICAO_SECTION]",
+            "condition": "description != ''"
+          },
+          {
+            "content": "[ATRIBUTOS_SECTION]\nEspecificacoes tecnicas:\n{atributos}\n[/ATRIBUTOS_SECTION]",
+            "condition": "atributos_count > 0"
+          },
+          {
+            "content": "[DETALHES_SECTION]\nDetalhes adicionais:\n{detalhes}\n[/DETALHES_SECTION]",
+            "condition": "details != ''"
+          },
+          {
+            "content": "[GENUINO_SECTION]\nProduto 100% original (garantia de qualidade)\n* Peca genuina, mesmo padrao utilizado pela montadora\n* Durabilidade superior e ajuste perfeito no seu veiculo\n* Evite problemas com pecas paralelas ou falsificadas\n[/GENUINO_SECTION]",
+            "condition": "isGenuine == 1"
+          },
+          {
+            "content": "[AVARIADO_SECTION]\nATENCAO - PRODUTO COM AVARIA/DEFEITO\nAnalise as fotos e a descricao cuidadosamente antes de efetuar a compra.\n{observacao}\n[/AVARIADO_SECTION]",
+            "condition": "situation == damaged"
+          }
+        ]
+      }
+    ],
+    "tokenStrategy": "oauth2",
+    "credentials": {
+      "partnerId": "enc:v1:qZqb5QnOUIzWDGRV:JOY/6aR7T6crcagcr4/1KA==:GgJBQVWNxw==",
+      "partnerKey": "enc:v1:lTVRpwiU+IHIuPrc:bkNkNaG+ZTDCCODfGzlQug==:72UdnVbAftBuqzBSsYzo7JhzFP7FHGRH6mNcfTQ7BGXFifyw1Dvi0St7Dnv2TzMWN7h7TEjwnrnhYUe0wAfx6A==",
+      "shopId": "enc:v1:1kbLW7g4qMKKQ+gb:Q0XtRmM4WWvCGj/0MKdPzQ==:l+IjdzlCE5bucg=="
+    }
+  },
+  {
+    "_id": "6955b688dfe7143a30376d2f",
+    "name": "Amazon",
+    "appId": null,
+    "enabled": true,
+    "logoUrl": "https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg",
+    "description": "Integração com Amazon",
+    "settings": {
+      "nfeSeries": "5"
+    },
+    "tokens": [],
+    "requirements": [
+      {
+        "fieldName": "price",
+        "displayName": "Preço",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376d7c",
+        "schemaField": "price"
+      },
+      {
+        "fieldName": "quantity",
+        "displayName": "Quantidade (Estoque)",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376d7d",
+        "schemaField": "stock"
+      },
+      {
+        "fieldName": "brand",
+        "displayName": "Marca",
+        "description": null,
+        "isRequired": true,
+        "dataType": "object",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376d7e"
+      }
+    ],
+    "createdAt": "2025-12-31T23:49:28.097Z",
+    "updatedAt": "2026-05-26T16:57:59.319Z",
+    "__v": 5889,
+    "tag": "amazon",
+    "templates": [
+      {
+        "_id": "69590b3e172f0ae7d9d32c0d",
+        "name": "Amazon",
+        "title": "{produto} - {marca} {modelo} | {descricao_curta}",
+        "template": "{produto}\nCódigo da peça: {modelo}\nCondição: Novo\n\n{observacao}\n\n[GENUINO_SECTION]\nProduto 100% original (garantia de qualidade)\n* Peça genuína, mesmo padrão utilizado pela montadora\n* Durabilidade superior e ajuste perfeito no seu veículo.\n* Evite problemas com peças paralelas ou falsificadas.\n[/GENUINO_SECTION]\n\nCompatibilidade\n* Verifique se o código da peça é compatível com o seu veículo\n* Em caso de dúvida, utilize o campo de perguntas informando: Modelo do veículo, ano, motorização. Nossa equipe auxilia na confirmação antes da compra.\n\nEnvio e Entrega\n* Envio rápido e seguro pela Amazon\n* Produtos em estoque com despacho ágil após confirmação do pedido\n* Devolução Facilitada, conforme política da Amazon. Processo simples e seguro, diretamente pela plataforma\n\nSobre Nós\n* Somos uma loja especializada em peças automotivas originais, com foco em: Qualidade, envio rápido, satisfação total do cliente\n\nAinda com dúvidas?\n* Utilize o campo de perguntas da Amazon. Respondemos rapidamente para garantir uma compra segura e correta.\n\nCompre com confiança e receba um produto original, pronto para instalação.",
+        "isActive": true,
+        "isDefault": true,
+        "placeholders": {
+          "garantia": "Garantia de fábrica"
+        },
+        "sections": [
+          {
+            "content": "[GENUINO_SECTION]\nProduto 100% original (garantia de qualidade)\n* Peça genuína, mesmo padrão utilizado pela montadora\n* Durabilidade superior e ajuste perfeito no seu veículo.\n* Evite problemas com peças paralelas ou falsificadas.\n[/GENUINO_SECTION]",
+            "condition": "isGenuine == 1"
+          }
+        ]
+      }
+    ],
+    "tokenStrategy": "hybrid",
+    "credentials": {
+      "appId": "enc:v1:sB4BpnSWEaP9QRJq:9kok/Em1U7TIfjZjOsV6SQ==:2LtofWZFi0HXJQjg2qTnJtTt0J3hwvoqXkkJTHqUZEg2fIQVwe4tmDlaB0/8otT7kWb/fTRgdXj9BASqng==",
+      "awsAccessKey": "enc:v1:NjjDInXfHeDQU5bt:JzjRYungGsU70LE8+AqzVQ==:HlyLV0HNKAj9T2JsUzLkDyIk5Zo=",
+      "awsSecretKey": "enc:v1:npeAnol73tA6N2Hu:AXSwYmdxPU/JqMECThOysA==:I2BsWLETtntojNvMTOjy833uzBMThYZTumrGEA7g+hr/3OWtmlx69Q==",
+      "clientSecret": "enc:v1:O5Ecp0iauJyA7JCM:15QMfP/Rq8fjWPRm/OIAcw==:OsVJIkPq4nmYIgsp9x7KjeBly6zp9UAGtN0Hf8mMFA+Vr8CnyM8kvnNBuIKAV5VVyyC/jU+s3F2XcczyV+QCCQUNUsFZZtyAAltyJamXhXI="
+    }
+  },
+  {
+    "_id": "6955b688dfe7143a30376b7b",
+    "name": "Magalu",
+    "appId": "magalu",
+    "enabled": false,
+    "logoUrl": "https://logos.example/magalu.png",
+    "description": "Integração Marketplace Magalu",
+    "tokens": [],
+    "requirements": [
+      {
+        "fieldName": "price",
+        "displayName": "Preço",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376b7c"
+      },
+      {
+        "fieldName": "available_quantity",
+        "displayName": "Quantidade (Estoque)",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376b7d"
+      }
+    ],
+    "createdAt": "2025-12-31T23:49:28.067Z",
+    "updatedAt": "2026-05-26T16:57:59.404Z",
+    "__v": 0,
+    "tag": "magalu",
+    "tokenStrategy": "oauth2",
+    "credentials": {
+      "clientId": "enc:v1:M82ZDFpMGKU81M1k:UfD2ly2bMWNqNRzedUybMg==:KSbBIeB7fq+5Lq3CPfZa3MNcT28qAIiKNaO/veqes4enrUwwauVxmN15bw==",
+      "clientSecret": "enc:v1:Ln/GT6ECRiiwimAa:K+nO2VJnm31lXQwgbNYp8w==:Md4UNOA5huUNC1SrdSIwwR2t0UrybmWjYRti1wwjXk11wgiaH2osYdi2LQ==",
+      "redirectUri": "enc:v1:6V41NddJ4dy0SyTl:be3UFq3hK5Wmu82xzWZqgA==:LNHZJFZYzaIQzx2RArsMX/M9Nxi83Xe8ps/tIGkaP63c54SMLN95rcXXiXOzsAhu0Af2"
+    }
+  },
+  {
+    "_id": "6955b688dfe7143a30376b16",
+    "name": "Mercado Livre",
+    "appId": "8934596517998344",
+    "enabled": true,
+    "logoUrl": "https://logopng.com.br/logos/mercado-livre-87.png",
+    "description": "Integração com Mercado Livre",
+    "settings": {
+      "nfeSeries": "2"
+    },
+    "tokens": [
+      {
+        "accessToken": "APP_USR-8934596517998344-060419-e820a95917539bf789866e0fefd698ab-2417879606",
+        "refreshToken": "TG-6a2205cae1ff6e0001fb2119-2417879606",
+        "expiresAt": "2026-06-05T05:10:01.309Z",
+        "tokenType": "Bearer",
+        "additionalData": {
+          "scope": "offline_access read urn:global:admin:oauth:/read-only urn:ml:all:comunication:/read-write urn:ml:all:publish-sync:/read-write urn:ml:mktp:ads:/read-write urn:ml:mktp:comunication:/read-write urn:ml:mktp:invoices:/read-write urn:ml:mktp:metrics:/read-only urn:ml:mktp:offers:/read-write urn:ml:mktp:orders-shipments:/read-write urn:ml:mktp:publish-sync:/read-write urn:ml:vis:comunication:/read-write urn:ml:vis:publish-sync:/read-write write",
+          "userId": 2417879606,
+          "clientId": "8934596517998344",
+          "clientSecret": "gSbYv7Imi5iSJR28gI2i7uFxsO234LIL"
+        },
+        "isActive": true,
+        "_id": "6a2205c9f2f0938b6a55c0bc"
+      }
+    ],
+    "requirements": [
+      {
+        "fieldName": "price",
+        "displayName": "Preço",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376b6f",
+        "schemaField": "price"
+      },
+      {
+        "fieldName": "category_id",
+        "displayName": "Categoria",
+        "description": null,
+        "isRequired": true,
+        "dataType": "string",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376b71",
+        "schemaField": "category"
+      },
+      {
+        "fieldName": "available_quantity",
+        "displayName": "Quantidade (Estoque)",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376b72",
+        "schemaField": "stock"
+      },
+      {
+        "fieldName": "pictures",
+        "displayName": "Imagens",
+        "isRequired": true,
+        "dataType": "array",
+        "schemaField": "images"
+      }
+    ],
+    "createdAt": "2025-12-31T23:49:28.064Z",
+    "updatedAt": "2026-06-04T23:10:01.384Z",
+    "__v": 306,
+    "tag": "mercadolivre",
+    "templates": [
+      {
+        "name": "Template Completo Mercado Livre v3",
+        "title": "{produto} - {marca} {modelo} | {descricao_curta}",
+        "template": "{produto}\nCódigo da peça: {modelo}\nMarca: {marca}\nCondição: {condicao}\n\n[DESCRICAO_SECTION]\nSobre o produto:\n{descricao}\n[/DESCRICAO_SECTION]\n\n[ATRIBUTOS_SECTION]\nEspecificações Técnicas:\n{atributos}\n[/ATRIBUTOS_SECTION]\n\n[DETALHES_SECTION]\nDetalhes Adicionais:\n{detalhes}\n[/DETALHES_SECTION]\n\n[GENUINO_SECTION]\nProduto 100% original (garantia de qualidade)\n* Peça genuína, mesmo padrão utilizado pela montadora\n* Durabilidade superior e ajuste perfeito no seu veículo.\n* Evite problemas com peças paralelas ou falsificadas.\n[/GENUINO_SECTION]\n\n[AVARIADO_SECTION]\nATENÇÃO — PRODUTO COM AVARIA/DEFEITO\nAnalise as fotos e a descrição cuidadosamente antes de efetuar a compra.\n{observacao}\n[/AVARIADO_SECTION]\n\nDimensões: {comprimento}cm x {largura}cm x {altura}cm | Peso: {peso}kg\n\nComo funciona o envio ?\n* Entrega rápida e segura via Mercado Envios\n* Compras confirmadas até 15h são enviadas no mesmo dia útil.\n\nCompra 100% segura\n* Pague em até 10x sem juros pelo Mercado Pago\n* Proteção total ao comprador: receba o produto ou seu dinheiro de volta\n\nDúvidas frequentes\nServe no meu veículo ?\n- Envie os dados do seu carro (modelo, ano, motorização). Ajudamos a confirmar a compatibilidade.\n\nEstá disponível para envio imediato ?\n- Sim! Produto em estoque, pronto para envio.\n\nE se não servir ?\n- A devolução é grátis pelo Mercado Livre e pode ser feita em até 30 dias.\n\nQuem somos\nSomos uma loja especializada em peças automotivas genuínas. Atendimento profissional, envio rápido e compromisso com a sua satisfação.\n\nAinda com dúvidas?\nUse o campo de perguntas! Nossa equipe responde em poucos minutos.\n\nClique em \"Comprar agora\" e receba com segurança e confiança.",
+        "isActive": true,
+        "isDefault": true,
+        "placeholders": {
+          "garantia": "Garantia de fábrica"
+        },
+        "sections": [
+          {
+            "content": "[DESCRICAO_SECTION]\nSobre o produto:\n{descricao}\n[/DESCRICAO_SECTION]",
+            "condition": "description != ''"
+          },
+          {
+            "content": "[ATRIBUTOS_SECTION]\nEspecificações Técnicas:\n{atributos}\n[/ATRIBUTOS_SECTION]",
+            "condition": "atributos_count > 0"
+          },
+          {
+            "content": "[DETALHES_SECTION]\nDetalhes Adicionais:\n{detalhes}\n[/DETALHES_SECTION]",
+            "condition": "details != ''"
+          },
+          {
+            "content": "[GENUINO_SECTION]\nProduto 100% original (garantia de qualidade)\n* Peça genuína, mesmo padrão utilizado pela montadora\n* Durabilidade superior e ajuste perfeito no seu veículo.\n* Evite problemas com peças paralelas ou falsificadas.\n[/GENUINO_SECTION]",
+            "condition": "isGenuine == 1"
+          },
+          {
+            "content": "[AVARIADO_SECTION]\nATENÇÃO — PRODUTO COM AVARIA/DEFEITO\nAnalise as fotos e a descrição cuidadosamente antes de efetuar a compra.\n{observacao}\n[/AVARIADO_SECTION]",
+            "condition": "situation == damaged"
+          }
+        ]
+      },
+      {
+        "name": "Template Mercado Livre Geral (saúde/suplementos)",
+        "title": "{produto} - {marca} | {descricao_curta}",
+        "template": "{produto}\n\n[ATRIBUTOS_SECTION]\nAtributos:\n{atributos}\n[/ATRIBUTOS_SECTION]\n\n[DESCRICAO_SECTION]\nSobre o produto:\n{descricao}\n[/DESCRICAO_SECTION]\n\nProduto 100% original\n* Itens lacrados e dentro da validade.\n* Procedência garantida — sem falsificações.\n* Armazenamento adequado até a entrega.\n\nDimensões: {comprimento}cm x {largura}cm x {altura}cm | Peso: {peso}kg\n\nComo funciona o envio ?\n* Entrega rápida e segura via Mercado Envios\n* Compras confirmadas até 15h são enviadas no mesmo dia útil.\n\nCompra 100% segura\n* Pague em até 10x sem juros pelo Mercado Pago\n* Proteção total ao comprador: receba o produto ou seu dinheiro de volta\n\nDúvidas frequentes\nComo devo usar o produto ?\n- Siga a sugestão de uso indicada na embalagem e no anúncio. Em caso de dúvida, consulte um profissional de saúde.\n\nEstá disponível para envio imediato ?\n- Sim! Produto em estoque, pronto para envio.\n\nE se eu quiser devolver ?\n- A devolução é grátis pelo Mercado Livre e pode ser feita em até 30 dias.\n\nQuem somos\nLoja especializada com atendimento profissional, envio rápido e compromisso com a sua satisfação.\n\nAinda com dúvidas?\nUse o campo de perguntas! Nossa equipe responde em poucos minutos.\n\nClique em \"Comprar agora\" e receba com segurança e confiança.",
+        "isActive": true,
+        "isDefault": true,
+        "domain": "general",
+        "placeholders": {},
+        "sections": [
+          {
+            "content": "[ATRIBUTOS_SECTION]\nEspecificações Técnicas:\n{atributos}\n[/ATRIBUTOS_SECTION]",
+            "condition": "atributos_count > 0"
+          },
+          {
+            "content": "[DESCRICAO_SECTION]\nSobre o produto:\n{descricao}\n[/DESCRICAO_SECTION]",
+            "condition": "description != ''"
+          }
+        ]
+      }
+    ],
+    "tokenStrategy": "oauth2",
+    "credentials": {
+      "clientId": "enc:v1:2WKHNf34fcepEhci:84ACcTe8efrCZrI1TS4sow==:8i2s3byTh9AeXo5oFjDCfA==",
+      "clientSecret": "enc:v1:Q6M9xuYLvtz9ynzO:gcFFV4Z8pF0BvUwAhq1z2w==:hTZgNlb6Qnf8EKVb7ky21ExcR6NW8wpS33Xa4JcAz+0="
+    }
+  },
+  {
+    "_id": "6955b688dfe7143a30376b73",
+    "name": "OLX",
+    "appId": "c827ec4862c2c5e5873c82a36baacf024e9d03ab",
+    "enabled": true,
+    "logoUrl": "https://upload.wikimedia.org/wikipedia/commons/e/ec/Logo_OLX_-_OK.png",
+    "description": "Integração com OLX",
+    "settings": {
+      "nfeSeries": "5"
+    },
+    "tokens": [
+      {
+        "accessToken": "5ae63ae93f17a381b79304488a07cd94ec82af50",
+        "tokenType": "Bearer",
+        "additionalData": {
+          "clientId": "c827ec4862c2c5e5873c82a36baacf024e9d03ab",
+          "authMethod": "authorization_code"
+        },
+        "isActive": true,
+        "_id": "69d02131bb77e2a3f7bd78aa"
+      }
+    ],
+    "requirements": [
+      {
+        "fieldName": "price",
+        "displayName": "Preço",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376b75",
+        "schemaField": "price"
+      },
+      {
+        "fieldName": "quantity",
+        "displayName": "Quantidade (Estoque)",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376b76",
+        "schemaField": "stock"
+      }
+    ],
+    "createdAt": "2025-12-31T23:49:28.066Z",
+    "updatedAt": "2026-05-26T16:57:59.488Z",
+    "__v": 1,
+    "tag": "olx",
+    "templates": [
+      {
+        "name": "Template OLX v1",
+        "title": "{produto} - {marca} {modelo}",
+        "template": "{produto}\nCódigo: {modelo} | Marca: {marca}\nCondição: {condicao}\n\n[DESCRICAO_SECTION]\n{descricao}\n[/DESCRICAO_SECTION]\n\n[ATRIBUTOS_SECTION]\nEspecificações:\n{atributos}\n[/ATRIBUTOS_SECTION]\n\n[DETALHES_SECTION]\nDetalhes:\n{detalhes}\n[/DETALHES_SECTION]\n\n[GENUINO_SECTION]\nProduto Original - Peça genuína com garantia de fábrica.\n[/GENUINO_SECTION]\n\nDimensões: {comprimento}cm x {largura}cm x {altura}cm | Peso: {peso}kg\n\nDúvidas? Entre em contato pelo chat!",
+        "isActive": true,
+        "isDefault": true,
+        "sections": [
+          {
+            "content": "[DESCRICAO_SECTION]\n{descricao}\n[/DESCRICAO_SECTION]",
+            "condition": "description != ''"
+          },
+          {
+            "content": "[ATRIBUTOS_SECTION]\nEspecificações:\n{atributos}\n[/ATRIBUTOS_SECTION]",
+            "condition": "atributos_count > 0"
+          },
+          {
+            "content": "[DETALHES_SECTION]\nDetalhes:\n{detalhes}\n[/DETALHES_SECTION]",
+            "condition": "details != ''"
+          },
+          {
+            "content": "[GENUINO_SECTION]\nProduto Original - Peça genuína com garantia de fábrica.\n[/GENUINO_SECTION]",
+            "condition": "isGenuine == 1"
+          }
+        ]
+      }
+    ],
+    "tokenStrategy": "oauth2",
+    "credentials": {
+      "clientId": "enc:v1:gg8MxcaV94TbCbVb:+FFgzFGEIHfDiXHMf6+bAw==:H4NwnPLnDIJbIu5mdEWTTSk7iYEZHWGkCasfZmi6A7BvqftAKHRh3Q==",
+      "clientSecret": "enc:v1:YiUo7MImOTtcDLkV:qScf9P4hwE2ymsAHpbFXqg==:pACpKyMiH1u264gJvmqFds9MoDFy6ukrrRqPFH9frfo=",
+      "redirectUri": "enc:v1:LRehZEDpmKZTEuoK:GdInvPKiOz17EQa9MckD1A==:MHb39/6QXi4tGv1OFdLc2nE6Cgrce8SjeVRV10hbxmzHJ7NRZHZ76X8v9H8LRZ0W"
+    }
+  },
+  {
+    "_id": "69695217f1870bc65b34d8c2",
+    "name": "Rocket",
+    "tag": "rocket",
+    "enabled": true,
+    "description": "Integração com Rocket",
+    "settings": {
+      "nfeSeries": "1"
+    },
+    "tokens": [],
+    "requirements": [
+      {
+        "fieldName": "price",
+        "displayName": "Preço",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376b6f",
+        "schemaField": "price"
+      },
+      {
+        "fieldName": "category_id",
+        "displayName": "Categoria",
+        "description": null,
+        "isRequired": true,
+        "dataType": "string",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376b71",
+        "schemaField": "category"
+      },
+      {
+        "fieldName": "available_quantity",
+        "displayName": "Quantidade (Estoque)",
+        "description": null,
+        "isRequired": true,
+        "dataType": "number",
+        "displayOrder": 0,
+        "_id": "6955b688dfe7143a30376b72",
+        "schemaField": "stock"
+      },
+      {
+        "fieldName": "pictures",
+        "displayName": "Imagens",
+        "isRequired": true,
+        "dataType": "array",
+        "schemaField": "images"
+      }
+    ],
+    "templates": [],
+    "createdAt": "2026-01-15T20:46:15.957Z",
+    "updatedAt": "2026-01-15T20:46:15.957Z",
+    "__v": 0
+  },
+  {
+    "_id": "69c29eb81b0f29f884e9946f",
+    "name": "TikTok Shop",
+    "tag": "tiktokshop",
+    "enabled": true,
+    "tokenStrategy": "oauth2",
+    "tokens": [],
+    "templates": [
+      {
+        "name": "Template TikTok Shop v1",
+        "title": "{produto} - {marca} {modelo}",
+        "template": "{produto}\nMarca: {marca} | Código: {modelo}\nCondição: {condicao}\n\n[DESCRICAO_SECTION]\n{descricao}\n[/DESCRICAO_SECTION]\n\n[ATRIBUTOS_SECTION]\nEspecificações:\n{atributos}\n[/ATRIBUTOS_SECTION]\n\n[DETALHES_SECTION]\nDetalhes:\n{detalhes}\n[/DETALHES_SECTION]\n\n[GENUINO_SECTION]\nProduto 100% Original\nPeça genuína com garantia de fábrica.\n[/GENUINO_SECTION]\n\n[AVARIADO_SECTION]\nATENÇÃO: Produto com avaria\nCondição: {condicao}\nObservação: {observacao}\n[/AVARIADO_SECTION]\n\nDimensões: {comprimento}cm x {largura}cm x {altura}cm | Peso: {peso}kg\n\nEnvio rápido! Compras confirmadas até 15h são enviadas no mesmo dia útil.\nCompra segura com garantia TikTok Shop.",
+        "isActive": true,
+        "isDefault": true,
+        "sections": [
+          {
+            "content": "[DESCRICAO_SECTION]\n{descricao}\n[/DESCRICAO_SECTION]",
+            "condition": "description != ''"
+          },
+          {
+            "content": "[ATRIBUTOS_SECTION]\nEspecificações:\n{atributos}\n[/ATRIBUTOS_SECTION]",
+            "condition": "atributos_count > 0"
+          },
+          {
+            "content": "[DETALHES_SECTION]\nDetalhes:\n{detalhes}\n[/DETALHES_SECTION]",
+            "condition": "details != ''"
+          },
+          {
+            "content": "[GENUINO_SECTION]\nProduto 100% Original\nPeça genuína com garantia de fábrica.\n[/GENUINO_SECTION]",
+            "condition": "isGenuine == 1"
+          },
+          {
+            "content": "[AVARIADO_SECTION]\nATENÇÃO: Produto com avaria\nCondição: {condicao}\nObservação: {observacao}\n[/AVARIADO_SECTION]",
+            "condition": "condition == damaged"
+          }
+        ]
+      }
+    ],
+    "settings": {
+      "apiBaseUrl": "https://open-api.tiktokglobalshop.com",
+      "apiVersion": "202309"
+    },
+    "requirements": [
+      "title",
+      "price",
+      "stock",
+      "images",
+      "category"
+    ],
+    "createdAt": "2026-03-24T14:24:56.992Z",
+    "updatedAt": "2026-05-26T16:57:59.572Z",
+    "credentials": {
+      "appKey": "enc:v1:GeKxCxf8N0FxkRhh:m4Lc2SR08VQ/bS3+6gfC6Q==:P3rgDmXSv8BAMSbMtA==",
+      "appSecret": "enc:v1:OS7sWCAtNmZso2sC:sMRC3SWkAqIJ2CVNSM1Tgw==:LY/Ffcfz/PkNybTZu9YokfBtD0IXIybrfQwFBPianjPE0I0YNYBfBg=="
+    }
+  }
+]

@@ -17,9 +17,13 @@ export class MarketplaceOrchestratorController {
      */
     @Post('sync-product/:productId')
     @HttpCode(HttpStatus.ACCEPTED)
-    async syncProduct(@Param('productId') productId: string, @Request() req: any) {
+    async syncProduct(
+        @Param('productId') productId: string,
+        @Request() req: any,
+        @Body('marketplaceIds') marketplaceIds?: string[],
+    ) {
         const requesterId = req.user?.id;
-        return this.publicationFlowService.syncProduct(productId, requesterId);
+        return this.publicationFlowService.syncProduct(productId, requesterId, marketplaceIds);
     }
 
     /**

@@ -1,6 +1,6 @@
 // Re-export schema models and documents
 export { ProductModel, ProductDocument, ProductImage, ProductTitle, ProductAttribute } from './schemas/product.schema';
-export { StockMovementModel, StockMovementDocument } from './schemas/stock-movement.schema';
+export { StockMovementModel, StockMovementDocument } from '../stock/schemas/stock-movement.schema';
 export { ProductCompatibilityModel, ProductCompatibilityDocument } from './schemas/product-compatibility.schema';
 export { ProductNCMModel, ProductNCMDocument } from './schemas/product-ncm.schema';
 export { ProductUnitModel, ProductUnitDocument } from './schemas/product-unit.schema';

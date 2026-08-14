@@ -1,12 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { MarketplaceDocument, MarketplaceModel } from '../../schemas/marketplace.schema';
 import { MarketplaceCategoryDocument, MarketplaceCategoryModel } from '../../schemas/marketplace-category.schema';
 import { MercadoLivreAdapter } from '../../adapters/mercado-livre/mercado-livre.adapter';
 import { ShopeeAdapter } from '../../adapters/shopee/shopee.adapter';
 import { MarketplaceAuthService } from '../../auth/services/marketplace-auth.service';
 import { CategoryQueryService } from './category-query.service';
+import { MarketplaceConfigCacheService, MarketplaceConfig } from '../marketplace-config-cache.service';
 
 @Injectable()
 export class CategorySyncService {
@@ -15,33 +15,31 @@ export class CategorySyncService {
   constructor(
     @InjectModel(MarketplaceCategoryModel.name)
     private marketplaceCategoryModel: Model<MarketplaceCategoryDocument>,
-    @InjectModel(MarketplaceModel.name)
-    private marketplaceModel: Model<MarketplaceDocument>,
     private mercadoLivreAdapter: MercadoLivreAdapter,
     private shopeeAdapter: ShopeeAdapter,
     private marketplaceAuthService: MarketplaceAuthService,
     private categoryQueryService: CategoryQueryService,
+    private configCache: MarketplaceConfigCacheService,
   ) { }
 
   async syncCategories(marketplaceId: string | number | any, parentId?: string): Promise<MarketplaceCategoryDocument[]> {
     this.logger.log(`Sincronizando categorias para marketplace ID ${marketplaceId}`);
 
-    const marketplace = await this.marketplaceModel.findById(marketplaceId).exec();
+    const marketplace = await this.configCache.getById(String(marketplaceId));
 
     if (!marketplace) {
       throw new Error(`Marketplace ID ${marketplaceId} não encontrado`);
     }
 
-    const token = await this.marketplaceAuthService.ensureValidToken(marketplaceId);
-
     let categories = [];
 
     switch (marketplace.name) {
       case 'Mercado Livre':
-        categories = await this.syncMercadoLivreCategories(marketplace, token, parentId);
+        categories = await this.syncMercadoLivreCategories(marketplace, parentId);
         break;
       case 'Shopee':
-        categories = await this.syncShopeeCategories(marketplace, token, parentId);
+        // Token/shopId resolvidos pelo ShopeeHttpClient dentro do adapter.
+        categories = await this.syncShopeeCategories(marketplace, parentId);
         break;
       // Adicionar outros marketplaces conforme necessário
       default:
@@ -51,7 +49,7 @@ export class CategorySyncService {
     return categories;
   }
 
-  private async syncMercadoLivreCategories(marketplace: MarketplaceDocument, token: any, parentId?: string): Promise<MarketplaceCategoryDocument[]> {
+  private async syncMercadoLivreCategories(marketplace: MarketplaceConfig, parentId?: string): Promise<MarketplaceCategoryDocument[]> {
     this.logger.log(`Sincronizando categorias do Mercado Livre${parentId ? ` para categoria pai ${parentId}` : ''}`);
 
     try {
@@ -62,22 +60,22 @@ export class CategorySyncService {
         this.logger.log(`Buscando recursivamente todas as subcategorias de ${parentId}`);
 
         // Primeiro, busca os detalhes da categoria pai para garantir que ela seja salva primeiro
-        const parentCategory = await this.mercadoLivreAdapter.categoryAdapter.getCategoryDetails(token.accessToken, parentId);
+        const parentCategory = await this.mercadoLivreAdapter.categoryAdapter.getCategoryDetails(parentId);
 
         // Adiciona a categoria pai à lista para garantir que ela seja salva/atualizada primeiro
         categories.push(parentCategory);
 
         // Depois busca todas as subcategorias recursivamente
-        const childCategories = await this.mercadoLivreAdapter.categoryAdapter.getAllChildCategories(token.accessToken, parentId);
+        const childCategories = await this.mercadoLivreAdapter.categoryAdapter.getAllChildCategories(parentId);
         categories = [...categories, ...childCategories];
       } else {
         // Se não tiver parentId, busca apenas as categorias raiz
-        categories = await this.mercadoLivreAdapter.getCategories(token.accessToken);
+        categories = await this.mercadoLivreAdapter.getCategories();
 
         // Para cada categoria raiz, busca detalhes completos
         const rootCategoriesWithDetails = [];
         for (const rootCategory of categories) {
-          const details = await this.mercadoLivreAdapter.categoryAdapter.getCategoryDetails(token.accessToken, rootCategory.id);
+          const details = await this.mercadoLivreAdapter.categoryAdapter.getCategoryDetails(rootCategory.id);
           rootCategoriesWithDetails.push(details);
         }
         categories = rootCategoriesWithDetails;
@@ -127,7 +125,7 @@ export class CategorySyncService {
    * Persiste uma categoria do Mercado Livre (detalhes completos da API) na coleção interna.
    */
   private async upsertMercadoLivreCategory(
-    marketplace: MarketplaceDocument,
+    marketplace: MarketplaceConfig,
     category: any,
   ): Promise<MarketplaceCategoryDocument> {
     const existingCategory = await this.categoryQueryService.findCategoryByExternalId(marketplace.id, category.id);
@@ -165,7 +163,7 @@ export class CategorySyncService {
   ): Promise<{ chain: MarketplaceCategoryDocument[]; category: MarketplaceCategoryDocument }> {
     this.logger.log(`Importando categoria externa ${externalCategoryId} para marketplace ${marketplaceId}`);
 
-    const marketplace = await this.marketplaceModel.findById(marketplaceId).exec();
+    const marketplace = await this.configCache.getById(String(marketplaceId));
     if (!marketplace) {
       throw new Error(`Marketplace ID ${marketplaceId} não encontrado`);
     }
@@ -189,10 +187,7 @@ export class CategorySyncService {
         break;
       }
       seen.add(currentId);
-      const details = await this.mercadoLivreAdapter.categoryAdapter.getCategoryDetails(
-        token.accessToken,
-        currentId,
-      );
+      const details = await this.mercadoLivreAdapter.categoryAdapter.getCategoryDetails(currentId);
       chainRaw.push(details);
       currentId = details.parent_id || null;
     }
@@ -212,12 +207,12 @@ export class CategorySyncService {
     return { chain: saved, category: leaf };
   }
 
-  private async syncShopeeCategories(marketplace: MarketplaceDocument, token: any, parentId?: string): Promise<MarketplaceCategoryDocument[]> {
+  private async syncShopeeCategories(marketplace: MarketplaceConfig, parentId?: string): Promise<MarketplaceCategoryDocument[]> {
     this.logger.log(`Sincronizando categorias da Shopee${parentId ? ` para categoria pai ${parentId}` : ''}`);
 
     try {
       // Obter categorias da API da Shopee
-      const categories = await this.shopeeAdapter.getCategories(token.accessToken, token.additionalData.shopId, parentId);
+      const categories = await this.shopeeAdapter.getCategories(parentId);
 
       // Salvar categorias no banco de dados
       const savedCategories = [];
@@ -255,7 +250,7 @@ export class CategorySyncService {
           this.logger.log(`Categoria ${category.category_id} da Shopee possui subcategorias. Processando recursivamente...`);
 
           // Sincronizar subcategorias
-          await this.syncShopeeCategoryChildren(marketplace, token, category.category_id.toString());
+          await this.syncShopeeCategoryChildren(marketplace, category.category_id.toString());
         }
       }
 
@@ -267,12 +262,12 @@ export class CategorySyncService {
   }
 
   // Método para sincronizar recursivamente as subcategorias da Shopee
-  private async syncShopeeCategoryChildren(marketplace: MarketplaceDocument, token: any, parentId: string): Promise<void> {
+  private async syncShopeeCategoryChildren(marketplace: MarketplaceConfig, parentId: string): Promise<void> {
     this.logger.log(`Sincronizando subcategorias da Shopee para categoria pai ${parentId}`);
 
     try {
       // Obter subcategorias da API da Shopee
-      const childCategories = await this.shopeeAdapter.getCategories(token.accessToken, token.additionalData.shopId, parentId);
+      const childCategories = await this.shopeeAdapter.getCategories(parentId);
 
       for (const childCategory of childCategories) {
         const existingCategory = await this.categoryQueryService.findCategoryByExternalId(marketplace.id, childCategory.category_id.toString());
@@ -305,7 +300,7 @@ export class CategorySyncService {
           this.logger.log(`Subcategoria ${childCategory.category_id} da Shopee possui subcategorias. Processando recursivamente...`);
 
           // Chamada recursiva para processar as subcategorias
-          await this.syncShopeeCategoryChildren(marketplace, token, childCategory.category_id.toString());
+          await this.syncShopeeCategoryChildren(marketplace, childCategory.category_id.toString());
         }
       }
     } catch (error) {
@@ -318,7 +313,7 @@ export class CategorySyncService {
   async saveDiscoveredCategory(marketplaceId: string | number, category: any): Promise<MarketplaceCategoryDocument> {
     this.logger.log(`Salvando categoria descoberta: ${category.id} - ${category.name}`);
 
-    const marketplace = await this.marketplaceModel.findById(marketplaceId).exec();
+    const marketplace = await this.configCache.getById(String(marketplaceId));
     if (!marketplace) {
       throw new Error(`Marketplace ID ${marketplaceId} não encontrado`);
     }

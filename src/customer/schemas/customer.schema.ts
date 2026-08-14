@@ -36,8 +36,14 @@ export class CustomerModel {
     @Prop()
     avatar?: string; // Avatar URL
 
-    @Prop()
-    phone: string;
+    @Prop({ index: true })
+    phone?: string;
+
+    @Prop({ default: false })
+    emailVerified: boolean;
+
+    @Prop({ default: false })
+    phoneVerified: boolean;
 
     @Prop({ default: true })
     isActive: boolean;

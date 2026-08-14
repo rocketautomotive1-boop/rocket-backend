@@ -25,13 +25,14 @@ export class ProductFieldMapper {
 
     return {
       produto:         this.formatProductName(product.name, product.partNumber),
-      marca:           product.brand?.amazonName || product.brand?.name || '',
+      marca:           product.brand?.amazonName || product.brand?.name || this.resolveBrandFromAttributes(p),
       modelo:          product.partNumber || '',
       descricao:       product.description || '',
       descricao_curta: product.description || '',
       detalhes:        p.details || '',
       condicao:        condicaoLabel,
-      preco:           product.price ? Number(product.price).toFixed(2) : '0.00',
+      // Sale price is owned by PricingModule; not templated here ({preco} unused). Kept as 0.00.
+      preco:           '0.00',
       codigo:          product.barcode || product.partNumber || '',
       peso:            product.weight ? String(product.weight) : '0',
       comprimento:     product.dimensions?.length ? String(product.dimensions.length) : '0',
@@ -84,6 +85,18 @@ export class ProductFieldMapper {
         return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
       })
       .join(' ');
+  }
+
+  /**
+   * Fallback de marca a partir dos atributos quando não há `product.brand`.
+   * No domínio general a marca vive como atributo BRAND (de marketplace), não
+   * no relacionamento brand do produto.
+   */
+  private resolveBrandFromAttributes(product: any): string {
+    const attrs = product?.attributes;
+    if (!Array.isArray(attrs)) return '';
+    const brand = attrs.find((a: any) => (a.code || a.id) === 'BRAND' && a.value);
+    return brand ? String(brand.valueName || brand.value) : '';
   }
 
   /**

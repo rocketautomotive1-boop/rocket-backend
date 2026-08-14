@@ -17,9 +17,9 @@ export class MagaluController {
   ) {}
 
   @Get('auth/url')
-  getAuthUrl(@Query('state') providedState?: string) {
+  async getAuthUrl(@Query('state') providedState?: string) {
     const state = ensureState(providedState);
-    const { url, codeVerifier } = this.auth.getAuthorizeUrl(state);
+    const { url, codeVerifier } = await this.auth.getAuthorizeUrl(state);
     pkceStore.set(state, codeVerifier);
     return { url, state }; // devolve o state para o client
   }

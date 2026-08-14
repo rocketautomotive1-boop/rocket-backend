@@ -47,7 +47,6 @@ export class ReadinessRecoveryJob {
         await this.orchestratorPublisher.requestSync({
           productId,
           reason: 'auto_complete_recovery',
-          force: false,
         });
         this.logger.log(`Recovery: enqueued sync for product ${productId}`);
       } catch (err) {

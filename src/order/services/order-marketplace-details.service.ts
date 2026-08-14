@@ -1,11 +1,14 @@
-import { Injectable, Logger, NotFoundException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import axios from 'axios';
 import { OrderDocument, OrderModel } from '../schemas/order.schema';
-import { MarketplaceModel, MarketplaceDocument } from '../../marketplace/schemas/marketplace.schema';
-import { buildSignedParams, buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
+import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
+import { buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
+import { ShopeeSignerService } from '../../marketplace/adapters/shopee/shopee-signer.service';
 import { MarketplaceOrderService } from '../../marketplace/services/marketplace-order.service';
+import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
+import { MlHttpClient } from '../../marketplace/adapters/mercado-livre/ml-http-client';
 
 // ── Shared types ────────────────────────────────────────────────────────────────
 
@@ -162,9 +165,11 @@ export class OrderMarketplaceDetailsService {
 
     constructor(
         @InjectModel(OrderModel.name) private readonly orderModel: Model<OrderDocument>,
-        @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceDocument>,
-        @Inject(forwardRef(() => MarketplaceOrderService))
+        private readonly configCache: MarketplaceConfigCacheService,
         private readonly marketplaceOrderService: MarketplaceOrderService,
+        private readonly auth: MarketplaceAuthService,
+        private readonly signer: ShopeeSignerService,
+        private readonly mlHttp: MlHttpClient,
     ) {}
 
     async getDetails(orderId: string): Promise<MarketplaceOrderDetails> {
@@ -283,9 +288,13 @@ export class OrderMarketplaceDetailsService {
      * Returns a normalized MarketplaceFinancialSummary plus raw data.
      */
     async getMlBillingDetails(orderId: string): Promise<any> {
-        const { order, marketplace, token } = await this.resolveContext(orderId);
-        const tag = (marketplace.tag || '').toLowerCase();
+        const order = await this.orderModel.findById(orderId).lean().exec();
+        if (!order) throw new NotFoundException(`Order ${orderId} not found`);
 
+        const marketplace = await this.configCache.getById(String((order as any).marketplaceId));
+        if (!marketplace) throw new NotFoundException(`Marketplace not found for order ${orderId}`);
+
+        const tag = (marketplace.tag || '').toLowerCase();
         if (!tag.includes('mercado')) {
             return { supported: false, marketplace: marketplace.name };
         }
@@ -296,15 +305,15 @@ export class OrderMarketplaceDetailsService {
         this.logger.log(`[ML Billing] Fetching billing details for order ${externalId}`);
 
         try {
-            const response = await axios.get(
-                `https://api.mercadolibre.com/billing/integration/group/ML/order/details`,
-                {
-                    headers: { Authorization: `Bearer ${token.accessToken}` },
-                    params: { order_ids: externalId },
-                }
+            // Transporte canônico (MlHttpClient): resolve conta (accountId), auth-retry
+            // e backoff de 429 (local_rate_limited) — sem axios cru nem token manual.
+            const billingResponse = await this.mlHttp.get<any>(
+                '/billing/integration/group/ML/order/details',
+                { accountId: (order as any).accountId, context: 'getMlBillingDetails' },
+                { order_ids: externalId },
             );
 
-            const rawResult = response.data?.results?.[0] ?? null;
+            const rawResult = billingResponse?.results?.[0] ?? null;
             if (!rawResult) {
                 return { supported: true, data: null };
             }
@@ -634,7 +643,7 @@ export class OrderMarketplaceDetailsService {
             response_optional_fields: extraFields,
         };
 
-        const signedParams = buildSignedParams(path, timestamp, token.accessToken, Number(shopId), queryParams);
+        const signedParams = await this.signer.buildSignedParams(path, timestamp, token.accessToken, Number(shopId), queryParams);
 
         this.logger.log(`[Shopee Details] Fetching order ${orderSn}`);
 
@@ -699,14 +708,11 @@ export class OrderMarketplaceDetailsService {
         const order = await this.orderModel.findById(orderId).lean().exec();
         if (!order) throw new NotFoundException(`Order ${orderId} not found`);
 
-        const marketplace = await this.marketplaceModel
-            .findById((order as any).marketplaceId)
-            .lean()
-            .exec();
+        const marketplace = await this.configCache.getById(String((order as any).marketplaceId));
         if (!marketplace) throw new NotFoundException(`Marketplace not found for order ${orderId}`);
 
-        const token = (marketplace as any).tokens?.find((t: any) => t.isActive);
-        if (!token) throw new NotFoundException(`No active token for marketplace ${marketplace.name}`);
+        const token = await this.auth.ensureValidToken(String(marketplace._id));
+        if (!token?.accessToken) throw new NotFoundException(`No active token for marketplace ${marketplace.name}`);
 
         return { order, marketplace, token };
     }

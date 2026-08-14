@@ -1,6 +1,4 @@
-import { createHash } from 'crypto';
 import { VEHICLE_CONSTANTS } from '../constants/vehicle.constants';
-import { VehicleAiOutput } from '../types/vehicle.types';
 import {
   collapseSpaces,
   removeAccents,
@@ -50,6 +48,162 @@ export function normalizeEngineTokens(engineStr: string): string[] {
   return tokenize(engineStr ?? '');
 }
 
+/** Extrai cilindrada em cc de formato bruto ("1000 cc", "1.0", "1,4", "2000cc") → undefined se irreconhecível. */
+export function normalizeDisplacementCc(raw?: string): number | undefined {
+  if (!raw) return undefined;
+  const str = raw.toLowerCase().trim();
+
+  const ccMatch = str.match(/(\d+(?:[.,]\d+)?)\s*cc/);
+  if (ccMatch) {
+    const cc = parseFloat(ccMatch[1].replace(',', '.'));
+    return Number.isFinite(cc) ? Math.round(cc) : undefined;
+  }
+
+  const litersMatch = str.match(/\b(\d)[.,](\d)\b/);
+  if (litersMatch) {
+    const liters = parseFloat(`${litersMatch[1]}.${litersMatch[2]}`);
+    return Number.isFinite(liters) ? Math.round(liters * 1000) : undefined;
+  }
+
+  return undefined;
+}
+
+/** Extrai a cilindrada como string de exibição do texto de version ("1.0 5p" -> "1.0") → undefined se irreconhecível. */
+export function extractEngineDisplay(version: string): string | undefined {
+  if (!version) return undefined;
+  const match = version.match(/\b(\d[.,]\d)\b/);
+  if (!match) return undefined;
+  return match[1].replace(',', '.');
+}
+
+const FUEL_TAG_DICTIONARY: Array<{ tag: string; substrings: string[] }> = [
+  { tag: 'diesel', substrings: ['diesel'] },
+  { tag: 'gasoline', substrings: ['gasolina', 'gasol'] },
+  { tag: 'ethanol', substrings: ['alcool', 'etanol'] },
+  { tag: 'hybrid', substrings: ['hibrid'] },
+  { tag: 'electric', substrings: ['eletric'] },
+  { tag: 'cng', substrings: ['gnv', 'gas natural', 'cng'] },
+];
+
+/**
+ * "flex" no PT-BR significa "aceita gasolina e álcool" — os registros nunca são gravados com a
+ * tag literal 'flex' (o campo fuelType vem como "Gasolina e álcool" e normaliza para
+ * ['gasoline','ethanol']). Por isso o token de busca "flex" precisa expandir para as duas tags
+ * reais, senão o filtro fuelTags nunca casa com nenhum documento.
+ */
+const FLEX_SUBSTRINGS = ['flex'];
+const FLEX_EXPANSION = ['gasoline', 'ethanol'];
+
+/** Mapeia texto livre de combustível (PT-BR, incl. compostos "X e Y", "X/Y") pra tags do VehicleFuelType. */
+export function normalizeFuelTags(raw?: string): string[] {
+  if (!raw) return [];
+  const str = removeAccents(raw).toLowerCase();
+
+  const tags = FUEL_TAG_DICTIONARY.filter(({ substrings }) =>
+    substrings.some((s) => str.includes(s)),
+  ).map(({ tag }) => tag);
+
+  if (FLEX_SUBSTRINGS.some((s) => str.includes(s))) {
+    tags.push(...FLEX_EXPANSION);
+  }
+
+  return [...new Set(tags)];
+}
+
+const TRACTION_RE = /\b(4x4|4wd|4x2|awd)\b/i;
+
+const TRIM_STRIP_PATTERNS: RegExp[] = [
+  /\b\d+(?:[.,]\d+)?\s*cc\b/gi,
+  /\b\d[.,]\d\b/g,
+  /\b\d\s*p\b/gi,
+  /\bflex\b/gi,
+  /\bgasolina\b/gi,
+  /\bgasol\b/gi,
+  /\b[ae]lcool\b/gi,
+  /\betanol\b/gi,
+  /\bhibrid[oa]?\b/gi,
+  /\beletric[oa]?\b/gi,
+  /\bgnv\b/gi,
+  /\bgas natural\b/gi,
+  /\bcng\b/gi,
+  /\bdiesel\b/gi,
+  /\baut\.?\b/gi,
+  /\bautomatic[ao]\b/gi,
+  /\bautomatizada\b/gi,
+  /\bsequencial\b/gi,
+  /\bsemiautomatic[ao]\b/gi,
+  /\bmanual\b/gi,
+  /\bcvt\b/gi,
+  /\b4x4\b/gi,
+  /\b4wd\b/gi,
+  /\b4x2\b/gi,
+  /\bawd\b/gi,
+  /\bcab(?:ine|\.)?\s*(?:dupla|simples)\b/gi,
+];
+
+const TRIM_ACRONYMS = new Set([
+  'rs', 'ss', 'ls', 'glx', 'gls', 'le', 'gt', 'gti', 'xei', 'lt', 'ltz', 'se', 'sl', 'sv',
+  'tsi', 'tdi', 'hdi', 'cdi', 'vht', 'srv', 'ltd', 'xls', 'xlt', 'sw4', 'ex', 'exl', 'gli',
+]);
+
+const CAB_TYPE_RE = /\bcab(?:ine|\.)?\s*(dupla|simples)\b/i;
+
+/** Detecta tipo de cabine no texto: "Cab. Dupla"/"Cabine Dupla" -> "dupla", "Cab. Simples" -> "simples". */
+export function extractCabType(version: string): string | undefined {
+  if (!version) return undefined;
+  const match = version.match(CAB_TYPE_RE);
+  if (!match) return undefined;
+  return match[1].toLowerCase();
+}
+
+/** Detecta menção de tração no texto: "4x4"/"4wd" -> "4x4", "4x2" -> "4x2", "awd" -> "awd". */
+export function extractTraction(version: string): string | undefined {
+  if (!version) return undefined;
+  const match = version.match(TRACTION_RE);
+  if (!match) return undefined;
+  const token = match[1].toLowerCase();
+  if (token === '4wd') return '4x4';
+  return token;
+}
+
+/**
+ * Title Case locale-aware para PT-BR: normaliza acentos antes de capitalizar (evita bugs tipo
+ * "FurgãO") e mantém siglas conhecidas (RS, GLX, TSI...) em uppercase em vez de "Rs"/"Glx".
+ */
+export function toTitleCasePtBr(text: string): string {
+  return collapseSpaces(text ?? '')
+    .split(' ')
+    .map((word) => {
+      if (!word) return word;
+      const bare = word.replace(/[().]/g, '');
+      if (TRIM_ACRONYMS.has(removeAccents(bare).toLowerCase())) {
+        return word.toUpperCase();
+      }
+      const lower = word.toLowerCase();
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    })
+    .join(' ');
+}
+
+/**
+ * Remove de version os tokens redundantes já capturados em campos estruturados (cilindrada,
+ * portas, combustível, transmissão, tração) e retorna o texto residual (nome comercial/edição)
+ * em Title Case PT-BR → undefined se nada sobrar.
+ */
+export function extractTrim(version: string): string | undefined {
+  if (!version) return undefined;
+
+  let remaining = version;
+  for (const pattern of TRIM_STRIP_PATTERNS) {
+    remaining = remaining.replace(pattern, ' ');
+  }
+
+  const cleaned = collapseSpaces(remaining.replace(/[()]+/g, ' ')).replace(/(?:^|\s)\.(?=\s|$)/g, '');
+  if (!cleaned) return undefined;
+
+  return toTitleCasePtBr(cleaned);
+}
+
 export function normalizeVersionForKey(version: string): string {
   return tokenize(version ?? '')
     .filter((t) => !VERSION_NOISE_TOKENS.has(t))
@@ -69,29 +223,21 @@ export function generateVersionStandard(
     .trim();
 }
 
-export function generateEngineSignature(engine?: {
-  family?: string;
-  displacement?: string;
-  aspiration?: string;
+export function generateEngineSignature(input?: {
+  displacementCc?: number;
   fuelType?: string;
 }): string {
-  if (!engine) return '';
+  if (!input) return '';
 
-  const toNormalizedToken = (
-    value: unknown,
-    replacer?: (v: string) => string,
-  ): string => {
+  const toNormalizedToken = (value: unknown): string => {
     if (value === null || value === undefined) return '';
     const str = String(value).toLowerCase().trim();
-    if (!str) return '';
-    return replacer ? replacer(str) : str;
+    return str;
   };
 
   const parts = [
-    toNormalizedToken(engine.family, (v) => v.replace(/[\s/]/g, '_')),
-    toNormalizedToken(engine.displacement, (v) => v.replace(/\s+/g, '_')),
-    toNormalizedToken(engine.aspiration),
-    toNormalizedToken(engine.fuelType),
+    toNormalizedToken(input.displacementCc),
+    toNormalizedToken(input.fuelType),
   ].filter(Boolean);
   return parts.join('_');
 }
@@ -102,6 +248,7 @@ export function generateCanonicalKey(
   version: string,
   engineSignature: string,
   market: string,
+  years: number[] = [],
 ): string {
   return [
     normalizeMake(make),
@@ -109,73 +256,8 @@ export function generateCanonicalKey(
     normalizeVersionForKey(version),
     (engineSignature ?? '').toLowerCase().trim(),
     (market ?? '').toLowerCase().trim(),
+    [...years].sort((a, b) => a - b).join('_'),
   ].join(':');
-}
-
-export function generateLockKey(
-  make: string,
-  model: string,
-  version: string,
-  sourceItemId?: string,
-  source?: string,
-  title?: string,
-  engineRaw?: string,
-): string {
-  const hasStructural = make?.trim() && model?.trim() && version?.trim();
-
-  if (hasStructural) {
-    return [
-      normalizeMake(make),
-      normalizeModel(model),
-      normalizeVersionDisplay(version),
-      (source ?? '').toLowerCase(),
-      (sourceItemId ?? '').toLowerCase(),
-    ]
-      .filter(Boolean)
-      .map((p) => p.replace(/\s+/g, '_'))
-      .join(':');
-  }
-
-  const hashInput = [
-    normalizeMake(make),
-    normalizeModel(model),
-    title ?? '',
-    engineRaw ?? '',
-    source ?? '',
-    sourceItemId ?? '',
-  ]
-    .map((s) => s.toLowerCase().trim())
-    .filter(Boolean)
-    .join('|');
-
-  const hash = createHash('sha256').update(hashInput).digest('hex').slice(0, 20);
-  return `fallback:${hash}`;
-}
-
-export function generateAiCacheKey(input: {
-  make?: string;
-  model?: string;
-  version?: string;
-  title?: string;
-  engine?: string;
-}): string {
-  const make = normalizeMake(input.make ?? '');
-  const model = normalizeModel(input.model ?? '');
-  const version = normalizeVersionForKey(input.version ?? '');
-  if (make && model && version) {
-    return `v1:${make}:${model}:${version}`;
-  }
-  const hashInput = [
-    make,
-    model,
-    input.title ?? '',
-    input.engine ?? '',
-  ]
-    .map((v) => toLowerClean(v))
-    .filter(Boolean)
-    .join('|');
-  const hash = createHash('sha256').update(hashInput).digest('hex').slice(0, 20);
-  return `v1:fallback:${hash}`;
 }
 
 export function deriveAliases(
@@ -235,12 +317,9 @@ export function computeDataQualityScore(input: {
   make?: string;
   model?: string;
   version?: string;
-  productionYears?: number[];
-  engine?: {
-    family?: string;
-    displacement?: string;
-    fuelType?: string;
-  };
+  years?: number[];
+  displacementCc?: number;
+  fuelType?: string;
   transmission?: string[];
   bodyType?: string;
   platform?: string;
@@ -253,10 +332,9 @@ export function computeDataQualityScore(input: {
   if (input.make) score += 15;
   if (input.model) score += 15;
   if (input.version) score += 10;
-  if (input.productionYears?.length) score += 12;
-  if (input.engine?.family) score += 10;
-  if (input.engine?.displacement) score += 8;
-  if (input.engine?.fuelType) score += 10;
+  if (input.years?.length) score += 12;
+  if (input.displacementCc) score += 18;
+  if (input.fuelType) score += 10;
   if (input.transmission?.length) score += 6;
   if (input.bodyType) score += 4;
   if (input.platform) score += 4;
@@ -265,37 +343,3 @@ export function computeDataQualityScore(input: {
   return Math.max(0, Math.min(100, score));
 }
 
-export function normalizeConfidence(value: unknown): number | undefined {
-  if (value === null || value === undefined) return undefined;
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : undefined;
-  }
-
-  const raw = String(value).trim().toLowerCase();
-  if (!raw) return undefined;
-
-  if (raw === 'high') return 0.9;
-  if (raw === 'medium' || raw === 'med' || raw === 'mid') return 0.6;
-  if (raw === 'low') return 0.3;
-
-  const parsed = Number(raw.replace(',', '.'));
-  if (!Number.isFinite(parsed)) return undefined;
-
-  // Accept percentages and normalize to 0..1
-  if (parsed > 1 && parsed <= 100) return Math.max(0, Math.min(1, parsed / 100));
-  return Math.max(0, Math.min(1, parsed));
-}
-
-export function aiOutputToCanonicalInput(ai: VehicleAiOutput): {
-  make?: string;
-  model?: string;
-  version?: string;
-  years?: number[];
-} {
-  return {
-    make: ai.make,
-    model: ai.model,
-    version: ai.version,
-    years: ai.productionYears,
-  };
-}

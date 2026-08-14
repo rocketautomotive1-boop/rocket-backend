@@ -1,13 +1,13 @@
 import { Controller, Post, Body, BadRequestException } from '@nestjs/common';
-import { OrderService } from '../order.service';
+import { OrderIngestService } from '../ingest/order-ingest.service';
 
 @Controller('orders/sync')
 export class OrderSyncController {
-    constructor(private readonly orderService: OrderService) { }
+    constructor(private readonly ingest: OrderIngestService) { }
 
     /**
-     * Manual trigger endpoint for order sync
-     * Frontend can call this to request sync instead of doing it directly
+     * Manual trigger endpoint for order sync.
+     * Frontend can call this to request sync instead of doing it directly.
      */
     @Post('request')
     async requestSync(@Body() body: { externalId: string; marketplaceId: string }) {
@@ -18,14 +18,10 @@ export class OrderSyncController {
         }
 
         try {
-            await this.orderService.enqueueSyncOrder(externalId, marketplaceId);
-            return {
-                message: 'Sync requested successfully',
-                externalId,
-                status: 'processing'
-            };
+            await this.ingest.ingest(externalId, marketplaceId, 'manual');
+            return { message: 'Sync requested successfully', externalId, status: 'processing' };
         } catch (error) {
-            throw new BadRequestException(error.message);
+            throw new BadRequestException((error as Error).message);
         }
     }
 }

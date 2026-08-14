@@ -50,16 +50,15 @@ export class MarketplaceAuthController {
     @Post(':tag/refresh-token')
     @ApiOperation({ summary: 'Atualizar token de acesso para um marketplace' })
     @ApiResponse({ status: 200, description: 'Token atualizado com sucesso' })
-    async refreshToken(@Param('tag') tag: string) {
-        // Note: MarketplaceService.refreshToken delegated to AuthService usually, or we can go direct.
-        // The original controller called MarketplaceService.refreshToken.
-        // Let's check MarketplaceService.refreshToken implementation to be sure.
-        // For now I'll use MarketplaceService to be safe, or check if AuthService has it.
-        // AuthService has refreshToken(id, token).
-        // MarketplaceService likely orchestrates fetching the token and calling auth service.
+    async refreshToken(@Param('tag') tag: string, @Query('accountId') accountId?: string) {
+        // Força refresh REAL via pipeline canônico (TokenManager → broker). Opcional
+        // ?accountId= força uma conta específica; senão a conta default/domínio.
         const marketplace = await this.marketplaceService.findByTag(tag);
         if (!marketplace) throw new NotFoundException(`Marketplace com tag ${tag} não encontrado`);
-        return this.marketplaceService.refreshToken(marketplace.id || marketplace._id);
+        return this.marketplaceAuthService.forceRefreshToken(
+            marketplace.id || marketplace._id,
+            accountId ? { accountId } : undefined,
+        );
     }
 
     @Post(':tag/update-access-token')

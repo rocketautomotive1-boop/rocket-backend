@@ -1,34 +1,24 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
-
-export type MarketplaceTokenDocument = MarketplaceToken & Document;
-
-@Schema({ timestamps: true, collection: 'marketplace_tokens' })
+/**
+ * Tipo de token de marketplace usado pelos adapters como contrato de
+ * authenticate()/refreshToken().
+ *
+ * NOTA: já foi um @Schema Mongoose (coleção `marketplace_tokens`), mas essa
+ * coleção nunca foi escrita em runtime — o token canônico vive embarcado em
+ * `marketplaces.tokens[]` (MarketplaceTokenSnapshot) e, no modelo unificado, em
+ * `marketplaces.accounts[].token`. Aqui ficou apenas o TIPO, consumido por ~14
+ * arquivos (adapters/controllers). Não registrar como model novamente.
+ */
 export class MarketplaceToken {
-    @Prop({ type: {} })
-    marketplaceId: number | string | any;
-
-
-    @Prop({ required: true })
+    marketplaceId?: number | string | any;
     accessToken: string;
-
-    @Prop()
-    refreshToken: string;
-
-    @Prop()
-    expiresAt: Date;
-
-    @Prop()
-    tokenType: string;
-
-    @Prop({ type: Object })
-    additionalData: Record<string, any>;
-
-    @Prop({ default: true })
-    isActive: boolean;
-
+    refreshToken?: string;
+    expiresAt?: Date;
+    tokenType?: string;
+    additionalData?: Record<string, any>;
+    isActive?: boolean;
     createdAt?: Date;
     updatedAt?: Date;
 }
 
-export const MarketplaceTokenSchema = SchemaFactory.createForClass(MarketplaceToken);
+/** Alias histórico — antes era `MarketplaceToken & Document`. Mantido como tipo puro. */
+export type MarketplaceTokenDocument = MarketplaceToken;

@@ -41,6 +41,11 @@ export interface DiscoveryResults {
     serp: {
         items: NormalizedItem[];
     };
+    // Preços de mercado (Menor Preço / SEFAZ, PE por EAN). Domínio general.
+    menorPreco?: {
+        stats: { min: number | null; avg: number | null; max: number | null; count: number } | null;
+        offers: MenorPrecoOffer[];
+    };
 
     // Legacy fields for backward compatibility with monolith
     titles: string[];
@@ -55,7 +60,25 @@ export interface DiscoveryResults {
     sources: {
         serp: { items: NormalizedItem[] };
         mercadolivre: { items: NormalizedItem[] };
+        menorPreco?: {
+            stats: { min: number | null; avg: number | null; max: number | null; count: number } | null;
+            offers: MenorPrecoOffer[];
+            confidence: string;
+        };
     };
+}
+
+export interface MenorPrecoOffer {
+    seller_name: string | null;
+    legal_name: string | null;
+    address: string | null;
+    bairro: string | null;
+    mun: string | null;
+    uf: string | null;
+    price: number | null;
+    list_price: number | null;
+    sold_at: string | null;
+    dist_km: number | null;
 }
 
 export interface NormalizedItem {

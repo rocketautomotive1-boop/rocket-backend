@@ -2,7 +2,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ProductModel, ProductDocument } from '../../product/schemas/product.schema';
-import { StockMovementModel, StockMovementDocument } from '../../product/schemas/stock-movement.schema';
+import { StockMovementModel, StockMovementDocument } from '../../stock/schemas/stock-movement.schema';
 import { ListingModel, ListingDocument } from '../../listing/schemas/listing.schema';
 
 @Injectable()

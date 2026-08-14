@@ -3,8 +3,10 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import axios from 'axios';
 import { OrderDocument, OrderModel } from '../schemas/order.schema';
-import { MarketplaceModel, MarketplaceDocument } from '../../marketplace/schemas/marketplace.schema';
-import { buildSignedParams, buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
+import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
+import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
+import { buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
+import { ShopeeSignerService } from '../../marketplace/adapters/shopee/shopee-signer.service';
 
 export interface LabelResult {
     format: 'zpl' | 'pdf' | 'url';
@@ -19,21 +21,21 @@ export class OrderLabelService {
 
     constructor(
         @InjectModel(OrderModel.name) private readonly orderModel: Model<OrderDocument>,
-        @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceDocument>,
+        private readonly configCache: MarketplaceConfigCacheService,
+        private readonly auth: MarketplaceAuthService,
+        private readonly signer: ShopeeSignerService,
     ) {}
 
     async getLabel(orderId: string): Promise<LabelResult> {
         const order = await this.orderModel.findById(orderId).lean().exec();
         if (!order) throw new NotFoundException(`Order ${orderId} not found`);
 
-        const marketplace = await this.marketplaceModel
-            .findById(order.marketplaceId)
-            .lean()
-            .exec();
+        const marketplace = await this.configCache.getById(String(order.marketplaceId));
         if (!marketplace) throw new NotFoundException(`Marketplace not found for order ${orderId}`);
 
-        const activeToken = (marketplace as any).tokens?.find((t: any) => t.isActive);
-        if (!activeToken) {
+        // Via única de token (resolve via accounts[], renova se preciso).
+        const activeToken = await this.auth.ensureValidToken(String(marketplace._id));
+        if (!activeToken?.accessToken) {
             throw new NotFoundException(`No active token for marketplace ${marketplace.name}`);
         }
 
@@ -127,7 +129,7 @@ export class OrderLabelService {
             shipping_document_type: 'THERMAL_AIR_WAYBILL',
         };
 
-        const params = buildSignedParams(path, timestamp, token.accessToken, Number(shopId));
+        const params = await this.signer.buildSignedParams(path, timestamp, token.accessToken, Number(shopId));
 
         this.logger.log(`[Shopee Label] Requesting THERMAL_AIR_WAYBILL for order ${orderSn}`);
 

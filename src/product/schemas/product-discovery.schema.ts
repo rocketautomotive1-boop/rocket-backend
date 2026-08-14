@@ -62,6 +62,21 @@ export class ProductDiscoveryModel {
     @Prop({ type: Types.ObjectId, ref: 'CategoryModel', required: false, index: true })
     resolvedCategoryId?: Types.ObjectId;
 
+    /**
+     * Product-scoped intent model: monotonic version per product. A new explicit
+     * discovery run supersedes the previous active intent and bumps this.
+     */
+    @Prop({ default: 1, index: true })
+    intentVersion: number;
+
+    /** True for the current active intent; false once superseded by a newer run. */
+    @Prop({ default: true, index: true })
+    isActiveIntent: boolean;
+
+    /** When this intent was superseded by a newer one (null while active). */
+    @Prop({ type: Date, default: null })
+    supersededAt: Date | null;
+
     createdAt?: Date;
     updatedAt?: Date;
 }

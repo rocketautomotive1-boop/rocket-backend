@@ -5,6 +5,7 @@ import { Model } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CategoryResolutionService } from '../services/category-resolution.service';
 import { DiscoveryRealtimeEvent, DiscoveryRealtimeStatus } from '../types/discovery-realtime-event';
+import { mapDiscoveryDocToAppData } from '../dto/discovery-app.mapper';
 
 @Injectable()
 export class DiscoveryMsResponseConsumer {
@@ -26,8 +27,8 @@ export class DiscoveryMsResponseConsumer {
         queueOptions: { durable: true },
     })
     async handleResponse(msg: any) {
-        const { jobId, status, results, error, scrapedAt } = msg;
-        this.logger.log(`Received discovery response: jobId=${jobId} status=${status}`);
+        const { jobId, status, results, error, scrapedAt, lateArrival } = msg;
+        this.logger.log(`Received discovery response: jobId=${jobId} status=${status}${lateArrival ? ' (late arrival)' : ''}`);
 
         const discoveryDoc = await this.discoveryModel
             .findOne({ batchId: jobId })
@@ -77,6 +78,11 @@ export class DiscoveryMsResponseConsumer {
                     items: results?.serp?.items ?? [],
                     confidence: results?.serp?.items?.length > 0 ? 'medium' : 'none',
                 },
+                menorPreco: {
+                    stats: results?.menorPreco?.stats ?? null,
+                    offers: results?.menorPreco?.offers ?? [],
+                    confidence: (results?.menorPreco?.offers?.length ?? 0) > 0 ? 'high' : 'none',
+                },
             };
 
             const mlPrices = results?.mercadolivre?.prices ?? results?.ai?.prices ?? null;
@@ -108,14 +114,19 @@ export class DiscoveryMsResponseConsumer {
                 oemCodes: results?.oemCodes ?? results?.ai?.oemCodes ?? [],
                 vehicles: results?.vehicles ?? results?.ai?.vehicles ?? [],
                 categoryPath: results?.categoryPath ?? null,
+                mlCategoryId: results?.categoryId ?? null,
+                mlRootCategoryId: results?.rootCategoryId ?? null,
                 breadcrumb: results?.mercadolivre?.breadcrumb ?? null,
                 timing: results?.timing ?? null,
                 confidence: preferredSource === 'mercadolivre' ? 'high' : 'medium',
             };
 
-            // Resolve category from categoryPath
+            // Resolve category: PRIMEIRO pelo MLB category_id (assertivo, 1:1 via
+            // marketplaceMappings.externalId); fallback para o path/breadcrumb (texto).
             try {
-                const categoryId = await this.categoryResolution.resolve(updateData.final.categoryPath);
+                const categoryId =
+                    (await this.categoryResolution.resolveByExternalId(updateData.final.mlCategoryId)) ??
+                    (await this.categoryResolution.resolve(updateData.final.categoryPath));
                 if (categoryId) {
                     updateData.resolvedCategoryId = categoryId;
                     this.logger.log(`Category resolved for job ${jobId}: ${categoryId}`);
@@ -157,15 +168,24 @@ export class DiscoveryMsResponseConsumer {
             { $set: updateData },
         ).exec();
 
+        if (lateArrival) {
+            // Real ML data arrived after the original job already timed out and completed —
+            // the Mongo update above corrects sources.mercadolivre for future reads, but the
+            // user already moved on with the SERP-fallback result, so don't reopen their UI.
+            this.logger.log(`Discovery job ${jobId} late arrival merged (ml=${results?.mercadolivre?.items?.length ?? 0}) — skipping realtime notification`);
+            return;
+        }
+
         const realtimeStatus: DiscoveryRealtimeStatus = status === 'completed' ? 'COMPLETED' : 'FAILED';
 
+        // Emite EXATAMENTE o mesmo shape normalizado do REST (DiscoveryAppData),
+        // para o frontend ter um contrato único — sem dialeto cru no WebSocket.
         const eventResult = realtimeStatus === 'COMPLETED'
-            ? {
-                ...updateData.final,
-                // Attach rawItems so frontend can populate inventory without a REST fetch
-                rawItems: updateData.sources?.mercadolivre?.items ?? [],
-                resolvedCategoryId: updateData.resolvedCategoryId ?? null,
-              }
+            ? mapDiscoveryDocToAppData({
+                final: updateData.final,
+                sources: updateData.sources,
+                resolvedCategoryId: updateData.resolvedCategoryId,
+              })
             : undefined;
 
         const event: DiscoveryRealtimeEvent = {

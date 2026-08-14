@@ -25,6 +25,16 @@ export class FiscalController {
         }
     }
 
+    @Post('nfe/avulsa')
+    @ApiOperation({ summary: 'Emitir NFe avulsa (sem pedido vinculado) — uso para testes/homologação' })
+    async emitNFeAvulsa(@Body() orderData: any) {
+        try {
+            return await this.fiscalService.emitNFeAvulsa(orderData);
+        } catch (error) {
+            throw new InternalServerErrorException(error.message);
+        }
+    }
+
     @Get('nfe/:orderId')
     @ApiOperation({ summary: 'Consultar NFe principal de um pedido (AUTHORIZED > ERROR > DRAFT > CANCELLED)' })
     async getNFe(@Param('orderId') orderId: string) {

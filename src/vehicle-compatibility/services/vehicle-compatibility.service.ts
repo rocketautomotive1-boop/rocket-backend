@@ -2,26 +2,37 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { VehicleCompatibilityDocument, VehicleCompatibilityModel } from '../schemas/vehicle-compatibility.schema';
+import { ProductCompatibilityModel } from '../../product/schemas/product-compatibility.schema';
+import { ProductModel } from '../../product/schemas/product.schema';
 import { CreateVehicleCompatibilityDto } from '../dto/create-vehicle-compatibility.dto';
 import { UpdateVehicleCompatibilityDto } from '../dto/update-vehicle-compatibility.dto';
 import { SearchVehicleCompatibilitiesDto } from '../dto/search-vehicle-compatibilities.dto';
 import { UpsertVehicleCompatibilityDto } from '../dto/upsert-vehicle-compatibility.dto';
-import { VehicleCompatibilityNotFoundException } from '../../vehicle-shared/exceptions/vehicle.exceptions';
+import { ResolveVehicleDto } from '../dto/resolve-vehicle.dto';
+import { VehicleCompatibilityFacetsDto } from '../dto/vehicle-compatibility-facets.dto';
+import {
+  VehicleCompatibilityInUseException,
+  VehicleCompatibilityNotFoundException,
+} from '../../vehicle-shared/exceptions/vehicle.exceptions';
 import {
   buildSearchText,
   computeDataQualityScore,
   deriveAliases,
+  extractCabType,
+  extractEngineDisplay,
+  extractTraction,
+  extractTrim,
   generateCanonicalKey,
   generateEngineSignature,
-  normalizeEngineTokens,
+  normalizeDisplacementCc,
+  normalizeFuelTags,
   normalizeMake,
   normalizeModel,
   normalizeVersionDisplay,
-  normalizeConfidence,
 } from '../../vehicle-shared/utils/vehicle-normalizer.util';
-import { VehicleMarket, VehicleReviewStatus } from '../../vehicle-shared/types/vehicle.types';
+import { parseVehicleQuery, ParsedVehicleQuery } from '../../vehicle-shared/utils/vehicle-query-parser.util';
+import { VehicleMarket, VehicleOrigin } from '../../vehicle-shared/types/vehicle.types';
 import { VEHICLE_CONSTANTS } from '../../vehicle-shared/constants/vehicle.constants';
-import { VehicleMetricsService } from '../../vehicle-shared/metrics/vehicle-metrics.service';
 
 @Injectable()
 export class VehicleCompatibilityService {
@@ -30,85 +41,57 @@ export class VehicleCompatibilityService {
   constructor(
     @InjectModel(VehicleCompatibilityModel.name)
     private readonly model: Model<VehicleCompatibilityDocument>,
-    private readonly metrics: VehicleMetricsService,
+    @InjectModel(ProductCompatibilityModel.name)
+    private readonly productCompatibilityModel: Model<ProductCompatibilityModel>,
+    @InjectModel(ProductModel.name)
+    private readonly productModel: Model<ProductModel>,
   ) {}
 
   async create(dto: CreateVehicleCompatibilityDto): Promise<VehicleCompatibilityDocument> {
-    const enriched = this.buildEnrichedFields(dto);
+    const enriched = this.buildEnrichedFields({ ...dto, origin: dto.origin ?? VehicleOrigin.MANUAL });
     const doc = new this.model(enriched);
     return doc.save();
   }
 
-  async upsertByCanonicalKey(
-    dto: UpsertVehicleCompatibilityDto,
-    sourceDiscoveryId?: string,
-  ): Promise<VehicleCompatibilityDocument> {
-    const incoming = this.buildEnrichedFields(dto as any);
-    if (sourceDiscoveryId && Types.ObjectId.isValid(sourceDiscoveryId)) {
-      (incoming as any).sourceDiscoveryId = new Types.ObjectId(sourceDiscoveryId);
+  /**
+   * Upsert usado pelo importador do ML e pela curadoria manual. Registros já curados
+   * manualmente (origin: manual) nunca são sobrescritos por uma reimportação do ML.
+   */
+  async upsertByCanonicalKey(dto: UpsertVehicleCompatibilityDto): Promise<VehicleCompatibilityDocument> {
+    const incoming = this.buildEnrichedFields(dto);
+
+    const existing = await this.model.findOne({ canonicalKey: incoming.canonicalKey }).lean().exec();
+
+    if (!existing) {
+      const created = await this.model.findOneAndUpdate(
+        { canonicalKey: incoming.canonicalKey },
+        { $setOnInsert: incoming },
+        { upsert: true, new: true },
+      ).exec();
+      return created as VehicleCompatibilityDocument;
     }
 
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const inserted = await this.model
-        .findOneAndUpdate(
-          { canonicalKey: incoming.canonicalKey },
-          { $setOnInsert: incoming },
-          { upsert: true, new: true },
-        )
-        .exec();
-
-      if (!inserted) continue;
-
-      const existing = await this.model
-        .findOne({ canonicalKey: incoming.canonicalKey })
-        .lean()
-        .exec();
-
-      if (!existing) continue;
-
-      const isIncomingBetter = incoming.dataQualityScore > (existing.dataQualityScore ?? 0);
-      const mergedAliases = [...new Set([...(existing.aliases ?? []), ...(incoming.aliases ?? [])])].slice(0, 20);
-      const mergedTags = [...new Set([...(existing.tags ?? []), ...(incoming.tags ?? [])])];
-
-      const update: Record<string, any> = {
-        searchText: incoming.searchText,
-        dataQualityScore: Math.max(existing.dataQualityScore ?? 0, incoming.dataQualityScore),
-        aliases: mergedAliases,
-        tags: mergedTags,
-        canonicalVersion: incoming.canonicalVersion,
-        normalizerVersion: incoming.normalizerVersion,
-      };
-
-      if ((incoming as any).sourceDiscoveryId) {
-        update.sourceDiscoveryId = (incoming as any).sourceDiscoveryId;
-      }
-
-      if (isIncomingBetter) {
-        const fieldsToPromote = [
-          'engine', 'transmission', 'productionYears', 'years', 'fuel', 'platform',
-          'generation', 'facelift', 'bodyType', 'segment', 'fipe', 'chassis',
-          'normalized', 'versionDisplay', 'confidence', 'reviewStatus', 'approvalTier',
-        ];
-        for (const field of fieldsToPromote) {
-          if ((incoming as any)[field] !== undefined && (incoming as any)[field] !== null) {
-            update[field] = (incoming as any)[field];
-          }
-        }
-      }
-
-      const result = await this.model
-        .findOneAndUpdate(
-          { canonicalKey: incoming.canonicalKey },
-          { $set: update },
-          { new: true },
-        )
-        .exec();
-
-      this.logger.debug(`Upserted compatibility ${incoming.canonicalKey}`);
-      return result as any;
+    if (existing.origin === VehicleOrigin.MANUAL && incoming.origin === VehicleOrigin.ML_IMPORT) {
+      this.logger.debug(`Skipping ML reimport over manually curated record: ${incoming.canonicalKey}`);
+      return existing as VehicleCompatibilityDocument;
     }
 
-    throw new Error(`Failed to upsert canonicalKey=${incoming.canonicalKey}`);
+    const mergedAliases = [...new Set([...(existing.aliases ?? []), ...(incoming.aliases ?? [])])].slice(0, 20);
+    const mergedTags = [...new Set([...(existing.tags ?? []), ...(incoming.tags ?? [])])];
+
+    const update: Record<string, any> = {
+      ...incoming,
+      aliases: mergedAliases,
+      tags: mergedTags,
+      dataQualityScore: Math.max(existing.dataQualityScore ?? 0, incoming.dataQualityScore),
+    };
+
+    const result = await this.model
+      .findOneAndUpdate({ canonicalKey: incoming.canonicalKey }, { $set: update }, { new: true })
+      .exec();
+
+    this.logger.debug(`Upserted compatibility ${incoming.canonicalKey}`);
+    return result as VehicleCompatibilityDocument;
   }
 
   async findById(id: string): Promise<VehicleCompatibilityDocument> {
@@ -117,13 +100,53 @@ export class VehicleCompatibilityService {
     return doc;
   }
 
+  /** Busca em lote por _id, best-effort (ids inexistentes/inválidos são omitidos do resultado). */
+  async findManyByIds(ids: string[]): Promise<VehicleCompatibilityDocument[]> {
+    const validIds = [...new Set(ids)].filter((id) => Types.ObjectId.isValid(id));
+    if (!validIds.length) return [];
+    return this.model.find({ _id: { $in: validIds } }).lean().exec() as any;
+  }
+
   async update(id: string, dto: UpdateVehicleCompatibilityDto): Promise<VehicleCompatibilityDocument> {
-    const doc = await this.model.findByIdAndUpdate(id, { $set: dto }, { new: true }).exec();
+    const update: Record<string, any> = { ...dto, origin: VehicleOrigin.MANUAL, lastEditedAt: new Date() };
+    const doc = await this.model.findByIdAndUpdate(id, { $set: update }, { new: true }).exec();
     if (!doc) throw new VehicleCompatibilityNotFoundException(id);
     return doc;
   }
 
+  /**
+   * Uso do veículo em product_compatibilities — base para bloquear exclusão (ver
+   * docs/superpowers/specs/2026-07-15-admin-vehicle-crud-design.md). `products` é limitado para
+   * exibição na UI; `count` é o total real.
+   */
+  async getUsage(id: string, limit = 20): Promise<{ count: number; products: Array<{ id: string; name: string }> }> {
+    const count = await this.productCompatibilityModel.countDocuments({ vehicleId: id }).exec();
+    if (count === 0) return { count: 0, products: [] };
+
+    const rows = await this.productCompatibilityModel
+      .find({ vehicleId: id })
+      .select('product')
+      .limit(limit)
+      .lean()
+      .exec();
+
+    const productIds = [...new Set(rows.map((r: any) => String(r.product)).filter(Boolean))];
+    const products = await this.productModel
+      .find({ _id: { $in: productIds } })
+      .select('name')
+      .lean()
+      .exec();
+
+    return {
+      count,
+      products: products.map((p: any) => ({ id: String(p._id), name: p.name })),
+    };
+  }
+
   async deactivate(id: string): Promise<void> {
+    const usage = await this.getUsage(id);
+    if (usage.count > 0) throw new VehicleCompatibilityInUseException(usage.count, usage.products);
+
     const result = await this.model.updateOne({ _id: id }, { $set: { active: false } }).exec();
     if (result.matchedCount === 0) throw new VehicleCompatibilityNotFoundException(id);
   }
@@ -137,15 +160,16 @@ export class VehicleCompatibilityService {
     if (dto.market) filter.market = dto.market;
     if (dto.bodyType) filter.bodyType = dto.bodyType;
     if (dto.year) filter.years = dto.year;
-    if (dto.engineCode) filter['engine.code'] = dto.engineCode;
-    if (dto.engineFamily) filter['engine.family'] = dto.engineFamily;
     if (dto.transmission) filter.transmission = dto.transmission;
 
-    if (dto.make) filter['normalized.make'] = normalizeMake(dto.make);
-    if (dto.model) filter['normalized.model'] = normalizeModel(dto.model);
-    if (dto.version) filter['normalized.version'] = normalizeVersionDisplay(dto.version);
+    if (dto.make) filter.makeKey = normalizeMake(dto.make);
+    if (dto.model) filter.modelKey = normalizeModel(dto.model);
+    if (dto.version) filter.versionKey = normalizeVersionDisplay(dto.version);
 
-    if (dto.q) return this.atlasSearch(dto);
+    if (dto.q) {
+      const parsed = parseVehicleQuery(dto.q);
+      return this.atlasSearch(dto, parsed);
+    }
 
     const skip = ((dto.page ?? 1) - 1) * (dto.limit ?? 20);
     const [data, total] = await Promise.all([
@@ -162,25 +186,73 @@ export class VehicleCompatibilityService {
     return { data: data as any, total };
   }
 
+  /**
+   * Resolve texto livre de veículo ("gol 1.6 2015 flex") a candidatos estruturados de
+   * vehicle_compatibilities, para uso pela garagem do cliente (rocket-b2c) — diferente de
+   * `search`, que serve a tela de curadoria interna e devolve o documento completo.
+   */
+  async resolve(dto: ResolveVehicleDto): Promise<{
+    candidates: Array<{
+      vehicleId: string;
+      make: string;
+      model: string;
+      version: string;
+      versionDisplay?: string;
+      year?: number;
+      fuelTags?: string[];
+    }>;
+  }> {
+    const parsed = parseVehicleQuery(dto.q);
+    const { data } = await this.atlasSearch({ q: dto.q, active: true, limit: dto.limit ?? 20 }, parsed);
+
+    const candidates = data.map((doc: any) => ({
+      vehicleId: String(doc._id),
+      make: doc.make,
+      model: doc.model,
+      version: doc.version,
+      versionDisplay: doc.versionDisplay,
+      year: Array.isArray(doc.years) && doc.years.length > 0 ? Math.max(...doc.years) : undefined,
+      fuelTags: doc.fuelTags,
+    }));
+
+    return { candidates };
+  }
+
   async atlasSearch(
     dto: SearchVehicleCompatibilitiesDto,
+    parsed?: ParsedVehicleQuery,
   ): Promise<{ data: VehicleCompatibilityDocument[]; total: number }> {
     const skip = ((dto.page ?? 1) - 1) * (dto.limit ?? 20);
     const limit = dto.limit ?? 20;
+    const freeText = parsed?.freeText || dto.q;
+
+    const queryTokens = (freeText ?? '').split(/\s+/).filter(Boolean);
+
+    // Cada token da busca precisa aparecer em pelo menos um campo forte (make/model/version/
+    // searchText) — evita que "Grand Vitara" retorne veículos que só batem em "grand" OU
+    // "vitara" isoladamente via aliases/tags/fuzzy. Esses campos fracos só ajustam o ranking.
+    const tokenMustClauses = queryTokens.map((token) => ({
+      compound: {
+        should: [
+          { text: { query: token, path: 'makeKey', score: { boost: { value: 5 } } } },
+          { text: { query: token, path: 'modelKey', score: { boost: { value: 5 } } } },
+          { text: { query: token, path: 'versionKey', score: { boost: { value: 3 } } } },
+          { text: { query: token, path: 'searchText', score: { boost: { value: 1 } } } },
+        ],
+        minimumShouldMatch: 1,
+      },
+    }));
 
     const searchStage: any = {
       $search: {
         index: 'vehicle_compatibility_search',
         compound: {
+          must: tokenMustClauses,
           should: [
-            { text: { query: dto.q, path: 'normalized.make', score: { boost: { value: 5 } } } },
-            { text: { query: dto.q, path: 'normalized.model', score: { boost: { value: 5 } } } },
-            { text: { query: dto.q, path: 'normalized.version', score: { boost: { value: 3 } } } },
-            { text: { query: dto.q, path: 'aliases', score: { boost: { value: 2 } } } },
-            { text: { query: dto.q, path: 'tags', score: { boost: { value: 1 } } } },
-            { text: { query: dto.q, path: 'searchText', fuzzy: { maxEdits: 1 }, score: { boost: { value: 1 } } } },
+            { text: { query: freeText, path: 'aliases', score: { boost: { value: 2 } } } },
+            { text: { query: freeText, path: 'tags', score: { boost: { value: 1 } } } },
+            { text: { query: freeText, path: 'searchText', fuzzy: { maxEdits: 1 }, score: { boost: { value: 1 } } } },
           ],
-          minimumShouldMatch: 1,
           filter: [],
         },
       },
@@ -194,6 +266,21 @@ export class VehicleCompatibilityService {
     }
     if (dto.market) {
       searchStage.$search.compound.filter.push({ text: { path: 'market', query: dto.market } });
+    }
+    if (parsed?.yearRange) {
+      searchStage.$search.compound.filter.push({
+        range: { path: 'years', gte: parsed.yearRange.from, lte: parsed.yearRange.to },
+      });
+    }
+    if (parsed?.fuelTags?.length) {
+      searchStage.$search.compound.filter.push({
+        in: { path: 'fuelTags', value: parsed.fuelTags },
+      });
+    }
+    if (parsed?.engineDisplay !== undefined) {
+      searchStage.$search.compound.filter.push({
+        equals: { path: 'engineDisplay', value: parsed.engineDisplay },
+      });
     }
 
     try {
@@ -212,10 +299,19 @@ export class VehicleCompatibilityService {
       return { data, total };
     } catch (err) {
       this.logger.warn(`Atlas Search unavailable, falling back to text search: ${err?.message}`);
-      const filter: any = { $text: { $search: dto.q } };
+      const filter: any = { $text: { $search: freeText } };
       if (dto.active !== undefined) filter.active = dto.active;
       if (dto.market) filter.market = dto.market;
       if (dto.year) filter.years = dto.year;
+      if (parsed?.yearRange) {
+        filter.years = { $elemMatch: { $gte: parsed.yearRange.from, $lte: parsed.yearRange.to } };
+      }
+      if (parsed?.fuelTags?.length) {
+        filter.fuelTags = { $in: parsed.fuelTags };
+      }
+      if (parsed?.engineDisplay !== undefined) {
+        filter.engineDisplay = parsed.engineDisplay;
+      }
 
       const [data, total] = await Promise.all([
         this.model
@@ -231,14 +327,66 @@ export class VehicleCompatibilityService {
     }
   }
 
+  /**
+   * Facets em cascata p/ dropdowns de filtro estruturado (marca→modelo→ano→carroceria→câmbio):
+   * cada faceta é escopada pelos filtros já escolhidos EXCETO ela mesma, senão selecionar uma
+   * marca zeraria a própria lista de marcas na próxima chamada.
+   */
+  async getFacets(dto: VehicleCompatibilityFacetsDto): Promise<{
+    makes: Array<{ value: string; count: number }>;
+    models: Array<{ value: string; count: number }>;
+    years: Array<{ value: number; count: number }>;
+    bodyTypes: Array<{ value: string; count: number }>;
+    transmissions: Array<{ value: string; count: number }>;
+  }> {
+    const active = dto.active ?? true;
+    const baseFilter: Record<string, any> = { active };
+    if (dto.make) baseFilter.makeKey = normalizeMake(dto.make);
+    if (dto.model) baseFilter.modelKey = normalizeModel(dto.model);
+    if (dto.year) baseFilter.years = dto.year;
+    if (dto.bodyType) baseFilter.bodyType = dto.bodyType;
+    if (dto.transmission) baseFilter.transmission = dto.transmission;
+
+    const filterWithout = (key: keyof typeof baseFilter) => {
+      const { [key]: _omit, ...rest } = baseFilter;
+      return rest;
+    };
+
+    const countBy = (field: string, filter: Record<string, any>, unwind = false): any[] => [
+      { $match: filter },
+      ...(unwind ? [{ $unwind: `$${field}` }] : []),
+      { $match: { [field]: { $ne: null } } },
+      { $group: { _id: `$${field}`, count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $project: { _id: 0, value: '$_id', count: 1 } },
+    ];
+
+    const result = await this.model
+      .aggregate<any>([
+        {
+          $facet: {
+            makes: countBy('make', filterWithout('makeKey')),
+            models: countBy('model', filterWithout('modelKey')),
+            years: countBy('years', filterWithout('years'), true),
+            bodyTypes: countBy('bodyType', filterWithout('bodyType')),
+            transmissions: countBy('transmission', filterWithout('transmission'), true),
+          } as any,
+        },
+      ])
+      .exec();
+
+    return {
+      makes: result?.[0]?.makes ?? [],
+      models: result?.[0]?.models ?? [],
+      years: result?.[0]?.years ?? [],
+      bodyTypes: result?.[0]?.bodyTypes ?? [],
+      transmissions: result?.[0]?.transmissions ?? [],
+    };
+  }
+
   private buildEnrichedFields(
-    dto: CreateVehicleCompatibilityDto & {
-      reviewStatus?: VehicleReviewStatus;
-      approvalTier?: string;
-      canonicalVersion?: string;
-      normalizerVersion?: string;
-    },
-  ): Partial<VehicleCompatibilityModel> & { canonicalKey: string } {
+    dto: CreateVehicleCompatibilityDto & { origin?: VehicleOrigin; mlVehicleId?: string },
+  ): Partial<VehicleCompatibilityModel> & { canonicalKey: string; origin: VehicleOrigin } {
     const market = dto.market ?? VehicleMarket.BR;
     const allAliases = [
       ...(dto.aliases ?? []),
@@ -249,25 +397,29 @@ export class VehicleCompatibilityService {
 
     const tags = [...new Set((dto.tags ?? []).map((v) => v.toLowerCase().trim()))];
 
-    const engineTokens = normalizeEngineTokens([
-      (dto.engine as any)?.family,
-      (dto.engine as any)?.displacement,
-    ].filter(Boolean).join(' '));
+    const rawEngine = dto.engine as any;
+    const rawDimensions = (dto as any).dimensions;
+
+    const displacementCc = normalizeDisplacementCc(rawEngine?.displacement);
+    const fuelType = rawEngine?.fuelType;
+    const doors = rawDimensions?.doors;
 
     const canonicalKey = `${VEHICLE_CONSTANTS.CANONICAL_VERSION}:${generateCanonicalKey(
       dto.make,
       dto.model,
       dto.version,
-      generateEngineSignature(dto.engine as any),
+      generateEngineSignature({ displacementCc, fuelType }),
       market,
+      dto.years,
     )}`;
 
     const dataQualityScore = computeDataQualityScore({
       make: dto.make,
       model: dto.model,
       version: dto.version,
-      productionYears: dto.years,
-      engine: dto.engine as any,
+      years: dto.years,
+      displacementCc,
+      fuelType,
       transmission: dto.transmission,
       bodyType: dto.bodyType,
       platform: dto.platform,
@@ -280,38 +432,46 @@ export class VehicleCompatibilityService {
       model: dto.model,
       version: dto.version,
       versionDisplay: dto.versionDisplay ?? normalizeVersionDisplay(dto.version),
+      makeKey: normalizeMake(dto.make),
+      modelKey: normalizeModel(dto.model),
+      versionKey: normalizeVersionDisplay(dto.version),
       market,
-      engine: dto.engine as any,
+      engineDisplay: extractEngineDisplay(dto.version),
+      displacementCc,
+      fuelType,
+      fuelTags: normalizeFuelTags(fuelType),
+      engine: rawEngine?.powerHp !== undefined ? { powerHp: rawEngine.powerHp } : undefined,
       transmission: dto.transmission,
-      productionYears: dto.productionYears as any,
       years: dto.years,
-      fuel: dto.fuel as any,
+      doors,
+      trim: extractTrim(dto.version),
+      traction: extractTraction(dto.version),
+      cabType: extractCabType(dto.version),
+      bodyType: dto.bodyType,
+      dimensions: rawDimensions
+        ? {
+            fuelCapacityL: rawDimensions.fuelCapacityL,
+            heightMm: rawDimensions.heightMm,
+            lengthMm: rawDimensions.lengthMm,
+            passengerCapacity: rawDimensions.passengerCapacity,
+            wheelbaseMm: rawDimensions.wheelbaseMm,
+            widthMm: rawDimensions.widthMm,
+          }
+        : undefined,
       platform: dto.platform,
       generation: dto.generation,
       facelift: dto.facelift,
-      bodyType: dto.bodyType,
       segment: dto.segment,
       fipe: dto.fipe as any,
-      chassis: dto.chassis as any,
+      features: (dto as any).features,
       aliases: [...new Set(allAliases)].slice(0, 20),
       tags,
       searchText: buildSearchText(dto.make, dto.model, dto.version, allAliases, tags),
-      normalized: {
-        make: normalizeMake(dto.make),
-        model: normalizeModel(dto.model),
-        version: normalizeVersionDisplay(dto.version),
-        versionDisplay: normalizeVersionDisplay(dto.version),
-        engineTokens,
-      },
       canonicalKey,
-      canonicalVersion: dto.canonicalVersion ?? VEHICLE_CONSTANTS.CANONICAL_VERSION,
-      normalizerVersion: dto.normalizerVersion ?? VEHICLE_CONSTANTS.NORMALIZER_VERSION,
       dataQualityScore,
       active: dto.active ?? true,
-      sourceType: dto.sourceType,
-      reviewStatus: dto.reviewStatus ?? VehicleReviewStatus.AUTO_APPROVED,
-      confidence: normalizeConfidence(dto.confidence),
-      approvalTier: dto.approvalTier,
+      origin: dto.origin ?? VehicleOrigin.MANUAL,
+      mlVehicleId: dto.mlVehicleId,
     };
   }
 }

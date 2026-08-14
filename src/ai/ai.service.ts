@@ -1,13 +1,22 @@
 
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { SearchService } from '../search/search.service';
-import { ProductRepository } from '../product/product.repository';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { UserDocument, UserModel } from '../auth/schemas/user.schema';
-import { VehicleDocument, VehicleModel } from '../customer/schemas/vehicle.schema';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
+import { GarageService } from '../garage/services/garage.service';
+import { IntentExtractionService } from './intent-extraction.service';
+import { AiChatSessionService } from './ai-chat-session.service';
+
+export interface VirtualClerkNavigation {
+    path: '/search';
+    query: { q: string[]; vehicleId?: string; vehicleLabel?: string };
+}
+
+export interface VirtualClerkResponse {
+    text: string;
+    products: any[];
+    navigateTo: VirtualClerkNavigation | null;
+}
 
 @Injectable()
 export class AiService {
@@ -17,10 +26,10 @@ export class AiService {
 
     constructor(
         private readonly configService: ConfigService,
-        @Inject(forwardRef(() => SearchService)) private readonly searchService: SearchService,
-        @InjectModel(UserModel.name) private userModel: Model<UserDocument>,
-        @InjectModel(VehicleModel.name) private vehicleModel: Model<VehicleDocument>,
-        private readonly productRepository: ProductRepository,
+        private readonly garageService: GarageService,
+        @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+        private readonly intentExtraction: IntentExtractionService,
+        private readonly chatSession: AiChatSessionService,
     ) {
         const apiKey = this.configService.get<string>('GEMINI_API_KEY');
         if (apiKey) {
@@ -39,184 +48,93 @@ export class AiService {
         }
     }
 
-    async virtualClerk(userId: string, question: string, image?: string): Promise<{ text: string, products: any[] }> {
-        try {
-            this.logger.log(`Virtual Clerk received question from user ${userId}: ${question} (Image present: ${!!image})`);
+    /**
+     * Orquestrador magro: pergunta a IntentExtractionService se a mensagem é uma busca de
+     * peça (com veículo já injetado no prompt, quando houver). Quando for, extrai os termos
+     * (um por item recomendado/confirmado) e devolve navigateTo para a página /search, que
+     * faz a busca de verdade via Atlas Search — o Balconista nunca busca produto diretamente.
+     * Quando a IA responde só texto, mantém o comportamento conversacional de sempre.
+     */
+    async virtualClerk(
+        userId: string,
+        question: string,
+        image?: string,
+        clientVehicle?: { vehicleId?: string; vehicleLabel?: string },
+        sessionId?: string,
+    ): Promise<VirtualClerkResponse> {
+        this.logger.log(`Virtual Clerk received question from user ${userId}: ${question} (Image present: ${!!image})`);
 
-            // 1. Fetch User and Active Context
-            let userContext = `Cliente não identificado.`;
-            let vehicleContext = `Nenhum veículo identificado na garagem.`;
-            let activeVehicle: any = null;
+        // O veículo ativo mora no GarageContext do frontend (localStorage), que funciona
+        // tanto logado quanto anônimo — por isso o cliente manda vehicleId/vehicleLabel
+        // direto no payload e isso tem prioridade. garageService.list(userId) é só fallback
+        // para chamadas antigas que não mandam o veículo explicitamente (e não existe pra
+        // usuários anônimos, já que não há userId).
+        let activeVehicleLabel: string | null = clientVehicle?.vehicleLabel ?? null;
+        let activeVehicleId: string | null = clientVehicle?.vehicleId ?? null;
 
-            if (userId) {
-                const user = await this.userModel.findById(userId).populate('garage.vehicleId');
-                if (user) {
-                    userContext = `CLIENTE: ${user.name}`;
-                    const primaryVehicleRef = user.garage?.find(v => v.isPrimary);
-                    if (primaryVehicleRef && primaryVehicleRef.vehicleId) {
-                        activeVehicle = primaryVehicleRef.vehicleId; // Populated
-                        if (activeVehicle) {
-                            vehicleContext = `VEÍCULO NA GARAGEM: ${activeVehicle.brand} ${activeVehicle.model} ${activeVehicle.year} ${activeVehicle.engine || ''} ${activeVehicle.version || ''}`;
-                        }
-                    }
-                }
+        if (!activeVehicleId && userId) {
+            const vehicles = await this.garageService.list(userId);
+            const activeVehicle = vehicles.find(v => v.active);
+            if (activeVehicle) {
+                activeVehicleLabel = activeVehicle.label;
+                activeVehicleId = activeVehicle.vehicleId;
             }
-
-            // 2. Define Tools (Multi-Item List Processing)
-            const tools = [
-                {
-                    functionDeclarations: [
-                        {
-                            name: "processar_lista_compras",
-                            description: "Extrai códigos de peças e nomes de produtos de uma lista ou frase para exibir no catálogo.",
-                            parameters: {
-                                type: "OBJECT",
-                                properties: {
-                                    itens: {
-                                        type: "ARRAY",
-                                        description: "Lista de objetos contendo os códigos e nomes identificados",
-                                        items: {
-                                            type: "OBJECT",
-                                            properties: {
-                                                codigo: { type: "STRING", description: "O SKU ou código do fabricante (ex: btc08206)" },
-                                                termo: { type: "STRING", description: "Nome da peça (ex: Amortecedor)" }
-                                            }
-                                        }
-                                    }
-                                },
-                                required: ["itens"]
-                            }
-                        }
-                    ]
-                }
-            ];
-
-            // 3. Construct Prompt (Orçamentista Proativo Persona)
-            const systemInstruction = `
-        Você é o "Rocket Man", o Consultor Técnico e Balconista da Rocket Auto Peças.
-        
-        PROTOCOLO DE VISÃO (IMPORTANTE):
-        1. SE RECEBER UMA IMAGEM: Você É OBRIGADO a chamar a função "processar_lista_compras".
-        2. NÃO responda apenas com texto descrevendo a peça. O cliente quer O LINK DO PRODUTO.
-        3. Se não souber o veículo, chame a função APENAS com o NOME DA PEÇA (ex: "Bieleta"). A busca se encarrega do resto.
-        4. NUNCA diga "já separei" se você não invocou "processar_lista_compras".
-        
-        MINDSET:
-        1. Você É O ESPECIALISTA. Identifique a peça visualmente.
-        2. AÇÃO: Identificou? -> processar_lista_compras({ itens: [{ termo: "Nome da Peça" }] }).
-        3. Se houver código na imagem, use-o no campo "codigo".
-
-        CONTEXTO DO CLIENTE:
-        ${userContext}
-        ${vehicleContext}
-
-        REGRAS DE OURO:
-        - IMAGEM = IDENTIFICAR + CHAMAR TOOL (processar_lista_compras).
-        - SEMPRE execute a busca, mesmo genérica. Melhor mostrar peças de vários carros do que nenhuma.
-      `;
-
-            const chatSession = this.model.startChat({
-                history: [
-                    { role: "user", parts: [{ text: systemInstruction }] },
-                    { role: "model", parts: [{ text: "Entendido. Estou pronto para atuar como Balconista Virtual da Rocket, processando listas e verificando a garagem." }] }
-                ],
-                tools: tools
-            });
-
-            // 4. Send Message (Multimodal support)
-            let msgParts: any[] = [];
-
-            // Vision Prompt Logic
-            if (image) {
-                // Strip header if present (e.g., "data:image/jpeg;base64,")
-                const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
-
-                msgParts.push({ text: question || "Analise esta imagem de peça automotiva. Identifique a peça, códigos e sugira a reposição." });
-                msgParts.push({
-                    inlineData: {
-                        mimeType: "image/jpeg", // Assuming JPEG for simplicity, or detect from header
-                        data: base64Data
-                    }
-                });
-            } else {
-                msgParts.push({ text: question });
-            }
-
-            const result = await chatSession.sendMessage(msgParts);
-            const response = await result.response;
-            const functionCalls = response.functionCalls();
-
-            let productsFound: any[] = [];
-            let finalResponseText = response.text();
-
-            // 5. Handle Function Calls (Iterative Search)
-            if (functionCalls && functionCalls.length > 0) {
-                const call = functionCalls[0];
-                if (call.name === "processar_lista_compras") {
-                    const args = call.args as any;
-                    this.logger.log(`Function args received: ${JSON.stringify(args)}`);
-                    const itens = args.itens || [];
-                    this.logger.log(`Processing list with ${itens.length} items`);
-
-                    // Iterate and search for each item
-                    for (const item of itens) {
-                        let searchQuery = "";
-
-                        const hasCode = item.codigo && item.codigo.toUpperCase() !== "N/A";
-
-                        if (hasCode) {
-                            searchQuery = item.codigo; // Priority to code
-                        } else if (item.termo) {
-                            searchQuery = item.termo;
-                            // If generic term and we have a garage vehicle, append context for better relevance
-                            // BUT only if the user didn't specify another car in the text (Hard to detect here, relying on AI warning text, 
-                            // but for search accuracy, adding the garage vehicle is usually safe as a "suggestion")
-                            // A better approach: The text response warns, but the search shows what "best fits" the user's likely intent or pure search.
-                            // Let's stick to: Search for the term + Garage Vehicle if available to ensure we show compatible parts by default.
-                            if (activeVehicle) {
-                                searchQuery += ` ${activeVehicle.model} ${activeVehicle.year}`;
-                            }
-                        }
-
-                        if (searchQuery) {
-                            this.logger.log(`Searching item: ${searchQuery}`);
-                            // Buscando produtos
-                            const searchResult: any = await this.searchService.search(searchQuery);
-                            const searchResults = searchResult.data || [];
-                            // Take top 2 results for each item to build the "Counter"
-                            productsFound.push(...searchResults.slice(0, 2));
-                        }
-                    }
-
-                    // 6. Send Function Response back to Gemini
-                    const functionResponse = {
-                        functionResponse: {
-                            name: "processar_lista_compras",
-                            response: {
-                                found_count: productsFound.length,
-                                products_summary: productsFound.map(p => `${p.partNumber} (${p.brand?.name || 'Genérico'})`).join(", "),
-                                status: "Produtos colocados no balcão virtual."
-                            }
-                        }
-                    };
-
-                    const finalResult = await chatSession.sendMessage([functionResponse]);
-                    finalResponseText = (await finalResult.response).text();
-                }
-            }
-
-            return {
-                text: finalResponseText,
-                products: productsFound
-            };
-
-        } catch (error) {
-            this.logger.error(`Error in virtualClerk: ${error.message}`, error.stack);
-            return {
-                text: "Desculpe, estou com dificuldades para processar sua lista agora. Pode tentar novamente?",
-                products: []
-            };
         }
+
+        const history = sessionId ? await this.chatSession.getRecentTurns(sessionId) : [];
+        const intent = await this.intentExtraction.extract({
+            question,
+            image,
+            vehicleLabel: activeVehicleLabel,
+            history,
+        });
+
+        if (sessionId) {
+            await this.chatSession.appendTurns(
+                sessionId,
+                [
+                    { role: 'user', text: question, timestamp: new Date() },
+                    {
+                        role: 'model',
+                        text: intent.conversationalText,
+                        ...(intent.functionCall ? { functionCall: intent.functionCall } : {}),
+                        timestamp: new Date(),
+                    },
+                ],
+                { userId: userId || undefined, vehicleId: activeVehicleId ?? undefined },
+            );
+        }
+
+        if (!intent.isProductQuery) {
+            return { text: intent.conversationalText, products: [], navigateTo: null };
+        }
+
+        // A busca de verdade (Atlas Search, paginação, filtros) acontece na página /search —
+        // o Balconista só extrai os termos; um por item recomendado/confirmado (ex: óleo +
+        // filtro de óleo), cada um vira sua própria seção de resultados lá.
+        const searchTerms = intent.items
+            .map((item) => {
+                const hasCode = item.codigo && item.codigo.toUpperCase() !== 'N/A';
+                return hasCode ? item.codigo! : (item.termo ?? '');
+            })
+            .filter((term): term is string => !!term);
+
+        if (searchTerms.length === 0) {
+            return { text: 'Não consegui identificar a peça. Pode descrever com mais detalhes?', products: [], navigateTo: null };
+        }
+
+        return {
+            text: intent.conversationalText,
+            products: [],
+            navigateTo: {
+                path: '/search',
+                query: {
+                    q: searchTerms,
+                    ...(activeVehicleId ? { vehicleId: activeVehicleId } : {}),
+                    ...(activeVehicleLabel ? { vehicleLabel: activeVehicleLabel } : {}),
+                },
+            },
+        };
     }
     async suggestQuestionAnswer(
         question: string,
@@ -254,7 +172,7 @@ DADOS DO PRODUTO:
 - Detalhes Técnicos: ${product.details || 'N/A'}
 - Condição: ${product.condition || 'N/A'}
 - Garantia: ${product.warranty?.months ? product.warranty.months + ' meses' : 'N/A'}
-- Estoque: ${product._id ? await this.productRepository.calculateStock(String(product._id)) : 'N/A'} unidades
+- Estoque: ${product._id ? (await this.stockQuery.getProductStock(String(product._id))).onHand : 'N/A'} unidades
 ${listingPrice ? `- Preço: R$ ${listingPrice}` : ''}
 ${attrs ? `\nATRIBUTOS:\n${attrs}` : ''}
 ${compList ? `\nVEÍCULOS COMPATÍVEIS: ${compList}` : ''}
@@ -450,7 +368,8 @@ REGRAS CRÍTICAS:
 
     async mapMarketplaceCategoryToInternal(
         marketplacePath: string,
-        existingTreeContext: { name: string; path: string }[]
+        existingTreeContext: { name: string; path: string }[],
+        domain: string = 'autopecas',
     ): Promise<{
         suggestedTree: string[];
         confidence: number;
@@ -467,7 +386,45 @@ REGRAS CRÍTICAS:
             .map(cat => `- ${cat.path}`)
             .join('\n');
 
-        const prompt = `
+        // Itens gerais (saúde, beleza, alimentos, etc.) NÃO são autopeças — o prompt
+        // não pode forçar a taxonomia automotiva (senão um suplemento vira "Outros
+        // Acessórios"). Para general usamos um prompt GENÉRICO, fiel à categoria do ML.
+        const prompt = domain === 'general'
+            ? `
+Você é um especialista em taxonomia de categorias de e-commerce (qualquer segmento:
+saúde, beleza, alimentos, bebidas, casa, eletrônicos, etc.).
+
+TAREFA: Mapear uma categoria do Mercado Livre para uma árvore de categorias interna,
+PRESERVANDO o segmento/domínio real do produto (NÃO force em automotivo/peças).
+
+CATEGORIA DO MERCADO LIVRE:
+"${marketplacePath}"
+
+CONTEXTO - CATEGORIAS EXISTENTES (exemplos, podem ser de outros segmentos):
+${contextLines}
+
+INSTRUÇÕES:
+1. Crie a árvore hierárquica fiel ao significado da categoria do ML.
+2. A raiz deve refletir o segmento real (ex.: "Saúde", "Beleza", "Alimentos", "Bebidas").
+3. NUNCA classifique como peça/acessório automotivo se o produto não for automotivo.
+4. Reutilize uma raiz existente SÓ se for do mesmo segmento; senão crie a raiz correta.
+5. Padrão: ["Raiz", "Nível 2", "Nível 3", ...].
+
+Retorne APENAS um JSON (sem markdown):
+{
+  "suggestedTree": ["Saúde", "Suplementos Alimentares", "Vitaminas e Minerais"],
+  "confidence": 90,
+  "reasoning": "Explicação breve",
+  "alternatives": [["Saúde", "Vitaminas e Suplementos"]]
+}
+
+REGRAS:
+- "suggestedTree": árvore (array de strings) fiel ao segmento do produto
+- "confidence": 0-100
+- "reasoning": justificativa (máx. 2 linhas)
+- "alternatives": até 2 opções (opcional)
+        `
+            : `
 Você é um especialista em categorização de peças automotivas.
 
 TAREFA: Mapear uma categoria do Mercado Livre para a estrutura de categorias da Rocket.

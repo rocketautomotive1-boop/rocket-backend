@@ -61,6 +61,7 @@ export class OLXController {
       configs: {
         clientId: this.configService.get('OLX_CLIENT_ID'),
         clientSecret: this.configService.get('OLX_CLIENT_SECRET_' + this.configService.get('OLX_CLIENT_ID')),
+        // NOTE: authoritative source é marketplaces.settings.redirectUri (fallback .env). Aqui ecoa apenas a env por ser endpoint de debug.
         redirectUri: this.configService.get('OLX_REDIRECT_URI'),
         allEnvVars: {
           OLX_CLIENT_ID: process.env.OLX_CLIENT_ID,
@@ -454,7 +455,9 @@ export class OLXController {
       marketplace._id,
       templateData.isDefault || false,
       templateData.placeholders,
-      templateData.sections
+      templateData.sections,
+      templateData.domain,
+      templateData.accountId
     );
   }
 

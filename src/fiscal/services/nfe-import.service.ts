@@ -6,7 +6,10 @@ import { FiscalEntryModel } from '../schemas/fiscal-entry.schema';
 import { SupplierMappingModel } from '../schemas/supplier-mapping.schema';
 import { ProductModel } from '../../product/schemas/product.schema';
 import { BrandModel } from '../../product/schemas/brand.schema';
-import { ProductMovementService } from '../../product/services/product-movement.service';
+import { StockService } from '../../stock/stock.service';
+import { StockMovementType } from '../../stock/domain/movement-type';
+import { buildUniqueProductSlug } from '../../product/utils/product-slug.util';
+import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 import { ProductService } from '../../product/product.service';
 import { ProductDraftsService } from '../../ai/product-drafts.service';
 import { FinancialService } from '../../financial/services/financial.service';
@@ -22,8 +25,8 @@ export class NfeImportService {
         @InjectModel(SupplierMappingModel.name) private supplierMappingModel: Model<SupplierMappingModel>,
         @InjectModel(ProductModel.name) private productModel: Model<ProductModel>,
         @InjectModel(BrandModel.name) private brandModel: Model<BrandModel>,
-        @Inject(forwardRef(() => ProductMovementService))
-        private readonly productMovementService: ProductMovementService,
+        private readonly stockService: StockService,
+        @Inject(PRICING_PORT) private readonly pricing: PricingPort,
         @Inject(forwardRef(() => ProductService))
         private readonly productService: ProductService,
         private readonly productDraftsService: ProductDraftsService,
@@ -318,11 +321,11 @@ export class NfeImportService {
 
                 if (qty > 0) {
                     // Create Stock Movement (Inbound) passing the SESSION
-                    await this.productMovementService.create({
+                    await this.stockService.move({
                         productId: item.productId.toString(),
-                        type: 'inbound',
+                        type: StockMovementType.INBOUND,
                         quantity: qty,
-                        price: unitCostStock, // Precise Landed Cost
+                        unitCost: unitCostStock, // Precise Landed Cost → lot cost
                         reason: `NF-e Import ${entry.accessKey.slice(0, 8)}`,
                         reference: entry.accessKey,
                         condition: 'new',
@@ -374,9 +377,8 @@ export class NfeImportService {
                             finalCost: unitCostStock
                         };
 
-                        product.costPrice = new Types.Decimal128(unitCostStock.toFixed(4));
-
-                        product.costPrice = new Types.Decimal128(unitCostStock.toFixed(4));
+                        // Cost is no longer stored on the product — the inbound above wrote it to
+                        // the stock lot (StockService). lastPurchase is kept as a fiscal/supplier audit record.
 
                         // We do NOT update the Sales Price (product.price) here anymore.
                         // The User has already defined/reviewed the prices in the Pricing Tab.
@@ -529,10 +531,10 @@ export class NfeImportService {
             return existing;
         }
 
-        // Ensure slug is unique-ish or handle error? Schema has unique slug.
-        // Assuming partNumber is unique enough, but duplicate descriptions might conflict on slug if we just use description.
-        // Let's use partNumber in slug.
-        const slug = `${xmlItem.description.slice(0, 50)}-${xmlItem.code}`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const slug = await buildUniqueProductSlug(
+            { name: xmlItem.description, partNumber: xmlItem.code },
+            async (candidate) => !!(await this.productModel.findOne({ slug: candidate })),
+        );
 
         // Generate Barcode Fallback
         let barcode = xmlItem.ean;
@@ -598,22 +600,20 @@ export class NfeImportService {
                 code: xmlItem.unit,
                 name: xmlItem.unit
             },
-            costPrice: Types.Decimal128.fromString((xmlItem.valueUnit || 0).toString()),
-            price: Types.Decimal128.fromString(((xmlItem.valueUnit || 0) * 1.5).toString()),
+            // cost lives on the stock lot (inbound); sale price lives in PricingModule (set below)
             active: true,
             schemaVersion: 1,
             images: [],
             titles: [],
             attributes: [],
             allocations: [],
-            pricing: {
-                markup: 1.5,
-                profitMargin: 0.33,
-                autoUpdate: false,
-                strategy: 'MANUAL'
-            }
         });
 
-        return await newProduct.save();
+        const saved = await newProduct.save();
+        // Provisional sale price (custo * 1.5) → PricingModule base price + markup metadata.
+        const provisional = (xmlItem.valueUnit || 0) * 1.5;
+        await this.pricing.setBasePrice(String(saved._id), provisional);
+        await this.pricing.setPricingMeta(String(saved._id), { markup: 1.5, profitMargin: 0.33, strategy: 'MANUAL' });
+        return saved;
     }
 }

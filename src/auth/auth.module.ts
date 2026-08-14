@@ -5,12 +5,15 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
+import { UserAdminController } from './controllers/user-admin.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from './guards/optional-jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { UserModel, UserSchema } from './schemas/user.schema';
+import { RefreshTokenModel, RefreshTokenSchema } from './schemas/refresh-token.schema';
 
 @Module({
   imports: [
@@ -21,24 +24,26 @@ import { UserModel, UserSchema } from './schemas/user.schema';
       useFactory: (configService: ConfigService) => ({
         secret: configService.get('JWT_SECRET', 'marketplace_integration_secret'),
         signOptions: {
-          expiresIn: configService.get('JWT_EXPIRES_IN', '1d'),
+          expiresIn: configService.get('JWT_EXPIRES_IN', '15m'),
         },
       }),
     }),
     MongooseModule.forFeature([
-      { name: UserModel.name, schema: UserSchema }
+      { name: UserModel.name, schema: UserSchema },
+      { name: RefreshTokenModel.name, schema: RefreshTokenSchema },
     ]),
     ConfigModule,
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, UserAdminController],
   providers: [
     AuthService,
     JwtStrategy,
     LocalStrategy,
     GoogleStrategy,
     JwtAuthGuard,
+    OptionalJwtAuthGuard,
     RolesGuard,
   ],
-  exports: [AuthService, JwtModule, JwtAuthGuard, RolesGuard],
+  exports: [AuthService, JwtModule, JwtAuthGuard, OptionalJwtAuthGuard, RolesGuard],
 })
 export class AuthModule { }

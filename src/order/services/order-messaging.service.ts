@@ -4,8 +4,10 @@ import { Model } from 'mongoose';
 import axios from 'axios';
 import * as FormData from 'form-data';
 import { OrderDocument, OrderModel } from '../schemas/order.schema';
-import { MarketplaceModel, MarketplaceDocument } from '../../marketplace/schemas/marketplace.schema';
-import { buildSignedParams, buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
+import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
+import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
+import { buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
+import { ShopeeSignerService } from '../../marketplace/adapters/shopee/shopee-signer.service';
 
 export interface ChatMessage {
     id: string;
@@ -31,7 +33,9 @@ export class OrderMessagingService {
 
     constructor(
         @InjectModel(OrderModel.name) private readonly orderModel: Model<OrderDocument>,
-        @InjectModel(MarketplaceModel.name) private readonly marketplaceModel: Model<MarketplaceDocument>,
+        private readonly configCache: MarketplaceConfigCacheService,
+        private readonly auth: MarketplaceAuthService,
+        private readonly signer: ShopeeSignerService,
     ) {}
 
     async getMessages(orderId: string): Promise<MessageThread> {
@@ -158,7 +162,7 @@ export class OrderMessagingService {
 
         // Step 1: Get conversation ID from order
         const convPath = '/sellerchat/get_one_conversation_by_order_sn';
-        const convParams = buildSignedParams(convPath, timestamp, token.accessToken, Number(shopId), { order_sn: orderSn });
+        const convParams = await this.signer.buildSignedParams(convPath, timestamp, token.accessToken, Number(shopId), { order_sn: orderSn });
 
         this.logger.log(`[Shopee Messages] Fetching conversation for order ${orderSn}`);
 
@@ -176,7 +180,7 @@ export class OrderMessagingService {
             // Step 2: Get messages in the conversation
             const msgPath = '/sellerchat/get_message';
             const msgTimestamp = Math.floor(Date.now() / 1000);
-            const msgParams = buildSignedParams(msgPath, msgTimestamp, token.accessToken, Number(shopId));
+            const msgParams = await this.signer.buildSignedParams(msgPath, msgTimestamp, token.accessToken, Number(shopId));
 
             const msgBody = { conversation_id: conversationId, page_size: 50 };
             const msgResponse = await axios.post(`${baseUrl}${msgPath}`, msgBody, {
@@ -217,7 +221,7 @@ export class OrderMessagingService {
 
         // Get conversation ID first
         const convPath = '/sellerchat/get_one_conversation_by_order_sn';
-        const convParams = buildSignedParams(convPath, timestamp, token.accessToken, Number(shopId), { order_sn: orderSn });
+        const convParams = await this.signer.buildSignedParams(convPath, timestamp, token.accessToken, Number(shopId), { order_sn: orderSn });
 
         const convResponse = await axios.get(`${baseUrl}${convPath}`, {
             headers: buildHeaders(),
@@ -229,7 +233,7 @@ export class OrderMessagingService {
 
         const msgPath = '/sellerchat/send_message';
         const msgTimestamp = Math.floor(Date.now() / 1000);
-        const msgParams = buildSignedParams(msgPath, msgTimestamp, token.accessToken, Number(shopId));
+        const msgParams = await this.signer.buildSignedParams(msgPath, msgTimestamp, token.accessToken, Number(shopId));
 
         const body = {
             conversation_id: conversationId,
@@ -310,7 +314,7 @@ export class OrderMessagingService {
 
         // Step 1: Get conversation ID
         const convPath = '/sellerchat/get_one_conversation_by_order_sn';
-        const convParams = buildSignedParams(convPath, timestamp, token.accessToken, Number(shopId), { order_sn: orderSn });
+        const convParams = await this.signer.buildSignedParams(convPath, timestamp, token.accessToken, Number(shopId), { order_sn: orderSn });
         const convResponse = await axios.get(`${baseUrl}${convPath}`, {
             headers: buildHeaders(),
             params: { ...convParams, access_token: token.accessToken, shop_id: Number(shopId), order_sn: orderSn },
@@ -322,7 +326,7 @@ export class OrderMessagingService {
         // Step 2: Upload image
         const uploadPath = '/sellerchat/upload_image';
         const uploadTimestamp = Math.floor(Date.now() / 1000);
-        const uploadParams = buildSignedParams(uploadPath, uploadTimestamp, token.accessToken, Number(shopId));
+        const uploadParams = await this.signer.buildSignedParams(uploadPath, uploadTimestamp, token.accessToken, Number(shopId));
 
         const imageBuffer = Buffer.from(imageBase64, 'base64');
         const ext = mimeType.includes('png') ? 'png' : 'jpg';
@@ -340,7 +344,7 @@ export class OrderMessagingService {
         // Step 3: Send image message
         const msgPath = '/sellerchat/send_message';
         const msgTimestamp = Math.floor(Date.now() / 1000);
-        const msgParams = buildSignedParams(msgPath, msgTimestamp, token.accessToken, Number(shopId));
+        const msgParams = await this.signer.buildSignedParams(msgPath, msgTimestamp, token.accessToken, Number(shopId));
 
         await axios.post(`${baseUrl}${msgPath}`, {
             conversation_id: conversationId,
@@ -360,14 +364,11 @@ export class OrderMessagingService {
         const order = await this.orderModel.findById(orderId).lean().exec();
         if (!order) throw new NotFoundException(`Order ${orderId} not found`);
 
-        const marketplace = await this.marketplaceModel
-            .findById((order as any).marketplaceId)
-            .lean()
-            .exec();
+        const marketplace = await this.configCache.getById(String((order as any).marketplaceId));
         if (!marketplace) throw new NotFoundException(`Marketplace not found for order ${orderId}`);
 
-        const token = (marketplace as any).tokens?.find((t: any) => t.isActive);
-        if (!token) throw new NotFoundException(`No active token for marketplace ${marketplace.name}`);
+        const token = await this.auth.ensureValidToken(String(marketplace._id));
+        if (!token?.accessToken) throw new NotFoundException(`No active token for marketplace ${marketplace.name}`);
 
         return { order, marketplace, token };
     }

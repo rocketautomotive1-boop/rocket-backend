@@ -100,16 +100,16 @@ export class TikTokShopAdapter extends MarketplaceAdapter {
     return this.orderAdapter.getOrders(params);
   }
 
-  async getOrderDetails(orderId: string, token?: any): Promise<any> {
-    return this.orderAdapter.getOrderDetails(orderId, token);
+  async getOrderDetails(orderId: string, accountId?: string): Promise<any> {
+    return this.orderAdapter.getOrderDetails(orderId, accountId);
   }
 
-  async updateOrderStatus(orderId: string, status: string, token?: any): Promise<any> {
-    return this.orderAdapter.updateOrderStatus(orderId, status, token);
+  async updateOrderStatus(orderId: string, status: string, accountId?: string): Promise<any> {
+    return this.orderAdapter.updateOrderStatus(orderId, status, accountId);
   }
 
-  // Category methods
-  async getCategories(accessToken: string, shopCipher?: string): Promise<any[]> {
-    return this.categoryAdapter.getCategories(accessToken, shopCipher);
+  // Category methods — token/shopCipher resolvidos no TikTokShopHttpClient.
+  async getCategories(locale?: string): Promise<any[]> {
+    return this.categoryAdapter.getCategories(locale);
   }
 }

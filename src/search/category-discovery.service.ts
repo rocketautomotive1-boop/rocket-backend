@@ -6,7 +6,6 @@ import { CategoryModel } from '../product/schemas/category.schema';
 @Injectable()
 export class CategoryDiscoveryService {
     private readonly logger = new Logger(CategoryDiscoveryService.name);
-    private readonly searchIndex = 'categories_discovery';
 
     constructor(
         @InjectModel(CategoryModel.name) private categoryModel: Model<CategoryModel>
@@ -35,89 +34,63 @@ export class CategoryDiscoveryService {
         return { updated };
     }
 
-    // No-op: Atlas Search auto-syncs with MongoDB — no manual indexing required.
+    // No-op: kept for callers that still invalidate the search index on write.
     async indexCategory(_category: any) {}
 
+    /** Busca por regex em memória (substitui o antigo $search do Atlas, cujo índice
+     *  'categories_discovery' foi removido). Pontuação replica a ordem de boost anterior:
+     *  frase exata em name > synonyms > name parcial > examples > breadcrumbs > usageGuide. */
     async discover(query: string): Promise<any[]> {
         try {
             const limitedQuery = query.trim().split(/\s+/).slice(0, 4).join(' ');
+            if (!limitedQuery) return [];
 
-            const pipeline: any[] = [
-                {
-                    $search: {
-                        index: this.searchIndex,
-                        compound: {
-                            should: [
-                                {
-                                    phrase: {
-                                        query: limitedQuery,
-                                        path: 'name',
-                                        score: { boost: { value: 10 } },
-                                    },
-                                },
-                                {
-                                    text: {
-                                        query: limitedQuery,
-                                        path: 'synonyms',
-                                        score: { boost: { value: 8 } },
-                                    },
-                                },
-                                {
-                                    text: {
-                                        query: limitedQuery,
-                                        path: 'name',
-                                        fuzzy: { maxEdits: 1 },
-                                        score: { boost: { value: 5 } },
-                                    },
-                                },
-                                {
-                                    text: {
-                                        query: limitedQuery,
-                                        path: 'examples',
-                                        score: { boost: { value: 3 } },
-                                    },
-                                },
-                                {
-                                    text: {
-                                        query: limitedQuery,
-                                        path: 'breadcrumbs',
-                                        score: { boost: { value: 2 } },
-                                    },
-                                },
-                                {
-                                    text: {
-                                        query: limitedQuery,
-                                        path: 'usageGuide',
-                                        score: { boost: { value: 1 } },
-                                    },
-                                },
-                            ],
-                            minimumShouldMatch: 1,
-                        },
-                    },
-                },
-                // $match after $search handles absent/undefined fields correctly,
-                // unlike $search.compound.filter which requires the field to exist.
-                { $match: { active: { $ne: false }, hidden: { $ne: true } } },
-                { $limit: 10 },
-                {
-                    $project: {
-                        id: { $toString: '$_id' },
-                        name: 1,
-                        breadcrumbs: 1,
-                        synonyms: 1,
-                        examples: 1,
-                        usage: '$usageGuide',
-                        attributes: 1,
-                        productCount: 1,
-                        mappings: '$marketplaceMappings',
-                        aiReason: 1,
-                        score: { $meta: 'searchScore' },
-                    },
-                },
-            ];
+            const escaped = limitedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(escaped, 'i');
+            const exactPhrase = new RegExp(`\\b${escaped}\\b`, 'i');
 
-            return await this.categoryModel.aggregate(pipeline).exec();
+            const categories = await this.categoryModel
+                .find({
+                    active: { $ne: false },
+                    hidden: { $ne: true },
+                    $or: [
+                        { name: regex },
+                        { synonyms: regex },
+                        { examples: regex },
+                        { breadcrumbs: regex },
+                        { usageGuide: regex },
+                    ],
+                })
+                .lean()
+                .exec();
+
+            const scored = categories.map((c: any) => {
+                let score = 0;
+                if (exactPhrase.test(c.name || '')) score += 10;
+                else if (regex.test(c.name || '')) score += 5;
+                if ((c.synonyms || []).some((s: string) => regex.test(s))) score += 8;
+                if ((c.examples || []).some((e: string) => regex.test(e))) score += 3;
+                if (regex.test(c.breadcrumbs || '')) score += 2;
+                if (regex.test(c.usageGuide || '')) score += 1;
+                return { c, score };
+            });
+
+            return scored
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 10)
+                .map(({ c, score }) => ({
+                    id: c._id.toString(),
+                    name: c.name,
+                    breadcrumbs: c.breadcrumbs,
+                    synonyms: c.synonyms,
+                    examples: c.examples,
+                    usage: c.usageGuide,
+                    attributes: c.attributes,
+                    productCount: c.productCount,
+                    mappings: c.marketplaceMappings,
+                    aiReason: c.aiReason,
+                    score,
+                }));
         } catch (error) {
             this.logger.error(`Error discovering category for "${query}": ${JSON.stringify({ ok: false, message: error.message })}`);
             return [];

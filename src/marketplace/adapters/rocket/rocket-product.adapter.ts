@@ -1,9 +1,10 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, Inject } from '@nestjs/common';
 import { IMarketplaceProductAdapter } from '../../interfaces/marketplace-product-adapter.interface';
 import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
 import { ProductDocument } from '../../../product/product-types';
 import { MarketplaceDocument } from '../../schemas/marketplace.schema';
 import { CategoryDiscoveryService } from '../../../search/category-discovery.service';
+import { PRICING_PORT, PricingPort } from '../../../pricing/ports/pricing.port';
 
 @Injectable()
 export class RocketProductAdapter implements IMarketplaceProductAdapter, OnModuleInit {
@@ -12,6 +13,7 @@ export class RocketProductAdapter implements IMarketplaceProductAdapter, OnModul
     constructor(
         private readonly registry: MarketplaceAdapterRegistry,
         private readonly categoryDiscoveryService: CategoryDiscoveryService,
+        @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     ) { }
 
     onModuleInit() {
@@ -28,6 +30,7 @@ export class RocketProductAdapter implements IMarketplaceProductAdapter, OnModul
 
             // Simulate Publication
             const newExternalId = externalId || `ROCKET-${product._id}-${Date.now()}`;
+            const salePrice = await this.pricing.getEffectivePrice(String(product._id), String(marketplace?._id ?? ''));
 
             return {
                 success: true,
@@ -42,7 +45,7 @@ export class RocketProductAdapter implements IMarketplaceProductAdapter, OnModul
                 },
                 requestPayload: {
                     title: product.name,
-                    price: product.price,
+                    price: salePrice,
                 },
                 responsePayload: {
                     id: newExternalId,

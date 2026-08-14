@@ -1,10 +1,14 @@
 // backend/src/product/services/product-readiness.service.ts
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProductRepository } from '../product.repository';
+import { STORE_LISTING_PORT, StoreListingPort } from '../../store-listing/ports/store-listing.port';
+import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 import { ProductTitleService } from './product-title.service';
+import { normalizeCompletedAt } from './product-readiness.normalize';
+import { hasUsableImage } from '../completion/has-usable-image';
 import {
   PRODUCT_SECTION_EVENTS,
   ProductDimensionsSavedEvent,
@@ -32,6 +36,8 @@ export class ProductReadinessService {
 
   constructor(
     private readonly productRepository: ProductRepository,
+    @Inject(STORE_LISTING_PORT) private readonly storeListingPort: StoreListingPort,
+    @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     private readonly productTitleService: ProductTitleService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
@@ -76,8 +82,17 @@ export class ProductReadinessService {
    * Pure compute: derives the canonical completion state from product data.
    * No writes, no events. Always reflects current state — this is the
    * single source of truth.
+   *
+   * storeId: quando informado (usuário logado — GET /products/:id/completion), a leitura de
+   * estoque é EXATAMENTE dessa loja, sem fallback para outra — um produto pode ter
+   * StoreListings em múltiplas lojas (cada uma publica seu próprio anúncio), e "inventory"
+   * precisa refletir o saldo da loja de quem está olhando, não de qualquer uma.
+   * Quando ausente (gate de publish via internal-product.controller, listener assíncrono —
+   * nenhum dos dois tem storeId de usuário disponível hoje), mantém o comportamento anterior
+   * (primeira loja com StoreListing) até o publish multi-loja ser desenhado — ver
+   * docs/superpowers/specs sobre a decomposição desse trabalho.
    */
-  async compute(productId: string): Promise<ProductCompletionResult | null> {
+  async compute(productId: string, storeId?: string): Promise<ProductCompletionResult | null> {
     const product = await this.productRepository.findByIdClean(productId);
     if (!product) return null;
 
@@ -85,15 +100,29 @@ export class ProductReadinessService {
     const hasBrand = !!brandObj?.name || !!brandObj?.shortName;
     const data = !!((product as any).partNumber && hasBrand);
 
-    const images = Array.isArray((product as any).images) && (product as any).images.length > 0;
+    // Count only slots that resolved to a usable image. A reserved rembg slot that is
+    // still 'processing' — or one whose background removal terminally 'failed' — must
+    // NOT mark the Images section done (see completion/has-usable-image).
+    const images = hasUsableImage((product as any).images);
 
-    const titles = await this.productTitleService.findByProductId(productId);
+    // Store-aware, igual ao estoque: com storeId (usuário logado), "titles done" só
+    // pode significar "esta loja tem título", nunca "alguma loja tem título" — senão o
+    // status aparece done mas a tela de Títulos (já isolada por loja) mostra vazio.
+    // Sem storeId (gate de publish/listener assíncrono), mantém o comportamento anterior
+    // (qualquer loja) até o publish multi-loja ser desenhado.
+    const titles = storeId
+      ? await this.productTitleService.findByProductIdAndStore(productId, storeId)
+      : await this.productTitleService.findByProductId(productId);
     const titlesOk = Array.isArray(titles) && titles.length > 0;
 
     const category = !!(product as any).category;
 
-    const stockQty = await this.productRepository.calculateStock(productId);
-    const priceRaw = (product as any).price ? Number((product as any).price) : 0;
+    const resolvedStoreId = storeId ?? (await this.storeListingPort.findAnyByProduct(productId))?.storeId;
+    const stockQty = resolvedStoreId
+      ? (await this.storeListingPort.getStockSummary(productId, String(resolvedStoreId))).onHand
+      : 0;
+    // Sale price lives in PricingModule (removed from Product in the pricing refactor).
+    const priceRaw = await this.pricing.getBasePrice(productId);
     const inventory = stockQty > 0 && priceRaw > 0;
 
     const w = this.parseNum((product as any).weight);
@@ -109,12 +138,17 @@ export class ProductReadinessService {
   }
 
   /**
-   * Recompute + persist `readyToPublish`/`completedAt` only (audit trail),
-   * and emit `BECAME_READY` on the false→true transition.
+   * Recompute readiness and emit `BECAME_READY` on the false→true edge.
    *
-   * Other completion fields are NOT persisted — they are derived on read
-   * via `compute()`. Persisting them led to drift when product fields were
-   * updated through paths that didn't emit a section-saved event.
+   * IMPORTANT — the persisted `readyToPublish`/`completion.readyToPublish` is NOT a
+   * source of truth. `compute()` is the single source; it is computed on every read
+   * (frontend `/completion`, internal `/products/:id` publish gate). The persisted
+   * value is ONLY a transition marker owned by this method: we compare the freshly
+   * computed value against the previously-persisted one to fire `BECAME_READY` exactly
+   * once. No other code may read it to decide readiness — doing so reintroduces the
+   * drift bug (it goes stale whenever state changes via a path that emits no section
+   * event, e.g. rembg finishing async, imports, scripts). Callers converge the marker
+   * by ensuring every such async change emits a section-saved event that reaches here.
    */
   async refreshAndMaybeEmit(productId: string): Promise<void> {
     try {
@@ -123,7 +157,7 @@ export class ProductReadinessService {
 
       const product = await this.productRepository.findByIdClean(productId);
       const previousReady = !!(product as any).completion?.readyToPublish;
-      const previousCompletedAt = (product as any).completion?.completedAt ?? null;
+      const previousCompletedAt = normalizeCompletedAt((product as any).completion?.completedAt);
 
       const completedAt = computed.readyToPublish
         ? (previousCompletedAt ?? new Date())

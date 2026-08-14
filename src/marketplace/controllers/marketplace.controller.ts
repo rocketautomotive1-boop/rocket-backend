@@ -11,7 +11,6 @@ import { ProductAttributesService } from '../services/product-attributes.service
 
 import { MarketplaceIntegrationHelperService } from '../services/marketplace-integration-helper.service';
 // import { PublishService } from '../../publish/publish.service';
-import { OrderService } from '../../order/order.service';
 import { MarketplaceOrderService } from '../services/marketplace-order.service';
 import { ProductService } from '../../product/product.service';
 import { ProductTitleService } from '../../product/services/product-title.service';
@@ -39,8 +38,6 @@ export class MarketplaceController {
     private readonly productAttributesService: ProductAttributesService,
     // @Inject(forwardRef(() => PublishService))
     // private readonly publishService: PublishService,
-    @Inject(forwardRef(() => OrderService))
-    private readonly orderService: OrderService,
     private readonly marketplaceOrderService: MarketplaceOrderService,
 
     // REPLACED: MarketplacePublicationService with Integration & Orchestrator
@@ -345,11 +342,11 @@ export class MarketplaceController {
   }
 
   @Post('products/:productId/publish')
-  async publishProduct(@Param('productId') productId: number, @Req() req: Request) {
+  async publishProduct(@Param('productId') productId: string, @Req() req: Request) {
     const user = (req as any).user;
     const userId = user?.sub || user?.userId || user?.id;
     // Forward to Orchestrator with User Context
-    this.orchestratorPublisherService.requestSync({ productId: String(productId), reason: 'user_publish', force: true, requesterId: userId });
+    this.orchestratorPublisherService.requestSync({ productId, reason: 'user_publish', requesterId: userId });
     return { success: true, message: 'Publicação iniciada via Orchestrator (Async)' };
   }
 
@@ -470,50 +467,8 @@ export class MarketplaceController {
     return this.marketplaceOrderService.ignoreOrder(marketplaceIdRaw, orderId);
   }
 
-  @Post(':marketplaceId/orders/sync-movements')
-  async syncOrdersToMovements(
-    @Param('marketplaceId') marketplaceId: string,
-    @Body() body: any
-  ) {
-    return this.marketplaceOrderService.syncOrdersToMovements(marketplaceId, body || {});
-  }
-
-  @Post(':marketplaceId/orders/:orderId/attach-fiscal')
-  @ApiOperation({ summary: 'Anexar documento fiscal ao pedido no marketplace' })
-  @ApiResponse({ status: 201, description: 'Documento fiscal anexado com sucesso' })
-  async attachFiscalDocument(
-    @Param('marketplaceId') marketplaceId: string,
-    @Param('orderId') orderId: string,
-  ) {
-    // 1. Get Order with Fiscal Docs
-    const result = await this.orderService.getOrder(orderId);
-    if (result.isFailure) {
-      throw new NotFoundException(result.error);
-    }
-    const order = result.getValue();
-
-    if (!order.fiscalDocuments || order.fiscalDocuments.length === 0) {
-      throw new NotFoundException('Nenhum documento fiscal encontrado para este pedido.');
-    }
-
-    // 2. Get the latest XML (Authorized)
-    // Assuming the last one is the relevant one or filtering by status if needed
-    const fiscalDoc = order.fiscalDocuments[order.fiscalDocuments.length - 1];
-    const xmlContent = fiscalDoc.xml || fiscalDoc.xmlSigned;
-
-    if (!xmlContent) {
-      throw new BadRequestException('Conteúdo do XML não encontrado no documento fiscal.');
-    }
-
-    // 3. Attach to Marketplace — pass pack_id for ML (required for Flex/Turbo/ME1/DropOff)
-    const packId = (order as any).packId || undefined;
-    return await this.marketplaceOrderService.attachFiscalDocument(
-      order.externalId,
-      marketplaceId,
-      xmlContent,
-      { packId },
-    );
-  }
+  // attach-fiscal moved to OrderController (POST /marketplaces/:marketplaceId/orders/:orderId/attach-fiscal)
+  // so the marketplace module no longer depends on the order module (cycle removed).
 
   @Get(':marketplaceId/listings')
   async getListings(

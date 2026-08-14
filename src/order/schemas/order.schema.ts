@@ -28,6 +28,10 @@ class OrderLogSnapshot {
 
 @Schema()
 class OrderCustomerSnapshot {
+    /** Vínculo com CustomerModel (loja B2C) — ausente em pedidos ingeridos de marketplace. */
+    @Prop({ type: Types.ObjectId, ref: 'CustomerModel', index: true })
+    customerId?: Types.ObjectId;
+
     @Prop() name: string;
     @Prop() document: string;
     @Prop() email: string;
@@ -42,6 +46,26 @@ class OrderCustomerSnapshot {
         city: string;
         state: string;
     };
+}
+
+@Schema({ _id: false })
+class OrderShippingSubstatusEntry {
+    @Prop() substatus: string;
+    @Prop() at: Date;
+}
+
+@Schema({ _id: false })
+class OrderShippingSnapshot {
+    @Prop() status?: string;       // shipping.status do marketplace (ex.: 'shipped', 'delivered')
+    @Prop() substatus?: string;    // substatus atual — fonte dos marcos de notificação
+    @Prop() trackingCode?: string;
+    @Prop() carrier?: string;
+    @Prop() estimatedDelivery?: Date;
+    @Prop() deliveredAt?: Date;    // setado quando substatus → delivered
+    @Prop() updatedAt?: Date;
+
+    @Prop({ type: [SchemaFactory.createForClass(OrderShippingSubstatusEntry)], default: [] })
+    history: OrderShippingSubstatusEntry[];
 }
 
 @Schema()
@@ -107,6 +131,15 @@ export class OrderModel {
     @Prop({ type: Types.ObjectId, required: true })
     marketplaceId: Types.ObjectId;
 
+    /**
+     * Conta multi-client (accounts[]._id) que RECEBEU este pedido, resolvida na
+     * borda do webhook a partir do user_id do marketplace. Persistida para que
+     * fulfillment/NF-e/update-status operem na conta correta. Ausente em pedidos
+     * legados (single-client) → cai na conta default.
+     */
+    @Prop()
+    accountId?: string;
+
     @Prop({ required: true, index: true })
     status: string;
 
@@ -116,11 +149,23 @@ export class OrderModel {
     @Prop({ required: true, default: 0 })
     shippingAmount: number;
 
+    /** Desconto de cupom aplicado (já refletido em totalAmount) — auditoria. */
+    @Prop({ default: 0 })
+    discountAmount?: number;
+
     @Prop({ default: 'pending', index: true }) // 'pending' | 'processing' | 'deducted' | 'unresolved' | 'error' | 'skipped'
     logisticsStatus: string;
 
     @Prop()
     trackingCode: string;
+
+    /**
+     * Estado de ENVIO do pedido (distinto de `status` comercial e de `logisticsStatus`,
+     * que é estoque). Atualizado por webhooks orders_v2 de logística. `history` é
+     * append-only delta (só quando o substatus muda).
+     */
+    @Prop({ type: SchemaFactory.createForClass(OrderShippingSnapshot) })
+    shipping?: OrderShippingSnapshot;
 
     @Prop({ type: OrderCustomerSnapshot })
     customer: OrderCustomerSnapshot;
@@ -135,6 +180,8 @@ export class OrderModel {
         taxAmount: number;         // Taxes withheld at source
         installments: number;
         authorizationCode?: string; // Payment authorization code
+        mpPaymentId?: string;      // ID do pagamento no Mercado Pago (checkout B2C) — usado p/ webhook confirmar/atualizar
+        mpStatus?: string;         // status bruto do MP (approved/pending/in_process/rejected)
     };
 
     @Prop()
@@ -169,6 +216,14 @@ export class OrderModel {
     @Prop()
     syncedAt: Date;
 
+    /**
+     * Data real de criação do pedido NO MARKETPLACE (ML date_created etc.). Distinta de
+     * `createdAt` (timestamps), que é o momento da nossa ingestão. Indexada para filtros
+     * e relatórios de vendas por data de venda real. Ausente em pedidos legados.
+     */
+    @Prop({ index: true })
+    marketplaceCreatedAt?: Date;
+
     @Prop({ type: SchemaFactory.createForClass(OrderPricingSnapshot) })
     pricing?: OrderPricingSnapshot; // Pricing calculation snapshot
 
@@ -199,6 +254,15 @@ export class OrderModel {
         };
     };
 
+    @Prop()
+    marketplaceTag?: string; // denormalized adapter tag for reconcile/gateway
+
+    @Prop({ type: Object })
+    reconcile?: {
+        lastCheckedAt?: Date;
+        detectedBy?: 'webhook' | 'reconcile' | 'gap-detector';
+    };
+
     fiscalDocuments?: any[];
 }
 
@@ -211,3 +275,7 @@ OrderSchema.virtual('fiscalDocuments', {
 OrderSchema.set('toObject', { virtuals: true });
 OrderSchema.set('toJSON', { virtuals: true });
 OrderSchema.index({ 'customer.document': 1 }); // Great for customer history lookup
+OrderSchema.index({ marketplaceId: 1, status: 1 });
+OrderSchema.index({ logisticsStatus: 1, status: 1 });
+OrderSchema.index({ 'items.productId': 1 });
+OrderSchema.index({ 'payment.mpPaymentId': 1 }, { sparse: true }); // lookup no webhook do Mercado Pago

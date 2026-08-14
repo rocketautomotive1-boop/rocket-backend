@@ -13,15 +13,22 @@ import { ProductFilterService } from './services/product-filter.service';
 import { PaginatedResponseDto, ProductFilterDto, ProductStatus } from './dto/product-filter.dto';
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
 import { ProductRepository } from './product.repository';
-import { ProductMovementService, resolveMovementCondition } from './services/product-movement.service';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
+import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
+import { StockService } from '../stock/stock.service';
+import { resolveMovementCondition, resolveMovementType } from '../stock/domain/movement-type';
+import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 import { MarketplaceDocument } from '../marketplace/schemas/marketplace.schema';
-import { SearchService } from '../search/search.service';
 import { ValidateMongoId } from '../common/decorators/validate-mongo-id.decorator';
+import { buildUniqueProductSlug, shouldRegenerateSlugForTitle } from './utils/product-slug.util';
+import { normalizeCode } from './utils/code-key.util';
 import { PublicationLogService } from '../marketplace/services/publication-log.service';
 import { CategoryMappingService } from '../marketplace/services/category/category-mapping.service';
 import { ProductTitleService } from './services/product-title.service';
 import { ProductCategoryService } from './services/product-category.service';
+import { TitleCategoryHintService } from './services/title-category-hint.service';
+import { ProductShortTitleService } from './services/product-short-title.service';
 import { UserProductivityService } from '../monitoring/user-productivity.service';
 import { ProductivityType } from '../monitoring/schemas/user-productivity.schema';
 import { MercadoLivreCompatibilityAdapter } from '../marketplace/adapters/mercado-livre/mercado-livre-compatibility.adapter';
@@ -59,15 +66,16 @@ export class ProductService {
 
   constructor(
     private readonly productRepository: ProductRepository,
+    @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+    @Inject(STORE_LISTING_PORT) private readonly storeListingPort: StoreListingPort,
+    @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     private readonly queueService: QueueService,
     private readonly productCompatibilityService: ProductCompatibilityService,
     private readonly productFilterService: ProductFilterService,
     private readonly marketplaceRegistry: MarketplaceRegistryService,
-    private readonly productMovementService: ProductMovementService,
+    private readonly stockService: StockService,
     @Inject(forwardRef(() => MarketplaceDescriptionService))
     private readonly marketplaceDescriptionService: MarketplaceDescriptionService,
-    @Inject(forwardRef(() => SearchService))
-    private readonly searchService: SearchService,
     private readonly publicationLogService: PublicationLogService,
     @Inject(forwardRef(() => CategoryMappingService))
     private readonly categoryMappingService: CategoryMappingService,
@@ -75,6 +83,8 @@ export class ProductService {
     private readonly productTitleService: ProductTitleService,
     private readonly userProductivityService: UserProductivityService,
     private readonly productCategoryService: ProductCategoryService,
+    private readonly titleCategoryHintService: TitleCategoryHintService,
+    private readonly productShortTitleService: ProductShortTitleService,
     private readonly mercadoLivreCompatibilityAdapter: MercadoLivreCompatibilityAdapter,
     @InjectModel(BrandModel.name) private readonly brandModel: Model<BrandDocument>,
     @InjectModel(ProductDiscoveryModel.name) private readonly productDiscoveryModel: Model<ProductDiscoveryDocument>,
@@ -91,8 +101,42 @@ export class ProductService {
     return this.productRepository.findByIdClean(id);
   }
 
+  /**
+   * Para rotas públicas (storefront): aceita slug OU _id, já que URLs antigas
+   * indexadas por _id continuam válidas durante a transição para slug.
+   */
+  async findOneBySlugOrId(idOrSlug: string): Promise<ProductModel | null> {
+    if (Types.ObjectId.isValid(idOrSlug)) {
+      return this.productRepository.findByIdClean(idOrSlug);
+    }
+    const doc = await this.productRepository.findOneRaw({ slug: idOrSlug });
+    return doc ? this.productRepository.findByIdClean(doc.id) : null;
+  }
+
   async findRecent(page: number = 1, limit: number = 10): Promise<ProductModel[]> {
     return this.productRepository.findAllClean({}, { page, limit, sort: { updatedAt: -1 } });
+  }
+
+  /**
+   * Batch summaries (id + name + main image) for badges/cards (e.g. notifications).
+   * Deduplicates ids, single indexed `$in` query, minimal projection.
+   */
+  async getSummariesByIds(
+    ids: string[],
+  ): Promise<Array<{ id: string; name: string; image: string | null }>> {
+    const unique = Array.from(new Set((ids || []).filter(Boolean).map(String)));
+    if (unique.length === 0) return [];
+
+    const docs = await this.productRepository.findSummariesByIds(unique);
+    return docs.map((doc) => {
+      const images: any[] = Array.isArray(doc.images) ? doc.images : [];
+      const main = images.find((img) => img?.main) ?? images[0];
+      return {
+        id: String(doc._id),
+        name: doc.name ?? '',
+        image: main?.url ?? null,
+      };
+    });
   }
 
   /**
@@ -108,7 +152,7 @@ export class ProductService {
     }
 
     const doc = await this.productRepository.findOneRaw({
-      partNumber: { $regex: `^${partNumber.trim()}$`, $options: 'i' },
+      partNumberKey: normalizeCode(partNumber),
       $or: brandConditions,
     });
     if (!doc) return null;
@@ -120,12 +164,19 @@ export class ProductService {
   }
 
   @ValidateMongoId()
-  async getProductCompletion(id: string) {
+  async getProductCompletion(id: string, storeId?: string) {
     // Source of truth: always compute on read. Persisted `completion.*` fields
     // were a cache that drifted whenever product data was mutated through a
     // path that didn't emit a section-saved event (imports, discovery direct
     // writes, scripts). The compute is cheap (~5ms) and idempotent.
-    const computed = await this.productReadinessService.compute(id);
+    const product = await this.productRepository.findByIdClean(id);
+    if (!product) throw new NotFoundException('Produto não encontrado');
+
+    // Itens gerais (saúde/beleza/alimentos) têm regra de completude própria —
+    // não têm partNumber, títulos por marketplace nem dimensões obrigatórias.
+    const computed = (product as any).domain === 'general'
+      ? await this.computeGeneralCompletion(id, product, storeId)
+      : await this.productReadinessService.compute(id, storeId);
     if (!computed) throw new NotFoundException('Produto não encontrado');
 
     const compatibilitiesComplete = await this.productRepository.existsCompatibility({ product: id });
@@ -136,12 +187,59 @@ export class ProductService {
     };
   }
 
+  /**
+   * Completude de um produto 'general', mapeada para as MESMAS chaves que o
+   * frontend lê (data/images/titles/category/inventory/dimensions). Seções que
+   * não se aplicam a itens gerais (titles/dimensions) não bloqueiam → true.
+   * inventory exige preço > 0 E estoque > 0 (igual autopeças), com estoque
+   * vindo da agregação de stock_movements (fonte única).
+   */
+  private async computeGeneralCompletion(id: string, product: any, storeId?: string) {
+    const brandObj = product.brand || product.brands;
+    // No general a marca costuma vir como atributo BRAND (de marketplace), não
+    // no relacionamento brand do produto.
+    const brandAttr = Array.isArray(product.attributes)
+      ? product.attributes.find((a: any) => (a.code || a.id) === 'BRAND' && a.value)
+      : null;
+    const hasBrand = !!brandObj?.name || !!brandObj?.shortName || !!brandAttr;
+    const data = !!(product.name && String(product.name).trim()) && hasBrand;
+
+    const images = Array.isArray(product.images) && product.images.length > 0;
+    const category = !!product.category;
+
+    // Estoque store-aware (mesmo critério de ProductReadinessService.compute): com storeId
+    // (usuário logado), lê exatamente essa loja, sem fallback. Sem storeId (chamadores sem
+    // usuário), cai na primeira loja com StoreListing — comportamento anterior preservado.
+    const resolvedStoreId = storeId ?? (await this.storeListingPort.findAnyByProduct(id))?.storeId;
+    const stockQty = resolvedStoreId
+      ? (await this.storeListingPort.getStockSummary(id, String(resolvedStoreId))).onHand
+      : 0;
+    const priceRaw = await this.pricing.getBasePrice(id);
+    const inventory = stockQty > 0 && priceRaw > 0;
+
+    // Títulos por marketplace são EXIGIDOS para general também (mesmo fluxo de
+    // autopeças): só conclui com pelo menos um título e bloqueia readyToPublish.
+    // Store-aware igual a ProductReadinessService.compute: com storeId, só a própria loja
+    // conta — senão "done" aparece mesmo com a tela de Títulos vazia para esta loja.
+    const titlesList = storeId
+      ? await this.productTitleService.findByProductIdAndStore(id, storeId)
+      : await this.productTitleService.findByProductId(id);
+    const titles = Array.isArray(titlesList) && titlesList.length > 0;
+
+    // Dimensões não se aplicam a itens gerais — não devem reprovar a publicação.
+    const dimensions = true;
+
+    const readyToPublish = data && images && titles && category && inventory;
+
+    return { data, images, titles, category, inventory, dimensions, readyToPublish };
+  }
+
   async findForStore(page = 1, limit = 20, search?: string, featured?: boolean) {
     const query: any = { active: true }; // status changed to active in schema
 
     if (search) {
       const regex = new RegExp(search, 'i');
-      query.$or = [{ name: regex }, { partNumber: regex }];
+      query.$or = [{ name: regex }, { partNumberKey: normalizeCode(search) }, { oemCodesKeys: normalizeCode(search) }];
     }
 
     const total = await this.productRepository.count(query);
@@ -164,7 +262,8 @@ export class ProductService {
   async getProductStock(id: string): Promise<number> {
     const product = await this.findDocument(id);
     if (!product) return 0;
-    return this.productRepository.calculateStock(product.id || (product as any)._id.toString());
+    const pid = product.id || (product as any)._id.toString();
+    return (await this.stockQuery.getProductStock(pid)).onHand;
   }
 
 
@@ -183,15 +282,15 @@ export class ProductService {
     // 1. Calculate Trusted Stock from stock_movements aggregation (source of truth)
     const available_quantity = await this.getProductStock(productDoc.id || productDoc._id);
 
-    // 2. Fetch Latest Price/Cost from Movements if needed
-    // Use costPrice from document if available
-    let costPrice = Number(productDoc.costPrice);
-    let lastMovement = null;
+    // 2. Cost = weighted-average lot cost (single source of truth = StockModule).
+    const costPrice = await this.stockQuery.getProductCost(String(productDoc.id || productDoc._id));
 
-    if (!costPrice || costPrice === 0) {
-      lastMovement = await this.productRepository.findLatestMovementWithPrice(productDoc.id || productDoc._id);
-      costPrice = lastMovement?.price ? Number(lastMovement.price) : 0;
-    }
+    // 2b. Sale price = PricingModule (single source of truth). Per-marketplace override
+    // when a marketplace is provided, otherwise the base price. NEVER cost.
+    const salePrice = await this.pricing.getEffectivePrice(
+      String(productDoc.id || productDoc._id),
+      marketplace ? String(marketplace.id || marketplace._id) : undefined,
+    );
 
     // 3. Normalize Attributes
     // Transform legacy/mongo attributes into a standard array if needed, though adapters usually handle this.
@@ -275,13 +374,13 @@ export class ProductService {
     return {
       ...productDoc,
       _id: productDoc._id, // Ensure _id is accessible
-      price: productDoc.price ? Number(productDoc.price) : 0,
+      price: salePrice ?? 0,
       costPrice,
       quantity: available_quantity, // TRUSTED STOCK
       stock: available_quantity,    // Standard alias
       available_quantity,           // Standard alias
       marketplaceDescription,       // Expose generated description
-      productMovements: lastMovement ? [lastMovement] : [], // Only need latest for price reference? Or maybe none? 
+      productMovements: [], // cost/stock now come from StockModule; adapters must not read movements here
       // Adapters shouldn't calc stock from this anymore.
       productImages: productDoc.images || [],
       // [REF] Fetch titles from service
@@ -305,8 +404,8 @@ export class ProductService {
     const product = await this.findOne(id);
     if (!product) return { productMovements: [], boxItems: [] };
 
-    // Delegate to specialized service
-    const movements = await this.productMovementService.findByProduct(product._id);
+    // Movement history from the stock ledger (read side)
+    const movements = await this.stockQuery.listMovements(String(product._id), 200);
 
     // Map allocations to the expected 'boxItems' format for the WMS
     const boxItems = (product.allocations || []).map(alloc => ({
@@ -360,7 +459,7 @@ export class ProductService {
   }
 
   async checkPartNumberBrandUniqueness(partNumber: string, brandId: number | string, excludeProductId?: string): Promise<boolean> {
-    const query: any = { partNumber, 'brand._id': brandId };
+    const query: any = { partNumberKey: normalizeCode(partNumber), 'brand._id': brandId };
 
     if (excludeProductId) {
       if (Types.ObjectId.isValid(excludeProductId)) {
@@ -377,7 +476,7 @@ export class ProductService {
   }
 
   async existsMovementReference(reference: string): Promise<boolean> {
-    return this.productRepository.existsMovementReference(reference);
+    return this.stockQuery.referenceExists(reference);
   }
 
   async create(data: Partial<any>, userId?: string): Promise<ProductModel> {
@@ -420,14 +519,24 @@ export class ProductService {
         await this.productRepository.save(existingProduct);
         const updated = await this.productRepository.findByIdClean(existingProduct.id);
 
-        // Indexing
-        this.searchService.indexProduct(updated).catch(e => this.logger.error(`Failed to index product on update: ${e.message}`));
-
         return updated;
       }
 
       // Create New
-      const slugBase = `${data.partNumber}-${data.brand?.name || 'generic'}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+      const shortTitle = data.title
+        ? await this.productShortTitleService.createOrGet(data.title)
+        : null;
+
+      const slugBase = await buildUniqueProductSlug(
+        {
+          titleText: shortTitle?.text,
+          subtitle: data.subtitle,
+          name: data.name,
+          brandShortName: data.brand?.shortName,
+          partNumber: data.partNumber,
+        },
+        async (candidate) => !!(await this.productRepository.findOneRaw({ slug: candidate })),
+      );
 
       const newProductData = {
         name: data.name || data.partNumber,
@@ -435,6 +544,10 @@ export class ProductService {
         createdByUserId: toOptionalObjectId(userId),
         slug: slugBase,
         description: data.description,
+        titleId: shortTitle ? new Types.ObjectId(shortTitle._id) : undefined,
+        subtitle: data.subtitle,
+        titleText: shortTitle?.text,
+        titleSynonyms: shortTitle?.synonyms,
         tax: {
           ncm: data.ncm,
           cfop: data.cfop,
@@ -443,7 +556,7 @@ export class ProductService {
           origin: data.origin
         },
         price: data.price ? Types.Decimal128.fromString(data.price.toString()) : Types.Decimal128.fromString('0'),
-        costPrice: data.costPrice ? Types.Decimal128.fromString(data.costPrice.toString()) : undefined,
+        // cost is no longer stored on the product — it lives on the stock lot (enters via inbound)
         weight: data.weight ? Types.Decimal128.fromString(data.weight.toString()) : undefined,
         dimensions: data.dimensions ? {
           length: Types.Decimal128.fromString(data.dimensions.length?.toString() || '0'),
@@ -494,15 +607,34 @@ export class ProductService {
       };
 
       const savedProduct = await this.productRepository.create(newProductData);
+
+      // Sale price is owned by PricingModule (base price). Set it via the port on create.
+      if (data.price !== undefined && data.price !== null) {
+        await this.pricing.setBasePrice(String((savedProduct as any).id ?? (savedProduct as any)._id), Number(data.price));
+      }
+      const createdProductId = String((savedProduct as any).id ?? (savedProduct as any)._id);
+      if (data.pricing) {
+        await this.pricing.setPricingMeta(createdProductId, {
+          markup: data.pricing?.markup,
+          profitMargin: data.pricing?.profitMargin,
+          strategy: data.pricing?.strategy,
+        });
+      }
+      const createBasePrice = data.price !== undefined && data.price !== null ? Number(data.price) : 0;
+      if (data.listPrice !== undefined && data.listPrice !== null && Number(data.listPrice) > createBasePrice) {
+        await this.pricing.setPromotion(createdProductId, {
+          listPrice: Number(data.listPrice),
+          startsAt: new Date(),
+          endsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        });
+      }
+
       const newProductClean = await this.productRepository.findByIdClean((savedProduct as any).id);
 
       // Update Category Counts
       if (newProductClean.category) {
         this.productCategoryService.updateProductCounts().catch(e => this.logger.error(`Failed to update product counts on create: ${e.message}`));
       }
-
-      // Indexing
-      this.searchService.indexProduct(newProductClean).catch(e => this.logger.error(`Failed to index product on create: ${e.message}`));
 
       // Log Productivity - Create
       if (userId) {
@@ -561,10 +693,6 @@ export class ProductService {
 
     await this.productRepository.update(id, { $set: update });
 
-    // Indexing
-    const updatedProduct = await this.productRepository.findByIdClean(id);
-    this.searchService.indexProduct(updatedProduct).catch(e => this.logger.error(`Failed to index product on updateDetails: ${e.message}`));
-
     try {
       this.eventEmitter.emit(PRODUCT_SECTION_EVENTS.DIMENSIONS_SAVED, new ProductDimensionsSavedEvent(id));
     } catch {}
@@ -580,17 +708,60 @@ export class ProductService {
       }
 
       if (data.name) product.name = data.name;
+      let newShortTitle: { _id: unknown; text: string; synonyms: string[] } | null = null;
+      if (data.title) {
+        newShortTitle = await this.productShortTitleService.createOrGet(data.title);
+        product.titleId = new Types.ObjectId(String(newShortTitle._id));
+        product.titleText = newShortTitle.text;
+        product.titleSynonyms = newShortTitle.synonyms;
+      }
+      if (data.subtitle !== undefined) product.subtitle = data.subtitle;
       if (data.partNumber) product.partNumber = data.partNumber;
       if (data.description) product.description = data.description;
       if (data.details) product.details = data.details;
       if (data.active !== undefined) product.active = data.active;
+      if (data.isGenuine !== undefined) product.isGenuine = data.isGenuine;
+
+      // Produto universal é elegível em qualquer busca por veículo sem vínculo
+      // granular (ver ProductVehicleSearchService) — compatibilidades específicas
+      // salvas ficam redundantes/inconsistentes ao ativar, então são removidas
+      // junto (confirmação já ocorreu na UI antes de chegar aqui).
+      let removedCompatibilitiesCount: number | undefined;
+      if (data.isUniversalFit !== undefined) {
+        product.isUniversalFit = data.isUniversalFit;
+        if (data.isUniversalFit) {
+          removedCompatibilitiesCount = await this.productCompatibilityService.deleteAllForProduct(String(product._id));
+        }
+      }
 
       if (data.barcode !== undefined) product.barcode = data.barcode;
       if (data.oemCodes) product.oemCodes = data.oemCodes;
       if (data.applicationSummary) product.applicationSummary = data.applicationSummary;
 
-      if (data.price !== undefined) product.price = Types.Decimal128.fromString(data.price.toString());
-      if (data.costPrice !== undefined) product.costPrice = Types.Decimal128.fromString(data.costPrice.toString());
+      // Sale price is owned by PricingModule — route to the port (not the product doc).
+      if (data.price !== undefined) await this.pricing.setBasePrice(String(product._id), Number(data.price));
+      if (data.pricing) {
+        await this.pricing.setPricingMeta(String(product._id), {
+          markup: data.pricing?.markup,
+          profitMargin: data.pricing?.profitMargin,
+          strategy: data.pricing?.strategy,
+        });
+      }
+      if (data.listPrice !== undefined) {
+        const currentBasePrice =
+          data.price !== undefined ? Number(data.price) : await this.pricing.getBasePrice(String(product._id));
+        if (data.listPrice === null || Number(data.listPrice) <= currentBasePrice) {
+          // App antigo envia listPrice <= preço base (ex: 0 ou igual ao price) para indicar "sem promoção".
+          await this.pricing.clearPromotion(String(product._id));
+        } else {
+          await this.pricing.setPromotion(String(product._id), {
+            listPrice: Number(data.listPrice),
+            startsAt: new Date(),
+            endsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          });
+        }
+      }
+      // cost is owned by the stock lot (enters via inbound) — not persisted on the product
       if (data.weight !== undefined) product.weight = Types.Decimal128.fromString(data.weight.toString());
 
       if (data.dimensions) {
@@ -618,6 +789,30 @@ export class ProductService {
         };
       }
 
+      if (
+        newShortTitle &&
+        shouldRegenerateSlugForTitle({
+          currentSlug: product.slug,
+          name: product.name,
+          brandShortName: product.brand?.shortName,
+          partNumber: product.partNumber,
+          barcode: product.barcode,
+          newTitleText: newShortTitle.text,
+        })
+      ) {
+        product.slug = await buildUniqueProductSlug(
+          {
+            titleText: newShortTitle.text,
+            subtitle: product.subtitle,
+            name: product.name,
+            brandShortName: product.brand?.shortName,
+            partNumber: product.partNumber,
+            barcode: product.barcode,
+          },
+          async (candidate) => !!(await this.productRepository.findOneRaw({ slug: candidate, _id: { $ne: product._id } })),
+        );
+      }
+
       const updatedProduct = await this.productRepository.save(product);
 
       // REMOVED: Manual Publication Trigger (Handled by ProductWatcherService)
@@ -625,6 +820,14 @@ export class ProductService {
       // Update Category Counts if relevant fields changed
       if (data.category || data.active !== undefined) {
         this.productCategoryService.updateProductCounts().catch(e => this.logger.error(`Failed to update product counts on update: ${e.message}`));
+      }
+
+      // Alimenta a base de aprendizado titleId -> categoria (ver
+      // docs/superpowers/specs/2026-07-25-product-title-subtitle-design.md)
+      if (newShortTitle && data.category) {
+        const categoryId = data.category.id || data.category;
+        this.titleCategoryHintService.recordHint(String(newShortTitle._id), String(categoryId))
+          .catch(e => this.logger.error(`Failed to record category hint: ${e.message}`));
       }
 
       const clean = await this.productRepository.findByIdClean(updatedProduct.id);
@@ -654,6 +857,10 @@ export class ProductService {
         this.eventEmitter.emit(PRODUCT_SECTION_EVENTS.DATA_SAVED, new ProductDataSavedEvent(id));
       } catch {}
 
+      if (removedCompatibilitiesCount !== undefined) {
+        (clean as any).removedCompatibilitiesCount = removedCompatibilitiesCount;
+      }
+
       return clean;
     } catch (error) {
       this.logger.error('Erro ao atualizar produto:', error);
@@ -661,12 +868,23 @@ export class ProductService {
     }
   }
 
+  /** Mark a reserved image slot as failed (atomic positional update by slotId). */
+  async markImageSlotFailed(productId: string, slotId: string): Promise<void> {
+    await this.productRepository.markImageSlotFailed(productId, slotId);
+  }
+
   @ValidateMongoId()
   async updateImages(id: string, imageDataList: {
+    slotId?: string;
     url: string;
     key: string;
     filename?: string;
     mimeType?: string;
+    /** Position in the list = source of truth for order. Falls back to array index. */
+    order?: number;
+    main?: boolean;
+    /** 'active' | 'processing' | 'failed'. Defaults to 'active'. */
+    status?: string;
   }[]): Promise<ProductModel> {
     try {
       const product = await this.findDocument(id);
@@ -674,14 +892,16 @@ export class ProductService {
         throw new NotFoundException(`Produto com ID ${id} não encontrado`);
       }
 
+      // Persist order/main EXACTLY as the caller arranged them — never re-derive.
       product.images = imageDataList.map((img, index) => ({
+        slotId: img.slotId,
         url: img.url,
         key: img.key,
         originalName: img.filename || `image-${index}`,
         mimeType: img.mimeType,
-        main: index === 0,
-        order: index,
-        status: 'active'
+        main: img.main ?? index === 0,
+        order: img.order ?? index,
+        status: img.status ?? 'active'
       }));
 
       const updatedProduct = await this.productRepository.save(product);
@@ -704,13 +924,13 @@ export class ProductService {
     title: string;
     locale?: string;
     marketplaceId?: string;  // Changed from number to string to match ProductTitleService
-  }[], userId?: number): Promise<ProductModel> {
+  }[], userId?: number, storeId?: string | null): Promise<ProductModel> {
     try {
       // FIXED: Delegate to ProductTitleService which has proper externalId preservation and deduplication
       // The old implementation was naively replacing the entire titles array and setting externalId: null
       // This caused the watcher to treat all titles as new, creating duplicate products in marketplaces
 
-      await this.productTitleService.updateTitles(id, titleDataList, userId);
+      await this.productTitleService.updateTitles(id, titleDataList, userId, storeId);
 
       // Return the updated product
       return this.productRepository.findByIdClean(id);
@@ -767,22 +987,17 @@ export class ProductService {
       const product = await this.findOne(productId);
       if (!product) throw new NotFoundException(`Produto com ID ${productId} não encontrado`);
 
-      return this.productMovementService.create({
-        productId: product._id,
-        type: (movementData.type === 'entrada' || movementData.type === 'inbound') ? 'inbound' :
-          (movementData.type === 'saida' || movementData.type === 'outbound') ? 'outbound' :
-            (movementData.type === 'transferencia' || movementData.type === 'transfer') ? 'transfer' : 'adjustment',
+      return this.stockService.move({
+        productId: String(product._id),
+        type: resolveMovementType(movementData.type),
         quantity: movementData.quantity,
-        price: movementData.price,
+        unitCost: movementData.costPrice ?? movementData.price,
         reason: movementData.reason,
         reference: movementData.reference,
-        condition: resolveMovementCondition(movementData.condition, movementData.conditionId),
-        situation: movementData.situation,
-        observation: movementData.observation,
-        // Forward new structure fields
+        condition: resolveMovementCondition(movementData.condition, movementData.conditionId) as any,
+        toBoxId: movementData.boxId ? String(movementData.boxId) : undefined,
         origin: movementData.origin,
-        metadata: movementData.metadata,
-        orderId: movementData.orderId
+        orderId: movementData.orderId,
       });
     } catch (error) {
       this.logger.error('Erro ao criar movimento:', error);
@@ -793,9 +1008,10 @@ export class ProductService {
   @ValidateMongoId()
   async updateMovement(productId: string, movementId: string, movementData: any): Promise<any> {
     try {
-      const updatedMovement = await this.productMovementService.update(movementId, movementData);
-
-      // Queue trigger removed: product.movement_updated
+      // Ledger is append-only: a quantity correction creates a compensating adjustment.
+      const updatedMovement = movementData.quantity != null
+        ? await this.stockService.editMovementViaAdjustment(movementId, movementData.quantity)
+        : { message: 'Nada a corrigir.' };
 
       return updatedMovement;
     } catch (error) {
@@ -832,7 +1048,7 @@ export class ProductService {
   async getMovements(productId: string): Promise<any[]> {
     const product = await this.findOne(productId);
     if (!product) return [];
-    return this.productMovementService.findByProduct(product._id as any);
+    return this.stockQuery.listMovements(String(product._id), 200);
   }
 
   @ValidateMongoId()
@@ -885,31 +1101,171 @@ export class ProductService {
     vehicleIds: string[],
     vehicleDetails?: Array<{
       id: string;
+      mlVehicleId?: string;
       name?: string;
-      brand?: string;
-      model?: string;
-      year?: string;
-      version?: string;
-      engine?: string;
-      fuelType?: string;
-      transmission?: string;
     }>
-  ): Promise<any[]> {
+  ): Promise<{ compatibilities: any[]; mlSync: any }> {
     try {
       const product = await this.findOne(productId);
       if (!product) throw new NotFoundException(`Produto com ID ${productId} não encontrado`);
 
-      const result = await this.productCompatibilityService.createMultipleCompatibilitiesBatch({
+      // Adicionar um vínculo específico é sinal claro de que o produto não é mais
+      // universal (isUniversalFit) — desliga automaticamente em vez de deixar os
+      // dois estados coexistirem de forma inconsistente. Ver ProductService.update.
+      if ((product as any).isUniversalFit) {
+        await this.productRepository.update(String(product._id), { $set: { isUniversalFit: false } });
+      }
+
+      const compatibilities = await this.productCompatibilityService.createMultipleCompatibilitiesBatch({
         productId: String(product._id),
         vehicleIds,
         vehicleDetails
       });
 
+      const mlSync = await this.autoSyncCompatibilitiesWithMercadoLivre(product, vehicleIds, compatibilities);
 
-      return result;
+      return { compatibilities, mlSync };
     } catch (error) {
       this.logger.error('Erro ao adicionar compatibilidades ao produto:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Best-effort: tenta enviar as compatibilidades recém-salvas ao Mercado Livre.
+   * NUNCA lança — o salvamento local já é o dado de verdade; falha de rede/API do ML
+   * aqui não pode reverter nem bloquear a resposta do endpoint de salvar.
+   * Pula silenciosamente se o produto ainda não tem título publicado no ML (nada para enviar).
+   */
+  private async autoSyncCompatibilitiesWithMercadoLivre(
+    product: any,
+    requestedVehicleIds: string[],
+    savedCompatibilities: any[],
+  ): Promise<{ attempted: boolean; reason?: string; successCount?: number; errorCount?: number }> {
+    try {
+      const marketplace = await this.marketplaceRegistry.findByName('Mercado Livre');
+      if (!marketplace) return { attempted: false, reason: 'marketplace_not_configured' };
+
+      const resolvedMarketplaceId = String(marketplace._id);
+      const allTitles = await this.productTitleService.findByProductId(product._id);
+      const productTitles = allTitles.filter((title: any) => String(title.marketplaceId) === resolvedMarketplaceId);
+
+      if (productTitles.length === 0) {
+        return { attempted: false, reason: 'no_ml_title' };
+      }
+
+      const relevant = savedCompatibilities.filter((c: any) => requestedVehicleIds.includes(c.vehicleId));
+      const mlVehicleIds = [...new Set(relevant.map((c: any) => c.mlVehicleId).filter(Boolean))] as string[];
+
+      if (mlVehicleIds.length === 0) {
+        return { attempted: false, reason: 'no_ml_vehicle_ids' };
+      }
+
+      const syncResult = await this.pushCompatibilitiesToMercadoLivre(productTitles, mlVehicleIds);
+
+      if (syncResult.successCount > 0) {
+        const syncedInternalIds = relevant
+          .filter((c: any) => mlVehicleIds.includes(c.mlVehicleId))
+          .map((c: any) => String(c._id ?? c.id))
+          .filter(Boolean);
+        await this.productCompatibilityService.markAsSynced(syncedInternalIds);
+      }
+
+      return { attempted: true, ...syncResult };
+    } catch (error: any) {
+      this.logger.warn(`Auto-sync de compatibilidades com Mercado Livre falhou (não bloqueante): ${error?.message}`);
+      return { attempted: true, reason: 'error', successCount: 0, errorCount: requestedVehicleIds.length };
+    }
+  }
+
+  /**
+   * Núcleo de envio ao ML compartilhado entre o auto-sync e a sincronização direta manual.
+   * O endpoint é aditivo (confirmado ao vivo contra a API — chamadas separadas ou em lote
+   * só acrescentam, nunca substituem), mas tem um teto rígido de 200 produtos por
+   * requisição (confirmado ao vivo: 201 numa chamada só dá 400 "Maximum of 200 products
+   * for a single request was exceeded"). Chunka em blocos de até 200 — o mínimo de
+   * chamadas que respeita o limite real da API, não um chunking arbitrário.
+   */
+  private static readonly ML_COMPATIBILITY_CHUNK_SIZE = 200;
+
+  private async pushCompatibilitiesToMercadoLivre(
+    productTitles: any[],
+    vehicleIds: string[],
+  ): Promise<{ successCount: number; errorCount: number; results: any[] }> {
+    const results: any[] = [];
+    let successCount = 0;
+    let errorCount = 0;
+
+    const chunkSize = ProductService.ML_COMPATIBILITY_CHUNK_SIZE;
+    const chunks: string[][] = [];
+    for (let i = 0; i < vehicleIds.length; i += chunkSize) {
+      chunks.push(vehicleIds.slice(i, i + chunkSize));
+    }
+
+    for (const title of productTitles) {
+      if (!title.externalId) {
+        results.push({ title: title.title, status: 'skipped', reason: 'missing_externalId' });
+        continue;
+      }
+      for (const chunk of chunks) {
+        const payloadML = {
+          products: chunk.map((id) => ({ id })),
+          site_id: 'MLB',
+          domain_id: 'MLB-CARS_AND_VANS',
+        };
+        try {
+          const resp = await this.mercadoLivreCompatibilityAdapter.syncCompatibility(title.externalId, payloadML);
+          results.push({ title: title.title, itemId: title.externalId, status: 'success', count: chunk.length, response: resp });
+          successCount += chunk.length;
+        } catch (err: any) {
+          this.logger.warn(`syncCompatibility falhou item=${title.externalId} count=${chunk.length}: ${err?.message}`);
+          results.push({
+            title: title.title,
+            itemId: title.externalId,
+            status: 'error',
+            message: err?.response?.message || err?.message,
+            cause: err?.response?.cause || err?.response,
+          });
+          errorCount += chunk.length;
+        }
+      }
+    }
+
+    return { successCount, errorCount, results };
+  }
+
+  /**
+   * Best-effort: remove do ML as compatibilidades (por mlVehicleId) já removidas
+   * localmente. Direto (sem fila) — mesma justificativa do auto-sync de adição:
+   * o dado de verdade é o local, e uma falha de rede aqui não deve bloquear a
+   * remoção que o usuário já pediu.
+   */
+  private async removeCompatibilitiesFromMercadoLivre(product: any, removed: any[]): Promise<void> {
+    const mlVehicleIds = [...new Set(removed.map((c: any) => c.mlVehicleId).filter(Boolean))] as string[];
+    if (mlVehicleIds.length === 0) return;
+
+    try {
+      const marketplace = await this.marketplaceRegistry.findByName('Mercado Livre');
+      if (!marketplace) return;
+
+      const resolvedMarketplaceId = String(marketplace._id);
+      const allTitles = await this.productTitleService.findByProductId(product._id);
+      const productTitles = allTitles.filter((title: any) => String(title.marketplaceId) === resolvedMarketplaceId);
+
+      for (const title of productTitles) {
+        if (!title.externalId) continue;
+        for (const mlVehicleId of mlVehicleIds) {
+          try {
+            await this.mercadoLivreCompatibilityAdapter.removeCompatibilityFromMarketplace(title.externalId, mlVehicleId);
+          } catch (err: any) {
+            this.logger.warn(
+              `removeCompatibilityFromMarketplace falhou item=${title.externalId} mlVehicleId=${mlVehicleId}: ${err?.message}`,
+            );
+          }
+        }
+      }
+    } catch (error: any) {
+      this.logger.warn(`Remoção de compatibilidades no Mercado Livre falhou (não bloqueante): ${error?.message}`);
     }
   }
 
@@ -919,20 +1275,30 @@ export class ProductService {
       const product = await this.findOne(productId);
       if (!product) throw new NotFoundException(`Produto com ID ${productId} não encontrado`);
 
-      await this.productCompatibilityService.deleteCompatibility(compatibilityId);
-
-      await this.queueService.addToQueue({
-        type: 'product.sync_compatibilities',
-        productId: product._id,
-        metadata: {
-          action: 'remove_compatibility',
-          compatibilityId
-        }
-      });
+      const removed = await this.productCompatibilityService.deleteCompatibility(compatibilityId);
+      if (removed) await this.removeCompatibilitiesFromMercadoLivre(product, [removed]);
 
       this.logger.log(`Compatibilidade ${compatibilityId} removida do produto ${productId}`);
     } catch (error) {
       this.logger.error('Erro ao remover compatibilidade:', error);
+      throw error;
+    }
+  }
+
+  /** Remove várias compatibilidades de uma vez (uma exclusão em lote + remoção direta no ML). */
+  @ValidateMongoId(0)
+  async removeProductCompatibilities(productId: string, compatibilityIds: string[]): Promise<void> {
+    if (!compatibilityIds?.length) return;
+    try {
+      const product = await this.findOne(productId);
+      if (!product) throw new NotFoundException(`Produto com ID ${productId} não encontrado`);
+
+      const removed = await this.productCompatibilityService.deleteMultipleCompatibilities(compatibilityIds);
+      if (removed.length > 0) await this.removeCompatibilitiesFromMercadoLivre(product, removed);
+
+      this.logger.log(`${compatibilityIds.length} compatibilidade(s) removida(s) do produto ${productId}`);
+    } catch (error) {
+      this.logger.error('Erro ao remover compatibilidades em lote:', error);
       throw error;
     }
   }
@@ -967,10 +1333,10 @@ export class ProductService {
         throw new BadRequestException('Produto não possui compatibilidades cadastradas');
       }
 
-      // Preparar dados para sincronização
+      // Preparar dados para sincronização (usa o id da taxonomia ML, não o _id da base própria)
       const syncData = {
         itemIds: productTitles.filter(t => t.externalId).map(t => t.externalId),
-        compatibilityIds: compatibilities.map(c => c.vehicleId)
+        compatibilityIds: compatibilities.map(c => (c as any).mlVehicleId ?? c.vehicleId)
       };
 
       // Adicionar à fila para sincronização
@@ -1029,55 +1395,7 @@ export class ProductService {
         throw new BadRequestException(`Sincronização direta ainda não implementada para ${marketplace.name}`);
       }
 
-      const results: any[] = [];
-      let successCount = 0;
-      let errorCount = 0;
-
-      const chunkSize = 50;
-      const chunks: string[][] = [];
-      for (let i = 0; i < vehicleIds.length; i += chunkSize) {
-        chunks.push(vehicleIds.slice(i, i + chunkSize));
-      }
-
-      for (const title of productTitles) {
-        if (!title.externalId) {
-          results.push({ title: title.title, status: 'skipped', reason: 'missing_externalId' });
-          continue;
-        }
-        for (const chunk of chunks) {
-          const payloadML = {
-            products: chunk.map((id) => ({ id })),
-            site_id: 'MLB',
-            domain_id: 'MLB-CARS_AND_VANS',
-          };
-          try {
-            const resp = await this.mercadoLivreCompatibilityAdapter.syncCompatibility(
-              title.externalId,
-              payloadML,
-            );
-            results.push({
-              title: title.title,
-              itemId: title.externalId,
-              status: 'success',
-              count: chunk.length,
-              response: resp,
-            });
-            successCount += chunk.length;
-          } catch (err: any) {
-            this.logger.warn(
-              `syncCompatibility falhou item=${title.externalId} chunk=${chunk.length}: ${err?.message}`,
-            );
-            results.push({
-              title: title.title,
-              itemId: title.externalId,
-              status: 'error',
-              message: err?.response?.message || err?.message,
-              cause: err?.response?.cause || err?.response,
-            });
-            errorCount += chunk.length;
-          }
-        }
-      }
+      const { successCount, errorCount, results } = await this.pushCompatibilitiesToMercadoLivre(productTitles, vehicleIds);
 
       return {
         message: 'Compatibilidades diretas sincronizadas imediatamente',
@@ -1107,21 +1425,22 @@ export class ProductService {
 
       // Estatísticas por marca de veículo
       const brandStats = compatibilities.reduce((acc, comp) => {
-        const brand = comp.vehicleBrand || 'Não especificada';
+        const brand = comp.vehicle?.make || 'Não especificada';
         acc[brand] = (acc[brand] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);
 
       // Estatísticas por ano
       const yearStats = compatibilities.reduce((acc, comp) => {
-        const year = comp.vehicleYear || 'Não especificado';
+        const years: number[] = comp.vehicle?.years ?? [];
+        const year = years.length ? String(Math.max(...years)) : 'Não especificado';
         acc[year] = (acc[year] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);
 
       // Estatísticas por combustível
       const fuelStats = compatibilities.reduce((acc, comp) => {
-        const fuel = comp.vehicleFuelType || 'Não especificado';
+        const fuel = comp.vehicle?.fuelType || 'Não especificado';
         acc[fuel] = (acc[fuel] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);
@@ -1138,14 +1457,6 @@ export class ProductService {
       this.logger.error('Erro ao buscar estatísticas de compatibilidade:', error);
       throw error;
     }
-  }
-
-  /**
-   * Atualizar keywords de compatibilidade quando compatibilidades são alteradas
-   */
-  @ValidateMongoId()
-  async updateCompatibilityKeywords(productId: string): Promise<void> {
-    await this.productFilterService.updateProductCompatibilityKeywords(productId);
   }
 
   async findProductsWithCompatibilitySearch(filters: ProductFilterDto): Promise<PaginatedResponseDto<ProductModel>> {
@@ -1171,7 +1482,8 @@ export class ProductService {
       $or: [
         { barcode: query },
         { ean: query },
-        { partNumber: new RegExp(query, 'i') },
+        { partNumberKey: normalizeCode(query) },
+        { oemCodesKeys: normalizeCode(query) },
         { name: new RegExp(query, 'i') },
         { 'brand.name': new RegExp(query, 'i') }
       ],
@@ -1180,11 +1492,6 @@ export class ProductService {
       limit: 20,
       sort: { updatedAt: -1 }
     });
-  }
-
-  async countByCategory(categoryId: string): Promise<number> {
-    const query = { category: new Types.ObjectId(categoryId), active: true };
-    return this.productRepository.count(query);
   }
 
   async createFromDiscovery(dto: CreateFromDiscoveryDto, userId?: string): Promise<ProductModel> {
@@ -1208,7 +1515,10 @@ export class ProductService {
     if (existing) return this.productRepository.findByIdClean(existing.id);
 
     // 4. Generate slug (same pattern as create())
-    const slugBase = `${dto.partNumber}-${brand.name || 'generic'}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+    const slugBase = await buildUniqueProductSlug(
+      { name: discoveryData.name, brandShortName: (brand as any).shortName, partNumber: dto.partNumber },
+      async (candidate) => !!(await this.productRepository.findOneRaw({ slug: candidate })),
+    );
 
     // 5. Cria o produto com campos pré-preenchidos
     const created = await this.productRepository.create({
@@ -1236,9 +1546,6 @@ export class ProductService {
     });
 
     const result = await this.productRepository.findByIdClean(created.id);
-
-    // 6. Elasticsearch indexing
-    this.searchService.indexProduct(result).catch(e => this.logger.error(`Failed to index product on createFromDiscovery: ${e.message}`));
 
     return result;
   }

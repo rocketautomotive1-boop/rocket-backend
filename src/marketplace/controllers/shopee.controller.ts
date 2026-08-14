@@ -1,6 +1,4 @@
 import { Controller, Get, Post, Put, Body, Param, Query, BadRequestException, HttpException, Logger } from '@nestjs/common'
-import axios from 'axios'
-import { getShopeeBaseUrl, buildSignedParams, buildHeaders } from '../adapters/shopee/shopee-utils'
 import { MarketplaceAuthService } from '../auth/services/marketplace-auth.service'
 import { MarketplaceOrderService } from '../services/marketplace-order.service'
 import { StandardOrder } from '../model/order.interface'
@@ -21,12 +19,6 @@ export class ShopeeController {
     private readonly marketplaceAuth: MarketplaceAuthService,
     private readonly marketplaceOrder: MarketplaceOrderService,
   ) { }
-
-  private async getShopeeToken() {
-    const marketplace = await this.marketplaceAuth.findByName('Shopee');
-    if (!marketplace) throw new BadRequestException('Marketplace Shopee não encontrado');
-    return this.marketplaceAuth.ensureValidToken(marketplace.id as any);
-  }
 
   private toHttpException(error: any): HttpException {
     if (error instanceof HttpException) {
@@ -87,8 +79,7 @@ export class ShopeeController {
   @Get('categories')
   async getCategories(@Query('parentId') parentId?: string) {
     try {
-      const token = await this.getShopeeToken()
-      return this.categories.getCategories(token.accessToken, token.additionalData.shopId, parentId)
+      return this.categories.getCategories(parentId)
     } catch (error) {
       throw this.toHttpException(error)
     }
@@ -97,15 +88,7 @@ export class ShopeeController {
   @Get('logistics/channels')
   async getLogisticsChannels() {
     try {
-      const token = await this.getShopeeToken()
-      const timestamp = Math.floor(Date.now() / 1000)
-      const path = '/logistics/get_channel_list'
-      const params = buildSignedParams(path, timestamp, token.accessToken, token.additionalData.shopId)
-      const response = await axios.get(`${getShopeeBaseUrl()}${path}`, {
-        headers: buildHeaders(),
-        params,
-      })
-      return response.data
+      return this.products.getLogisticsChannels()
     } catch (error) {
       throw this.toHttpException(error)
     }
@@ -114,8 +97,7 @@ export class ShopeeController {
   @Get('orders')
   async listOrders(@Query() params: any) {
     try {
-      const token = await this.getShopeeToken()
-      return this.orders.getOrders({ ...params, token })
+      return this.orders.getOrders({ ...params })
         .then(orders => orders.map(o => ({
           ...o,
           marketplaceId: 3, // Shopee ID
@@ -129,8 +111,7 @@ export class ShopeeController {
   @Get('orders/:orderId')
   async orderDetails(@Param('orderId') orderId: string) {
     try {
-      const token = await this.getShopeeToken()
-      return this.orders.getOrderDetails(orderId, token)
+      return this.orders.getOrderDetails(orderId)
     } catch (error) {
       throw this.toHttpException(error)
     }
@@ -139,8 +120,7 @@ export class ShopeeController {
   @Post('orders/:orderId/status')
   async updateOrderStatus(@Param('orderId') orderId: string, @Body('status') status: string) {
     try {
-      const token = await this.getShopeeToken()
-      return this.orders.updateOrderStatus(orderId, status, token)
+      return this.orders.updateOrderStatus(orderId, status)
     } catch (error) {
       throw this.toHttpException(error)
     }
@@ -149,8 +129,7 @@ export class ShopeeController {
   @Post('products')
   async createProduct(@Body() product: any) {
     try {
-      const token = await this.getShopeeToken()
-      return this.products.createProduct({ ...product, token })
+      return this.products.createProduct(product)
     } catch (error) {
       throw this.toHttpException(error)
     }
@@ -159,8 +138,7 @@ export class ShopeeController {
   @Put('products/:externalId')
   async updateProduct(@Param('externalId') externalId: string, @Body() product: any) {
     try {
-      const token = await this.getShopeeToken()
-      return this.products.updateProduct(externalId, { ...product, token })
+      return this.products.updateProduct(externalId, product)
     } catch (error) {
       throw this.toHttpException(error)
     }
@@ -169,7 +147,6 @@ export class ShopeeController {
   @Put('products/:externalId/images')
   async updateImages(@Param('externalId') externalId: string, @Body('images') images: any[]) {
     try {
-      const token = await this.getShopeeToken()
       const marketplace = await this.marketplaceAuth.findByName('Shopee')
       let cachedImageIds: string[] = []
       // Note: findProductMarketplaceByExternalId needs to be moved or used from new service if available.
@@ -183,8 +160,7 @@ export class ShopeeController {
       if (shouldUseCache) {
         finalImages = cachedImageIds
       }
-      const imagesWithToken = (finalImages || []).map((img: any) => ({ ...img, token }))
-      const response = await this.products.updateProductImages(externalId, imagesWithToken)
+      const response = await this.products.updateProductImages(externalId, finalImages)
       if (pm && marketplace && Array.isArray(response?.used_image_ids)) {
         // Update via new service if possible
         this.logger.log(`Updated Shopee image IDs for ${externalId}`);
@@ -195,28 +171,10 @@ export class ShopeeController {
     }
   }
 
-  @Post('media/upload-image')
-  async uploadImage(@Body('imageUrl') imageUrl: string) {
-    try {
-      const token = await this.getShopeeToken()
-      if (!imageUrl) {
-        throw new BadRequestException('imageUrl é obrigatório')
-      }
-      const response = await (this.products as any)['uploadImage']?.(imageUrl, token)
-      if (!response) {
-        throw new BadRequestException('Falha ao enviar imagem para a Shopee')
-      }
-      return { imageUrl: response }
-    } catch (error) {
-      throw this.toHttpException(error)
-    }
-  }
-
   @Put('products/:externalId/title')
   async updateTitle(@Param('externalId') externalId: string, @Body('title') title: string) {
     try {
-      const token = await this.getShopeeToken()
-      return this.products.updateProductTitle(externalId, title, token)
+      return this.products.updateProductTitle(externalId, title)
     } catch (error) {
       throw this.toHttpException(error)
     }
@@ -225,8 +183,7 @@ export class ShopeeController {
   @Put('products/:externalId/category')
   async updateCategory(@Param('externalId') externalId: string, @Body() category: any) {
     try {
-      const token = await this.getShopeeToken()
-      return this.products.updateProductCategory(externalId, { ...category, token })
+      return this.products.updateProductCategory(externalId, category)
     } catch (error) {
       throw this.toHttpException(error)
     }
@@ -235,8 +192,7 @@ export class ShopeeController {
   @Put('products/:externalId/inventory')
   async updateInventory(@Param('externalId') externalId: string, @Body() inventory: any) {
     try {
-      const token = await this.getShopeeToken()
-      return this.products.updateProductInventory(externalId, { ...inventory, token })
+      return this.products.updateProductInventory(externalId, inventory)
     } catch (error) {
       throw this.toHttpException(error)
     }

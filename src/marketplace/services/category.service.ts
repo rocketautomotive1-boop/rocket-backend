@@ -1,7 +1,6 @@
 import { Injectable, Logger, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { CategoryQueryService, CategorySyncService, CategoryMappingService } from './category';
 import { ProductService } from '../../product/product.service';
-import { MarketplaceAuthService } from '../auth/services/marketplace-auth.service';
 import { MercadoLivreAdapter } from '../adapters/mercado-livre/mercado-livre.adapter';
 import { CategorySuggestionService } from './category-suggestion.service';
 
@@ -18,7 +17,6 @@ export class CategoryService {
     private categorySyncService: CategorySyncService,
     private categoryMappingService: CategoryMappingService,
     @Inject(forwardRef(() => ProductService)) private productService: ProductService,
-    private marketplaceAuthService: MarketplaceAuthService,
     private mercadoLivreAdapter: MercadoLivreAdapter,
     private categorySuggestionService: CategorySuggestionService,
     private adapterRegistry: MarketplaceAdapterRegistry,
@@ -120,13 +118,8 @@ export class CategoryService {
 
   async getShippingPreferences(marketplaceId: number | string, categoryId: string): Promise<any> {
     try {
-      // TODO: Refactor to usage pattern found in other methods or use strategy pattern if multiple marketplaces support this.
-      // For now, hardcoding to Mercado Livre flow as it's the requested feature.
-      const token = await this.marketplaceAuthService.ensureValidToken(marketplaceId as any);
-      if (!token || !token.accessToken) {
-        throw new Error('Token de acesso não encontrado');
-      }
-      return this.mercadoLivreAdapter.getShippingPreferences(token.accessToken, categoryId);
+      // Token/refresh ficam no MlHttpClient dentro do adapter (ML, conta default).
+      return this.mercadoLivreAdapter.getShippingPreferences(categoryId);
     } catch (error) {
       this.logger.error(`Erro ao buscar preferências de envio: ${error.message}`);
       throw error;

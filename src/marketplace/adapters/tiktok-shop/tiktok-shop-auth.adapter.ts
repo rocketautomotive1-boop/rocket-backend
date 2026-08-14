@@ -1,15 +1,12 @@
-import { Injectable, Logger, HttpException, Inject, forwardRef, OnModuleInit, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, HttpException, OnModuleInit, InternalServerErrorException } from '@nestjs/common';
 import axios from 'axios';
-import { MarketplaceAuthService } from '../../auth/services/marketplace-auth.service';
+import { createHmac } from 'crypto';
 import { IMarketplaceAuthAdapter } from '../../interfaces/marketplace-auth-adapter.interface';
-import {
-  getTikTokShopBaseUrl,
-  getAppKey,
-  getAppSecret,
-  buildHeaders,
-  buildAuthUrl,
-  buildSignedParams,
-} from './tiktok-shop-utils';
+import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
+import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
+import { TokenManagerService } from '../../auth/services/token-manager.service';
+import { MarketplaceCredentialsService } from '../../credentials/marketplace-credentials.service';
+import { getTikTokShopBaseUrl, buildHeaders } from './tiktok-shop-utils';
 
 @Injectable()
 export class TikTokShopAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit {
@@ -19,12 +16,34 @@ export class TikTokShopAuthAdapter implements IMarketplaceAuthAdapter, OnModuleI
   readonly tag = 'tiktokshop';
 
   constructor(
-    @Inject(forwardRef(() => MarketplaceAuthService))
-    private marketplaceAuthService: MarketplaceAuthService,
+    private readonly registry: MarketplaceAdapterRegistry,
+    private readonly marketplaceRegistry: MarketplaceRegistryService,
+    private readonly tokenManager: TokenManagerService,
+    private readonly credentials: MarketplaceCredentialsService,
   ) {}
 
   onModuleInit() {
-    this.marketplaceAuthService.registerAdapter(this);
+    this.registry.registerAuthAdapter(this);
+  }
+
+  /** appKey/appSecret via CredentialsService (DB cifrado → env fallback). */
+  private async creds(): Promise<{ appKey: string; appSecret: string }> {
+    const appKey = await this.credentials.getRequired('tiktokshop', 'appKey');
+    const appSecret = await this.credentials.getRequired('tiktokshop', 'appSecret');
+    return { appKey, appSecret };
+  }
+
+  /**
+   * Query params TikTok assinados resolvendo appKey/appSecret via
+   * CredentialsService. Mesma fórmula do tiktok-shop-utils (HMAC wrapped),
+   * mas sem ler env direto.
+   */
+  private signedParams(appKey: string, appSecret: string, path: string, timestamp: number, body?: string): Record<string, any> {
+    const base: Record<string, any> = { app_key: appKey, timestamp };
+    const sorted = Object.keys(base).sort().map((k) => `${k}${base[k]}`).join('');
+    const content = `${path}${sorted}${body || ''}`;
+    const sign = createHmac('sha256', appSecret).update(`${appSecret}${content}${appSecret}`).digest('hex');
+    return { ...base, sign };
   }
 
   async authenticate(code: string, additionalData?: any): Promise<any> {
@@ -33,17 +52,17 @@ export class TikTokShopAuthAdapter implements IMarketplaceAuthAdapter, OnModuleI
       throw new Error('Parâmetros inválidos: informe o authorization code');
     }
 
-    this.logger.log(`Autenticando no TikTok Shop com app_key: ${getAppKey()}`);
-
     try {
+      const { appKey, appSecret } = await this.creds();
+      this.logger.log(`Autenticando no TikTok Shop com app_key: ${appKey}`);
+
       const path = '/api/v2/token/get';
       const timestamp = Math.floor(Date.now() / 1000);
-
-      const queryParams = buildSignedParams(path, timestamp);
+      const queryParams = this.signedParams(appKey, appSecret, path, timestamp);
 
       const body = {
-        app_key: getAppKey(),
-        app_secret: getAppSecret(),
+        app_key: appKey,
+        app_secret: appSecret,
         auth_code: code,
         grant_type: 'authorized_code',
       };
@@ -68,7 +87,6 @@ export class TikTokShopAuthAdapter implements IMarketplaceAuthAdapter, OnModuleI
         additionalData: {
           shopId: data.open_id,
           shopCipher: data.seller_base_region ? `${data.seller_base_region}` : '',
-          appKey: getAppKey(),
           sellerName: data.seller_name || '',
           refreshTokenExpiresAt: new Date(Date.now() + (data.refresh_token_expire_in || 0) * 1000),
         },
@@ -84,23 +102,23 @@ export class TikTokShopAuthAdapter implements IMarketplaceAuthAdapter, OnModuleI
   }
 
   async getValidToken(marketplaceName: string): Promise<any> {
-    const marketplace = await this.marketplaceAuthService.findByName(marketplaceName);
+    const marketplace = await this.marketplaceRegistry.findByName(marketplaceName);
     if (!marketplace) throw new Error(`Marketplace ${marketplaceName} não encontrado`);
-    return await this.marketplaceAuthService.ensureValidToken(marketplace._id as any);
+    return await this.tokenManager.resolveToken(String(marketplace._id));
   }
 
   async refreshToken(token: any): Promise<any> {
     this.logger.log('Renovando token do TikTok Shop');
 
     try {
+      const { appKey, appSecret } = await this.creds();
       const path = '/api/v2/token/refresh';
       const timestamp = Math.floor(Date.now() / 1000);
-
-      const queryParams = buildSignedParams(path, timestamp);
+      const queryParams = this.signedParams(appKey, appSecret, path, timestamp);
 
       const body = {
-        app_key: getAppKey(),
-        app_secret: getAppSecret(),
+        app_key: appKey,
+        app_secret: appSecret,
         refresh_token: token.refreshToken,
         grant_type: 'refresh_token',
       };
@@ -154,9 +172,9 @@ export class TikTokShopAuthAdapter implements IMarketplaceAuthAdapter, OnModuleI
     }
   }
 
-  async generateAuthUrl(redirectUri?: string): Promise<{ authUrl: string }> {
-    const defaultRedirect = process.env.TIKTOK_SHOP_REDIRECT_URL || `${process.env.API_BASE_URL}/auth/tiktok-shop/callback`;
-    const url = buildAuthUrl(redirectUri || defaultRedirect);
-    return { authUrl: url };
+  async generateAuthUrl(_redirectUri?: string): Promise<{ authUrl: string }> {
+    const { appKey } = await this.creds();
+    const qs = new URLSearchParams({ app_key: appKey, state: `tiktokshop_${Date.now()}` });
+    return { authUrl: `https://services.tiktokshop.com/open/authorize?${qs.toString()}` };
   }
 }

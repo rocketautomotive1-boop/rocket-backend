@@ -9,13 +9,12 @@ import { CategoryController } from './controllers/category.controller';
 import { CategoryService } from './services/category.service';
 import { ProductModule } from '../product/product.module';
 import { AuthModule } from '../auth/auth.module';
-import { OrderModule } from '../order/order.module';
 import { ListingModule } from '../listing/listing.module'; // [NEW]
 import { AiModule } from '../ai/ai.module';
 import { MercadoLivreProductAdapter } from './adapters/mercado-livre/mercado-livre-product.adapter';
+import { MercadoLivrePricingAdapter } from './adapters/mercado-livre/mercado-livre-pricing.adapter';
 import { MercadoLivreController } from './controllers/mercado-livre.controller';
 import { PublicationLogService } from './services/publication-log.service';
-import { MarketplaceToken, MarketplaceTokenSchema } from './schemas/marketplace-token.schema';
 
 import { MercadoLivreOrderAdapter } from './adapters/mercado-livre/mercado-livre-order.adapter';
 import { MercadoLivreCategoryAdapter } from './adapters/mercado-livre/mercado-livre-category.adapter';
@@ -23,6 +22,8 @@ import { ShopeeAuthAdapter } from './adapters/shopee/shopee-auth.adapter';
 import { ShopeeProductAdapter } from './adapters/shopee/shopee-product.adapter';
 import { ShopeeOrderAdapter } from './adapters/shopee/shopee-order.adapter';
 import { ShopeeCategoryAdapter } from './adapters/shopee/shopee-category.adapter';
+import { ShopeeSignerService } from './adapters/shopee/shopee-signer.service';
+import { ShopeeHttpClient } from './adapters/shopee/shopee-http-client';
 import { CategoryQueryService, CategorySyncService, CategoryMappingService } from './services/category';
 import { MarketplaceIntegrationService } from './services/marketplace-integration.service';
 import { MarketplaceIntegrationHelperService } from './services/marketplace-integration-helper.service';
@@ -33,13 +34,16 @@ import { ProductFieldMapper } from './services/product-field-mapper.service';
 import { TemplateEngine } from './services/template-engine.service';
 import { TemplateConditionEvaluator } from './services/template-condition.evaluator';
 import { MarketplaceAdapterRegistry } from './registries/marketplace-adapter.registry';
+import { AuthRetryService } from './adapters/shared/auth-retry.service';
+import { MlHttpClient } from './adapters/mercado-livre/ml-http-client';
+import { AmazonHttpClient } from './adapters/amazon/amazon-http-client';
+import { TikTokShopHttpClient } from './adapters/tiktok-shop/tiktok-shop-http-client';
 import { MarketplaceCategoryService } from './services/marketplace-category.service';
 
 import { MarketplaceRegistryService } from './services/marketplace-registry.service';
 import { MarketplaceOrderService } from './services/marketplace-order.service';
 import { MercadoLivreService } from './services/mercado-livre.service';
 import { ShopeeService } from './services/shopee.service';
-import { AmericanasService } from './services/americanas.service';
 import { CategoryAttributesService } from './services/category-attributes.service';
 import { CategorySuggestionService } from './services/category-suggestion.service';
 import { ProductAttributesService } from './services/product-attributes.service';
@@ -72,7 +76,7 @@ import { MarketplaceModel, MarketplaceSchema } from './schemas/marketplace.schem
 import { IgnoredOrderModel, IgnoredOrderSchema } from './schemas/ignored-order.schema';
 import { MarketplaceCategoryModel, MarketplaceCategorySchema } from './schemas/marketplace-category.schema';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
-import { StockMovementModel, StockMovementSchema } from '../product/schemas/stock-movement.schema';
+import { StockMovementModel, StockMovementSchema } from '../stock/schemas/stock-movement.schema';
 import { MarketplaceRegistryModule } from './marketplace-registry.module';
 import { MarketplaceAuthModule } from './auth/marketplace-auth.module';
 import { SearchModule } from '../search/search.module';
@@ -86,6 +90,9 @@ import { TikTokShopOrderAdapter } from './adapters/tiktok-shop/tiktok-shop-order
 import { TikTokShopCategoryAdapter } from './adapters/tiktok-shop/tiktok-shop-category.adapter';
 import { TikTokShopService } from './services/tiktok-shop.service';
 import { TikTokShopController } from './controllers/tiktok-shop.controller';
+
+import { MarketplaceOrderGatewayProvider } from './ports/marketplace-order-gateway.provider';
+import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gateway';
 
 @Module({
   imports: [
@@ -112,7 +119,6 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     YampiModule,
     MagaluModule,
     forwardRef(() => QueueModule),
-    forwardRef(() => OrderModule),
     ListingModule,
     MongooseModule.forFeature([
       { name: MarketplaceModel.name, schema: MarketplaceSchema },
@@ -120,8 +126,8 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
       { name: MarketplaceCategoryModel.name, schema: MarketplaceCategorySchema },
       { name: ProductModel.name, schema: ProductSchema },
       { name: StockMovementModel.name, schema: StockMovementSchema },
-      { name: MarketplaceToken.name, schema: MarketplaceTokenSchema },
       { name: QueueRecordModel.name, schema: QueueRecordSchema },
+      { name: require('../order/schemas/order.schema').OrderModel.name, schema: require('../order/schemas/order.schema').OrderSchema },
       {
         name: 'PublicationAttempt',
         schema: require('./schemas/publication-attempt.schema').PublicationAttemptSchema
@@ -145,6 +151,7 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     MercadoLivreAdapter,
     ShopeeAdapter,
     MercadoLivreProductAdapter,
+    MercadoLivrePricingAdapter,
     MercadoLivreOrderAdapter,
     MercadoLivreCategoryAdapter,
     MercadoLivreListingAdapter,
@@ -167,10 +174,12 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     ShopeeProductAdapter,
     ShopeeOrderAdapter,
     ShopeeCategoryAdapter,
-    AmericanasService,
+    ShopeeSignerService,
+    ShopeeHttpClient,
     AmazonAdapter,
     AmazonService,
     AmazonProductAdapter,
+    AmazonHttpClient,
     ProductAttributesService,
     OLXProductAdapter,
     OLXImportService,
@@ -178,16 +187,22 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     OLXHighlightsService,
     OLXWebhookService,
     MarketplaceAdapterRegistry,
+    AuthRetryService,
+    MlHttpClient,
     RocketProductAdapter,
     TikTokShopAdapter,
     TikTokShopAuthAdapter,
     TikTokShopProductAdapter,
     TikTokShopOrderAdapter,
     TikTokShopCategoryAdapter,
+    TikTokShopHttpClient,
     TikTokShopService,
     MlDimensionsCalculatorService,
     MlDimensionsAttributeHandler,
     MlAttributeHydrationService,
+    // Hexagonal port implementation consumed by OrderModule (pure — no Order DB access)
+    MarketplaceOrderGatewayProvider,
+    { provide: MARKETPLACE_ORDER_GATEWAY, useClass: MarketplaceOrderGatewayProvider },
   ],
   exports: [
     MarketplaceService,
@@ -214,7 +229,7 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     MercadoLivreService,
     MercadoLivreAttributesService,
     ShopeeService,
-    AmericanasService,
+    ShopeeSignerService,
     AmazonAdapter,
     AmazonService,
     AmazonProductAdapter,
@@ -235,6 +250,10 @@ import { TikTokShopController } from './controllers/tiktok-shop.controller';
     TikTokShopCategoryAdapter,
     TikTokShopService,
     MlAttributeHydrationService,
+    // Transporte canônico ML consumido pelo OrderMarketplaceDetailsService (billing)
+    MlHttpClient,
+    // Token consumed by OrderModule
+    MARKETPLACE_ORDER_GATEWAY,
   ],
 })
 export class MarketplaceModule { }

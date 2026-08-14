@@ -1,6 +1,8 @@
-import { forwardRef, Inject, Injectable, Logger } from "@nestjs/common";
-import { MercadoLivreAuthAdapter } from "./mercado-livre-auth.adapter";
-import axios from "axios";
+import { Injectable, Logger } from "@nestjs/common";
+import { MlHttpClient } from "./ml-http-client";
+
+/** Leituras de catálogo/anúncios do seller (conta default). */
+const CTX = (context: string) => ({ context });
 
 interface MercadoLivreListing {
     code: number;
@@ -22,17 +24,12 @@ interface MercadoLivreListing {
 
 @Injectable()
 export class MercadoLivreListingAdapter {
-    constructor(
-        @Inject(forwardRef(() => MercadoLivreAuthAdapter))
-        private readonly authAdapter: MercadoLivreAuthAdapter,
-    ) { }
+    constructor(private readonly http: MlHttpClient) { }
     private readonly logger = new Logger(MercadoLivreListingAdapter.name);
-    private baseUrl = 'https://api.mercadolibre.com';
-    private name = 'Mercado Livre';
 
     async getSellerId(): Promise<string | undefined> {
         try {
-            const mlUser = await this.authAdapter.me(this.name);
+            const mlUser = await this.http.get<any>('/users/me', CTX('listing.me'));
             return mlUser?.id != null ? String(mlUser.id) : undefined;
         } catch {
             return undefined;
@@ -43,25 +40,15 @@ export class MercadoLivreListingAdapter {
      * GET /users/{user_id}/items/search — paginação ML (máx. 50 por página).
      */
     async searchUserItems(params?: { offset?: number; limit?: number; order?: string; tags?: string }): Promise<any> {
-        const mlUser = await this.authAdapter.me(this.name);
-        const token = await this.authAdapter.getValidToken(this.name);
+        const mlUser = await this.http.get<any>('/users/me', CTX('listing.me'));
         const offset = params?.offset ?? 0;
         const limit = Math.min(50, Math.max(1, params?.limit ?? 50));
         const query: Record<string, string | number> = { offset, limit };
         if (params?.order) query.order = params.order;
         if (params?.tags?.trim()) query.tags = params.tags.trim();
 
-        try {
-            this.logger.log(`Buscando items/search user=${mlUser.id} offset=${offset} limit=${limit}`);
-            const response = await axios.get(`${this.baseUrl}/users/${mlUser.id}/items/search`, {
-                headers: { Authorization: `Bearer ${token}` },
-                params: query,
-            });
-            return response.data;
-        } catch (error: any) {
-            this.logger.error(`Erro ao buscar items/search: ${JSON.stringify(error.response?.data)}`);
-            throw error;
-        }
+        this.logger.log(`Buscando items/search user=${mlUser.id} offset=${offset} limit=${limit}`);
+        return this.http.get<any>(`/users/${mlUser.id}/items/search`, CTX('searchUserItems'), query);
     }
 
     async getListing(): Promise<any> {
@@ -69,7 +56,6 @@ export class MercadoLivreListingAdapter {
     }
 
     async getListingMultiget(): Promise<any> {
-        const token = await this.authAdapter.getValidToken(this.name);
         const ids = await this.getListing() as any;
         if (!ids?.results) {
             this.logger.error(`Nenhum anúncio encontrado`);
@@ -79,51 +65,24 @@ export class MercadoLivreListingAdapter {
         const results = [];
 
         for (let i = 0; i < ids.results.length; i += 20) {
-            const idsArray = ids.results.slice(i, i + 20);
-            const idsString = idsArray.map(item => item).join(',');
-
-            try {
-                this.logger.log(`Buscando detalhes de anúncios ${idsString}`);
-                const response = await axios.get(`${this.baseUrl}/items?ids=${idsString}`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                    },
-                });
-                results.push(...response.data);
-            } catch (error) {
-                this.logger.error(`Erro ao buscar lista de produtos: ${JSON.stringify(error.response?.data)}`);
-                throw error;
-            }
+            const idsString = ids.results.slice(i, i + 20).join(',');
+            this.logger.log(`Buscando detalhes de anúncios ${idsString}`);
+            const data = await this.http.get<any[]>('/items', CTX('getListingMultiget'), { ids: idsString });
+            results.push(...data);
         }
-        
+
         return results;
     }
 
     async getListingMultigetByIds(ids: string): Promise<MercadoLivreListing[]> {
-        const token = await this.authAdapter.getValidToken(this.name);
-
-        try {
-            this.logger.log(`Buscando detalhes de anúncios por IDs: ${ids}`);
-            
-            if (!ids || ids.trim() === '') {
-                this.logger.warn('Nenhum ID fornecido para busca');
-                return [];
-            }
-
-            const response = await axios.get(`${this.baseUrl}/items?ids=${ids}`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                },
-            });
-
-            this.logger.log(`Anúncios encontrados: ${response.data.length}`);
-            this.logger.log(`Resposta da API: ${JSON.stringify(response.data, null, 2)}`);
-            
-            return response.data;
-        } catch (error) {
-            this.logger.error(`Erro ao buscar anúncios por IDs: ${JSON.stringify(error.response?.data)}`);
-            throw error;
+        if (!ids || ids.trim() === '') {
+            this.logger.warn('Nenhum ID fornecido para busca');
+            return [];
         }
+        this.logger.log(`Buscando detalhes de anúncios por IDs: ${ids}`);
+        const data = await this.http.get<MercadoLivreListing[]>('/items', CTX('getListingMultigetByIds'), { ids });
+        this.logger.log(`Anúncios encontrados: ${data.length}`);
+        return data;
     }
 
     // Nova função para buscar status de anúncios específicos

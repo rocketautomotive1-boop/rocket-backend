@@ -1,9 +1,11 @@
-import { Injectable, Logger, Inject, forwardRef, OnModuleInit, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, InternalServerErrorException } from '@nestjs/common';
 import axios from 'axios';
 import * as aws4 from 'aws4';
 import { MarketplaceToken } from '../../schemas/marketplace-token.schema';
-import { MarketplaceAuthService } from '../../auth/services/marketplace-auth.service';
 import { ResolvedToken } from '../../auth/services/token-manager.service';
+import { TokenManagerService } from '../../auth/services/token-manager.service';
+import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
+import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
 import { MarketplaceDocument } from '../../schemas/marketplace.schema';
 import { IMarketplaceAuthAdapter } from '../../interfaces/marketplace-auth-adapter.interface';
 
@@ -14,22 +16,23 @@ export class AmazonAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
   readonly tag = 'amazon';
 
   constructor(
-    @Inject(forwardRef(() => MarketplaceAuthService))
-    private readonly authService: MarketplaceAuthService,
+    private readonly registry: MarketplaceAdapterRegistry,
+    private readonly marketplaceRegistry: MarketplaceRegistryService,
+    private readonly tokenManager: TokenManagerService,
   ) { }
 
   onModuleInit() {
-    this.authService.registerAdapter(this);
+    this.registry.registerAuthAdapter(this);
   }
 
   async getMarketplaceByName(name: string): Promise<MarketplaceDocument> {
-    return this.authService.findByName(name);
+    return this.marketplaceRegistry.findByName(name);
   }
 
   async getValidToken(marketplaceName: string): Promise<ResolvedToken> {
-    const marketplace = await this.authService.findByName(marketplaceName);
+    const marketplace = await this.marketplaceRegistry.findByName(marketplaceName);
     if (!marketplace) throw new Error(`Marketplace ${marketplaceName} não encontrado`);
-    return this.authService.ensureValidToken(marketplace._id as any);
+    return this.tokenManager.resolveToken(String(marketplace._id));
   }
 
   async authenticate(code: string, additionalData?: any): Promise<MarketplaceToken> {

@@ -1,0 +1,15 @@
+{
+  "name": "product_compatibility_search",
+  "mappings": {
+    "dynamic": false,
+    "fields": {
+      "searchText": { "type": "string" }
+    }
+  },
+  "synonyms": [
+    {
+      "name": "product_compatibility_synonyms",
+      "source": { "collection": "search_synonyms" }
+    }
+  ]
+}

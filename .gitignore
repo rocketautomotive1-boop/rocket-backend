@@ -129,4 +129,9 @@ Desktop.ini
 
 # Project specific
 debug_grampos.json
-verify-*
+/verify-*
+# WhatsApp (Baileys) session — contains private crypto keys, never commit
+whatsapp_data/
+
+# Git worktrees (isolated workspaces)
+.worktrees/

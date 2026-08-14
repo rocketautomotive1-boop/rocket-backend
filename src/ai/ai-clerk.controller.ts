@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Controller, Post, Body, BadRequestException, UseGuards, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { AiService } from './ai.service';
@@ -18,18 +19,25 @@ export class AiClerkController {
             properties: {
                 userId: { type: 'string', example: '6758d9...' },
                 question: { type: 'string', example: 'Qual óleo serve no meu carro?' },
-                image: { type: 'string', description: 'Base64 image string', example: '/9j/4AAQSw...' }
+                image: { type: 'string', description: 'Base64 image string', example: '/9j/4AAQSw...' },
+                vehicleId: { type: 'string', description: 'Veículo ativo no GarageContext do cliente (logado ou anônimo)' },
+                vehicleLabel: { type: 'string', description: 'Rótulo do veículo ativo, ex: "Jeep Compass 2.0 2022"' },
+                sessionId: { type: 'string', description: 'Identificador da conversa, gerado pelo cliente para manter histórico entre turnos' }
             }
         }
     })
     @ApiResponse({ status: 200, description: 'Resposta do Balconista Virtual' })
-    async chat(@Body() body: { userId: string; question: string; image?: string }) {
+    async chat(@Body() body: { userId: string; question: string; image?: string; vehicleId?: string; vehicleLabel?: string; sessionId?: string }) {
         if (!body.question && !body.image) {
             throw new BadRequestException('Pergunta ou Imagem obrigatória');
         }
         // In production, get userId from @Req() user
         const userId = body.userId || ('' as string);
+        const sessionId = body.sessionId || randomUUID();
 
-        return this.aiService.virtualClerk(userId, body.question || '', body.image);
+        return this.aiService.virtualClerk(userId, body.question || '', body.image, {
+            vehicleId: body.vehicleId,
+            vehicleLabel: body.vehicleLabel,
+        }, sessionId);
     }
 }

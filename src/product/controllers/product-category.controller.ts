@@ -7,6 +7,7 @@ import { CategoryModel } from '../schemas/category.schema';
 import { CreateProductCategoryDto } from '../dto/create-product-category.dto';
 import { UpdateProductCategoryDto } from '../dto/update-product-category.dto';
 import { UpdateCategoryTreeDto } from '../dto/update-category-tree.dto';
+import { SkipJwtAuth } from '../../auth/decorators/skip-jwt-auth.decorator';
 
 
 @ApiTags('categories')
@@ -67,6 +68,37 @@ export class ProductCategoryController {
     );
   }
 
+  @Post('ensure-from-ml/:marketplaceTag/:externalCategoryId')
+  @ApiOperation({
+    summary: 'Garante a categoria interna a partir do category_id do marketplace (idempotente)',
+    description:
+      'Se já houver mapping para o externalCategoryId (ex.: MLB264201), retorna o id existente (sem IA). ' +
+      'Senão, importa a categoria do marketplace e mapeia via IA, retornando o id criado. Usado pelo ' +
+      'auto-save de categoria do frontend quando o discovery traz o MLB mas não há categoria mapeada.',
+  })
+  async ensureFromMl(
+    @Param('marketplaceTag') marketplaceTag: string,
+    @Param('externalCategoryId') externalCategoryId: string,
+    @Query('domain') domain?: string,
+  ) {
+    return this.productCategoryService.ensureCategoryFromMl(marketplaceTag, externalCategoryId, domain ?? 'autopecas');
+  }
+
+  @Post('resolve-ml-leaf/:productId')
+  @ApiOperation({
+    summary: 'Resolve a categoria ML folha publicável de um produto e garante a categoria interna mapeada',
+    description:
+      'Quando a categoria escolhida mapeia para um nó ML NÃO-folha (não publicável), pede ao predictor do ML ' +
+      '(domain_discovery) a categoria folha a partir do texto do produto e materializa/mapeia a categoria interna ' +
+      '(idempotente). Retorna { categoryId, externalCategoryId, status }.',
+  })
+  async resolveMlLeaf(
+    @Param('productId') productId: string,
+    @Query('domain') domain?: string,
+  ) {
+    return this.productCategoryService.resolveMlLeafForProduct(productId, domain ?? 'autopecas');
+  }
+
   @Get('debug-counts')
   async debugCounts() {
     // Return top 10 categories with highest productCount
@@ -101,6 +133,7 @@ export class ProductCategoryController {
 
 
 
+  @SkipJwtAuth()
   @Get('autocomplete')
   @ApiOperation({ summary: 'Buscar categorias (Autocomplete ES)' })
   async autocomplete(@Query('q') query: string) {
@@ -121,8 +154,9 @@ export class ProductCategoryController {
     return this.productCategoryService.uploadImage(id, file);
   }
 
+  @SkipJwtAuth()
   @Get('es-tree')
-  @ApiOperation({ summary: 'Obter árvore de categorias via Elasticsearch' })
+  @ApiOperation({ summary: 'Obter árvore de categorias (MongoDB Atlas Search)' })
   async getEsTree() {
     return this.productCategoryService.getEsTree();
   }
@@ -134,6 +168,7 @@ export class ProductCategoryController {
     return this.productCategoryService.getTree();
   }
 
+  @SkipJwtAuth()
   @Get('slug/:slug')
   @ApiOperation({ summary: 'Obter uma categoria pelo Slug (SEO)' })
   @ApiResponse({ status: 200, description: 'Categoria encontrada com sucesso' })

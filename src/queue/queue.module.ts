@@ -5,11 +5,13 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { HttpModule } from '@nestjs/axios';
 import { QueueService } from './queue.service';
+import { QueueCleanupScheduler } from './queue-cleanup.scheduler';
 import { QueueController } from './queue.controller';
 import { QueueRecordModel, QueueRecordSchema } from './schemas/queue-record.schema';
 // ProductProcessor removed
-import { OrderProcessor } from './processors/order.processor';
-import { CompatibilityProcessor } from './processors/compatibility.processor';
+// OrderProcessor removed — orders-sync queue aposentada (ingest direto + OrderReconciler)
+// CompatibilityProcessor removed — pattern nunca batia com o evento emitido (dead consumer);
+// sync/remoção de compatibilidade agora é direta via ProductService (sem fila).
 
 
 import { MarketplaceModule } from '../marketplace/marketplace.module';
@@ -55,8 +57,8 @@ import { ProductModule } from '../product/product.module';
       },
     ]),
   ],
-  controllers: [QueueController, OrderProcessor, CompatibilityProcessor],
-  providers: [QueueService],
+  controllers: [QueueController],
+  providers: [QueueService, QueueCleanupScheduler],
   exports: [QueueService, MongooseModule],
 })
 export class QueueModule { }

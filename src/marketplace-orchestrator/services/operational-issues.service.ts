@@ -90,11 +90,7 @@ export class OperationalIssuesService {
 
     private buildIssueView(listing: any) {
         const classifier = String(listing.marketplaceData?.syncIssue?.classifier || '').toUpperCase();
-        const closedReason = String(listing.marketplaceData?.closedReason || '').toLowerCase();
-        const recreateRequiredRaw = listing.marketplaceData?.recreateRequired === true;
-        const recreateRequiredEffective =
-            recreateRequiredRaw &&
-            (classifier === 'TERMINAL_RECREATE' || (!classifier && closedReason === 'wrong_category'));
+        const recreateRequiredEffective = classifier === 'TERMINAL_RECREATE';
 
         return {
             listingId: String(listing._id),
@@ -108,7 +104,6 @@ export class OperationalIssuesService {
             syncMetadata: listing.marketplaceData?.syncMetadata || null,
             validationSummary: listing.marketplaceData?.syncMetadata?.validationSummary || null,
             moderation: null,
-            closedReason,
             recreateRequired: recreateRequiredEffective,
             lastSyncAt: listing.lastSyncAt || null,
             updatedAt: listing.updatedAt || null,

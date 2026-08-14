@@ -13,13 +13,13 @@ export class PublicationFlowService {
         private readonly orchestratorPublisher: OrchestratorPublisherService,
     ) {}
 
-    async syncProduct(productId: string, requesterId?: string) {
+    async syncProduct(productId: string, requesterId?: string, marketplaceIds?: string[]) {
         await this.orchestratorPublisher.requestSync({
             productId,
             reason: 'user_publish',
-            force: true,
             requesterId,
             resolutionSignal: 'user_publish',
+            targetMarketplaceIds: marketplaceIds?.length ? marketplaceIds : undefined,
         });
         return { queued: true, via: 'orchestrator-ms' };
     }
