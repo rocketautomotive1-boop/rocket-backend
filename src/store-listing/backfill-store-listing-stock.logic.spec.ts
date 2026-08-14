@@ -89,6 +89,44 @@ describe('backfillStock', () => {
     expect(stockLotModel.create).not.toHaveBeenCalled();
     expect(summary.lotsSkippedAlreadyMigrated).toBe(1);
   });
+
+  it('regressão: resolveStore recebe productId (não só createdByUserId) — permite resolver via listing.storeId', async () => {
+    const lot = makeLot();
+    const resolveStore = jest.fn().mockResolvedValue(FALLBACK_STORE_ID);
+    const storeListingService = {
+      findByProductAndStore: jest.fn().mockResolvedValue({ id: 'SL1' }),
+      create: jest.fn(),
+    };
+    const stockLotModel = { findOne: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ _id: 'newlot1' }) };
+
+    await backfillStock({
+      lots: [lot],
+      resolveStore,
+      storeListingService: storeListingService as any,
+      stockLotModel: stockLotModel as any,
+      dryRun: false,
+    });
+
+    expect(resolveStore).toHaveBeenCalledWith(lot.productId, lot.createdByUserId);
+  });
+
+  it('regressão: sem nenhum sinal de loja (resolveStore retorna null), pula sem criar StoreListing nem forçar loja padrão', async () => {
+    const lot = makeLot();
+    const storeListingService = { findByProductAndStore: jest.fn(), create: jest.fn() };
+    const stockLotModel = { findOne: jest.fn().mockResolvedValue(null), create: jest.fn() };
+
+    const summary = await backfillStock({
+      lots: [lot],
+      resolveStore: async () => null,
+      storeListingService: storeListingService as any,
+      stockLotModel: stockLotModel as any,
+      dryRun: false,
+    });
+
+    expect(storeListingService.create).not.toHaveBeenCalled();
+    expect(stockLotModel.create).not.toHaveBeenCalled();
+    expect(summary.lotsSkippedNoStoreSignal).toBe(1);
+  });
 });
 
 describe('backfillBalances', () => {

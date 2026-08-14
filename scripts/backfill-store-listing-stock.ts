@@ -70,6 +70,7 @@ export interface StockBackfillSummary {
   lotsCreated: number;
   lotsWouldCreate: number;
   lotsSkippedAlreadyMigrated: number;
+  lotsSkippedNoStoreSignal: number;
   storeListingsCreatedForStockOnly: number;
 }
 
@@ -84,7 +85,7 @@ export interface RelatedBackfillSummary {
 
 export async function backfillStock(params: {
   lots: StockLotRow[];
-  resolveStore: (createdByUserId: Types.ObjectId | null) => Promise<string>;
+  resolveStore: (productId: Types.ObjectId, createdByUserId: Types.ObjectId | null) => Promise<string | null>;
   storeListingService: Pick<StoreListingService, 'findByProductAndStore' | 'create'>;
   stockLotModel: Pick<Model<StoreListingStockLotDocument>, 'findOne' | 'create'>;
   dryRun: boolean;
@@ -96,6 +97,7 @@ export async function backfillStock(params: {
     lotsCreated: 0,
     lotsWouldCreate: 0,
     lotsSkippedAlreadyMigrated: 0,
+    lotsSkippedNoStoreSignal: 0,
     storeListingsCreatedForStockOnly: 0,
   };
 
@@ -106,15 +108,23 @@ export async function backfillStock(params: {
       continue;
     }
 
+    const storeId = await resolveStore(lot.productId, lot.createdByUserId);
+    if (!storeId) {
+      // Nenhum sinal de dono (nem listing.storeId, nem createdByUserId) — não
+      // força uma loja padrão (ver docs/superpowers/specs sobre roteamento de
+      // conta): produto fica sem StoreListing até um sinal real aparecer.
+      summary.lotsSkippedNoStoreSignal++;
+      continue;
+    }
+
     if (dryRun) {
-      // resolveStore/findByProductAndStore são leituras — seguras em dry-run,
-      // dão visibilidade real de quantos lots seriam criados sem gravar nada
-      // (create() só é chamado fora do bloco dry-run, abaixo).
+      // storeId já resolvido acima (leitura, segura em dry-run) — dá visibilidade
+      // real de quantos lots seriam criados sem gravar nada (create() só é
+      // chamado fora do bloco dry-run, abaixo).
       summary.lotsWouldCreate++;
       continue;
     }
 
-    const storeId = await resolveStore(lot.createdByUserId);
     let storeListingId: string;
     const existing = await storeListingService.findByProductAndStore(String(lot.productId), storeId);
     if (existing) {
@@ -285,7 +295,6 @@ async function main() {
   const { getModelToken } = require('@nestjs/mongoose');
   const { AppModule } = require('../src/app.module');
   const { StoreListingService } = require('../src/store-listing/store-listing.service');
-  const { StoreService } = require('../src/store/services/store.service');
   const { StockLotModel } = require('../src/stock/schemas/stock-lot.schema');
   const { StockBalanceModel } = require('../src/stock/schemas/stock-balance.schema');
   const { StockMovementModel } = require('../src/stock/schemas/stock-movement.schema');
@@ -298,13 +307,13 @@ async function main() {
   } = require('../src/store-listing/schemas/store-listing-stock-movement.schema');
   const { UserModel } = require('../src/auth/schemas/user.schema');
   const { ProductModel } = require('../src/product/schemas/product.schema');
-  const { resolveOwnerStore } = require('../src/store-listing/resolve-owner-store');
+  const { ListingModel } = require('../src/listing/schemas/listing.schema');
+  const { resolveOwnerStoreByListing } = require('../src/store-listing/resolve-owner-store');
 
   const dryRun = !process.argv.includes('--execute');
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn', 'log'] });
   try {
     const storeListingService = app.get(StoreListingService);
-    const storeService = app.get(StoreService);
     const stockLotModel = app.get(getModelToken(StockLotModel.name)) as Model<any>;
     const stockBalanceModel = app.get(getModelToken(StockBalanceModel.name)) as Model<any>;
     const stockMovementModel = app.get(getModelToken(StockMovementModel.name)) as Model<any>;
@@ -319,34 +328,52 @@ async function main() {
     ) as Model<StoreListingStockMovementDocument>;
     const userModel = app.get(getModelToken(UserModel.name)) as Model<any>;
     const productModel = app.get(getModelToken(ProductModel.name)) as Model<any>;
-
-    const fallbackStore = await storeService.findByName('Rocket Automotive');
-    if (!fallbackStore) {
-      throw new Error("Loja padrão 'Rocket Automotive' não encontrada — não deveria acontecer em produção.");
-    }
-
-    const resolveStore = async (createdByUserId: Types.ObjectId | null): Promise<string> =>
-      resolveOwnerStore({
-        createdByUserId,
-        fallbackStoreId: fallbackStore.id,
-        userStoreIdLookup: async (userId: string) => {
-          const user = await userModel.findById(userId).lean().exec();
-          return user?.storeId ?? null;
-        },
-      });
+    const listingModel = app.get(getModelToken(ListingModel.name)) as Model<any>;
 
     // Fase 1: lots (constrói Map<originalLotId, newLotId> e
     // Map<productId, storeListingId> — necessários pros passos de
     // balance/movement referenciarem o novo lot/StoreListing sem
     // reresolver loja por produto).
     const allLots = await stockLotModel.find().lean().exec();
+    const productIds = allLots.map((l: any) => l.productId);
     const products = await productModel
-      .find({ _id: { $in: allLots.map((l: any) => l.productId) } }, { createdByUserId: 1 })
+      .find({ _id: { $in: productIds } }, { createdByUserId: 1 })
       .lean()
       .exec();
     const createdByUserIdByProductId = new Map(
       products.map((p: any) => [String(p._id), p.createdByUserId ?? null]),
     );
+
+    // listingStoreIdsByProductId: storeId(s) já gravado(s) nos ListingModel
+    // ativos do produto — sinal mais forte que createdByUserId (ver
+    // resolveOwnerStoreByListing). Um produto pode ter listings em mais de
+    // uma loja (vendido por lojas diferentes); nesse caso o resolver cai
+    // para o próximo sinal em vez de escolher arbitrariamente.
+    const listings = await listingModel
+      .find({ productId: { $in: productIds }, storeId: { $exists: true } }, { productId: 1, storeId: 1 })
+      .lean()
+      .exec();
+    const listingStoreIdsByProductId = new Map<string, string[]>();
+    for (const l of listings) {
+      const key = String(l.productId);
+      const arr = listingStoreIdsByProductId.get(key) ?? [];
+      arr.push(String(l.storeId));
+      listingStoreIdsByProductId.set(key, arr);
+    }
+
+    const resolveStore = async (
+      productId: Types.ObjectId,
+      createdByUserId: Types.ObjectId | null,
+    ): Promise<string | null> =>
+      resolveOwnerStoreByListing({
+        listingStoreIds: listingStoreIdsByProductId.get(String(productId)) ?? [],
+        createdByUserId,
+        fallbackStoreId: null,
+        userStoreIdLookup: async (userId: string) => {
+          const user = await userModel.findById(userId).lean().exec();
+          return user?.storeId ?? null;
+        },
+      });
 
     const lotRows: StockLotRow[] = allLots.map((l: any) => ({
       _id: l._id,
@@ -384,7 +411,8 @@ async function main() {
     // encadeamento sem gravar, então relata o estado real de agora).
     const storeListingIdByProductId = new Map<string, string>();
     for (const [productId, createdByUserId] of createdByUserIdByProductId as Map<string, Types.ObjectId | null>) {
-      const storeId = await resolveStore(createdByUserId);
+      const storeId = await resolveStore(new Types.ObjectId(productId), createdByUserId);
+      if (!storeId) continue;
       const existing = await storeListingService.findByProductAndStore(productId, storeId);
       if (existing) storeListingIdByProductId.set(productId, existing.id);
     }

@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { resolveOwnerStore } from './resolve-owner-store';
+import { resolveOwnerStore, resolveOwnerStoreByListing } from './resolve-owner-store';
 
 describe('resolveOwnerStore', () => {
   const FALLBACK_STORE_ID = '6a00000000000000000000f0';
@@ -49,6 +49,76 @@ describe('resolveOwnerStore', () => {
       userStoreIdLookup: lookup,
       fallbackStoreId: FALLBACK_STORE_ID,
     });
+    expect(result).toBe(FALLBACK_STORE_ID);
+  });
+});
+
+describe('resolveOwnerStoreByListing', () => {
+  const FALLBACK_STORE_ID = '6a00000000000000000000f0';
+  const STORE_A = '6a00000000000000000000a1';
+  const STORE_B = '6a00000000000000000000b2';
+
+  it('regressão: prioriza o storeId já gravado nos listings sobre createdByUserId (caso real: produto sem createdByUserId, listing.storeId já correto)', async () => {
+    const lookup = jest.fn();
+
+    const result = await resolveOwnerStoreByListing({
+      listingStoreIds: [STORE_A],
+      createdByUserId: null,
+      userStoreIdLookup: lookup,
+      fallbackStoreId: FALLBACK_STORE_ID,
+    });
+
+    expect(result).toBe(STORE_A);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it('ignora listingStoreIds vazio/ausente e cai para createdByUserId', async () => {
+    const lookup = jest.fn().mockResolvedValue(STORE_B);
+
+    const result = await resolveOwnerStoreByListing({
+      listingStoreIds: [],
+      createdByUserId: new Types.ObjectId('6a00000000000000000000c3'),
+      userStoreIdLookup: lookup,
+      fallbackStoreId: FALLBACK_STORE_ID,
+    });
+
+    expect(result).toBe(STORE_B);
+  });
+
+  it('produto com listings em lojas DIFERENTES: não escolhe arbitrariamente, cai para o próximo sinal', async () => {
+    const lookup = jest.fn().mockResolvedValue(STORE_B);
+
+    const result = await resolveOwnerStoreByListing({
+      listingStoreIds: [STORE_A, STORE_B],
+      createdByUserId: new Types.ObjectId('6a00000000000000000000c3'),
+      userStoreIdLookup: lookup,
+      fallbackStoreId: FALLBACK_STORE_ID,
+    });
+
+    expect(result).toBe(STORE_B);
+  });
+
+  it('sem nenhum sinal e sem fallbackStoreId, retorna null explícito (não força uma loja)', async () => {
+    const lookup = jest.fn();
+
+    const result = await resolveOwnerStoreByListing({
+      listingStoreIds: [],
+      createdByUserId: null,
+      userStoreIdLookup: lookup,
+      fallbackStoreId: null,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('sem nenhum sinal, usa fallbackStoreId quando fornecido', async () => {
+    const result = await resolveOwnerStoreByListing({
+      listingStoreIds: [],
+      createdByUserId: null,
+      userStoreIdLookup: jest.fn(),
+      fallbackStoreId: FALLBACK_STORE_ID,
+    });
+
     expect(result).toBe(FALLBACK_STORE_ID);
   });
 });
