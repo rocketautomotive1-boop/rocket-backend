@@ -12,6 +12,7 @@ import { StockController } from './stock.controller';
 import { STOCK_QUERY_PORT } from './ports/stock-query.port';
 import { STOCK_LEDGER_PORT } from '../order/ports/stock-ledger.port';
 import { StoreListingModule } from '../store-listing/store-listing.module';
+import { AuthModule } from '../auth/auth.module';
 
 /**
  * Single owner of stock: stock_movements (immutable ledger), stock_lots (cost per condition),
@@ -21,6 +22,10 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
  * Fase 3 (dual-write): importa StoreListingModule pra injetar STORE_LISTING_PORT — StockService
  * espelha todo move() bem-sucedido em store_listing_stock_* sem nunca bloquear/falhar o legado
  * (fire-and-log). STORE_PORT vem de StoreModule, que é @Global (não precisa de import aqui).
+ *
+ * Fase 4 (leitura/escrita store-aware): importa AuthModule pra JwtAuthGuard (StockController
+ * ganhou endpoints autenticados) — JwtAuthGuard depende de JwtService, que só existe no
+ * contexto de um módulo que importe AuthModule.
  */
 @Module({
   imports: [
@@ -30,6 +35,7 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
       { name: StockBalanceModel.name, schema: StockBalanceSchema },
     ]),
     StoreListingModule,
+    AuthModule,
   ],
   controllers: [StockController],
   providers: [
