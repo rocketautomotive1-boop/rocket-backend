@@ -342,11 +342,11 @@ export class MarketplaceController {
   }
 
   @Post('products/:productId/publish')
-  async publishProduct(@Param('productId') productId: number, @Req() req: Request) {
+  async publishProduct(@Param('productId') productId: string, @Req() req: Request) {
     const user = (req as any).user;
     const userId = user?.sub || user?.userId || user?.id;
     // Forward to Orchestrator with User Context
-    this.orchestratorPublisherService.requestSync({ productId: String(productId), reason: 'user_publish', requesterId: userId });
+    this.orchestratorPublisherService.requestSync({ productId, reason: 'user_publish', requesterId: userId });
     return { success: true, message: 'Publicação iniciada via Orchestrator (Async)' };
   }
 
