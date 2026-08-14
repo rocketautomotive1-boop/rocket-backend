@@ -89,7 +89,10 @@ async function main() {
         }
         console.log(`  conta ${account.label} (seller ${sellerId}): ${count} itens publicados.`);
       } catch (err: any) {
-        console.warn(`  [skip] conta ${account.label}: falha na API do ML (${err?.response?.status ?? ''} ${err?.message})`);
+        console.warn(
+          `  [skip] conta ${account.label}: falha na API do ML (${err?.response?.status ?? ''} ${err?.message}) ` +
+          `body=${JSON.stringify(err?.response?.data ?? null)}`,
+        );
         continue;
       }
     }
