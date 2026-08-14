@@ -63,6 +63,21 @@ export class InternalTokenController {
     }
 
     /**
+     * Publicação desligada para este marketplace (sem conta ativa selecionada na
+     * tela de Config) — decisão administrativa explícita de pausar, distinta de
+     * "loja sem accountId resolvido" (erro de configuração). Usado pelo worker
+     * ANTES de checar accountId, para pular publicação de todos os listings desse
+     * marketplace sem gerar erro nem retry. Não resolve token nenhum — só o sinal.
+     */
+    @Get('token/:tag/publishing-disabled')
+    async isPublishingDisabled(@Param('tag') tag: string) {
+        const marketplace = await this.registry.findByTag(tag);
+        if (!marketplace) throw new NotFoundException(`Marketplace not found: ${tag}`);
+        const disabled = await this.authService.isPublishingDisabled(marketplace._id.toString());
+        return { disabled };
+    }
+
+    /**
      * @deprecated Alias de retrocompatibilidade para o contrato antigo
      * (`/token/account/:tag/:domain`). Removido na fatia final da unificação —
      * use `GET /internal/token/:tag?domain=`. Mantido só para o orchestrator

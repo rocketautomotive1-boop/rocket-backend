@@ -181,7 +181,39 @@ describe('InternalProductController — getListings (catalog listing Fase 2)', (
       expect(storeService.resolveAccountId).toHaveBeenCalledWith(storeId, 'mercadolivre');
     });
 
-    it('sem storeId no listing, resolve via createdByUserId → user.storeId (fallback pré-backfill)', async () => {
+    it('sem storeId no listing, resolve via marketplaceData.userId → user.storeId (sinal do operador, prioridade sobre o criador)', async () => {
+      const operatorId = new Types.ObjectId().toHexString();
+      const creatorId = new Types.ObjectId().toHexString();
+      const storeId = new Types.ObjectId().toHexString();
+      listingModel.find.mockReturnValue(mockLean([pendingListing({ marketplaceData: { userId: operatorId } })]));
+      mockFindByIdBoth(null, { createdByUserId: creatorId });
+      userModel.findById.mockReturnValue(mockSelectLean({ storeId }));
+      storeService.resolveAccountId.mockResolvedValue('ACC_1');
+
+      const result = await controller.getListings(productId);
+
+      expect(userModel.findById).toHaveBeenCalledWith(operatorId);
+      expect(result[0].storeId).toBe(storeId);
+    });
+
+    it('regressão: sem storeId no listing, marketplaceData.userId aponta pra loja DIFERENTE do criador do produto — usa o operador, não o criador (caso real Djalma/RCK_AUTOMOTIVE publicado como se fosse do criador)', async () => {
+      const operatorId = new Types.ObjectId().toHexString();
+      const creatorId = new Types.ObjectId().toHexString();
+      const operatorStoreId = new Types.ObjectId().toHexString();
+      const creatorStoreId = new Types.ObjectId().toHexString();
+      listingModel.find.mockReturnValue(mockLean([pendingListing({ marketplaceData: { userId: operatorId } })]));
+      mockFindByIdBoth(null, { createdByUserId: creatorId });
+      userModel.findById.mockImplementation((id: string) =>
+        mockSelectLean(id === operatorId ? { storeId: operatorStoreId } : { storeId: creatorStoreId }),
+      );
+
+      const result = await controller.getListings(productId);
+
+      expect(result[0].storeId).toBe(operatorStoreId);
+      expect(result[0].storeId).not.toBe(creatorStoreId);
+    });
+
+    it('sem storeId no listing e sem operador, resolve via createdByUserId → user.storeId (fallback secundário)', async () => {
       const creatorId = new Types.ObjectId().toHexString();
       const storeId = new Types.ObjectId().toHexString();
       listingModel.find.mockReturnValue(mockLean([pendingListing()]));
@@ -195,7 +227,7 @@ describe('InternalProductController — getListings (catalog listing Fase 2)', (
       expect(result[0].storeId).toBe(storeId);
     });
 
-    it('sem storeId e sem criador resolvível, cai para null (não quebra o endpoint)', async () => {
+    it('sem storeId, sem operador e sem criador resolvível, cai para null (não quebra o endpoint, e NÃO usa loja padrão)', async () => {
       listingModel.find.mockReturnValue(mockLean([pendingListing()]));
       mockFindByIdBoth(null, null);
 

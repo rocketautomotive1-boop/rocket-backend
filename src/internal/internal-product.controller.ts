@@ -161,14 +161,25 @@ export class InternalProductController {
 
         // storeId é a IDENTIDADE do listing (snapshot gravado na criação — ver
         // ProductTitleService.updateTitles). Fallback só cobre listings
-        // pré-backfill sem storeId gravado ainda: resolve ao vivo a partir do
-        // criador do produto, sem persistir (o backfill é quem grava de vez).
-        const fallbackStoreId = await this.resolveFallbackStoreId(id, listings);
+        // pré-backfill sem storeId gravado ainda: resolve ao vivo, por listing
+        // (cada um pode ter um operador diferente), sem persistir (o backfill é
+        // quem grava de vez). Ordem de sinais — ver
+        // docs/superpowers/specs/2026-08-14-publish-account-routing-fallback-design.md:
+        //   1. listing.storeId (já gravado)
+        //   2. listing.marketplaceData.userId → user.storeId (quem de fato publicou —
+        //      sinal mais forte, 100% de cobertura nos listings legados reais)
+        //   3. product.createdByUserId → user.storeId (residual, quase sempre vazio)
+        //   4. nenhum sinal resolve → null explícito (nunca cai numa loja "padrão")
+        const creatorId = listings.some((l) => !(l as any).storeId)
+            ? (await this.productModel.findById(id).select('createdByUserId').lean().exec() as any)?.createdByUserId ?? null
+            : null;
 
         const listingsWithAccount = await Promise.all(
             listings.map(async (l) => {
                 const tag = tagMap.get(String(l.marketplaceId)) ?? '';
-                const storeId = (l as any).storeId ? String((l as any).storeId) : fallbackStoreId;
+                const storeId = (l as any).storeId
+                    ? String((l as any).storeId)
+                    : await this.resolveFallbackStoreId((l as any).marketplaceData?.userId ?? null, creatorId);
                 const accountId = await this.storeService.resolveAccountId(storeId, tag);
                 return { ...l, marketplaceTag: tag, storeId, accountId };
             }),
@@ -178,14 +189,17 @@ export class InternalProductController {
     }
 
     /**
-     * storeId do criador do produto (product.createdByUserId → user.storeId) —
-     * usado só quando algum listing ainda não tem storeId gravado (pré-backfill).
-     * Evita a consulta quando todos os listings já têm storeId carimbado.
+     * storeId de quem de fato publicou o listing (marketplaceData.userId), com
+     * fallback secundário no criador do produto — usado só quando o listing ainda
+     * não tem storeId gravado (pré-backfill). Nenhum dos dois sinais resolvendo,
+     * retorna null explícito: não há mais fallback para uma loja padrão.
      */
-    private async resolveFallbackStoreId(productId: string, listings: any[]): Promise<string | null> {
-        if (listings.every((l) => !!(l as any).storeId)) return null;
-        const product = await this.productModel.findById(productId).select('createdByUserId').lean().exec();
-        const creatorId = (product as any)?.createdByUserId;
+    private async resolveFallbackStoreId(operatorUserId: string | null, creatorId: string | null): Promise<string | null> {
+        if (operatorUserId) {
+            const operator = await this.userModel.findById(operatorUserId).select('storeId').lean().exec();
+            const operatorStoreId = (operator as any)?.storeId;
+            if (operatorStoreId) return String(operatorStoreId);
+        }
         if (!creatorId) return null;
         const user = await this.userModel.findById(creatorId).select('storeId').lean().exec();
         return (user as any)?.storeId ?? null;

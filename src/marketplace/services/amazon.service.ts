@@ -90,6 +90,12 @@ export class AmazonService {
             status: 'active' // Synced
           });
         } else {
+          // createProduct() não tem nenhum chamador ativo hoje (confirmado 2026-08-14,
+          // ver docs/superpowers/specs/2026-08-12-store-as-aggregate-root-design.md) —
+          // não recebe storeId/usuário e não pode resolvê-lo. ListingService.create
+          // exige storeId (ver comentário lá); se este método for reconectado ao
+          // fluxo de publish, precisa ganhar resolução de storeId (mesmo padrão de
+          // sinais do internal-product.controller.ts) antes de voltar a funcionar.
           await this.listingService.create({
             productId: typeof product._id === 'string' ? new Types.ObjectId(product._id) : product._id,
             marketplaceId: marketplace._id,

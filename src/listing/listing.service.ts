@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, Inject } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ListingDocument, ListingModel } from './schemas/listing.schema';
@@ -110,7 +110,24 @@ export class ListingService {
         return this.listingModel.findOne(query).exec();
     }
 
+    /**
+     * storeId é IDENTIDADE do listing, não decoração — nunca deve nascer ausente
+     * (ver docs/superpowers/specs/2026-08-12-store-as-aggregate-root-design.md).
+     * Rejeita a escrita explicitamente em vez de persistir um listing "órfão" que
+     * mais tarde exigiria um fallback para adivinhar a loja (a causa raiz do bug de
+     * produto publicado sob a conta errada). Resolver a loja é responsabilidade de
+     * quem chama, não deste repositório.
+     */
+    private assertHasStoreId(data: Partial<ListingModel>): void {
+        if (!data.storeId) {
+            throw new BadRequestException(
+                'ListingModel requer storeId — resolva a loja antes de criar o listing (ver ListingService.assertHasStoreId).',
+            );
+        }
+    }
+
     async create(data: Partial<ListingModel>): Promise<ListingDocument> {
+        this.assertHasStoreId(data);
         const doc = await this.listingModel.create(data);
         await this.mirrorToStoreListing(doc);
         return doc;
@@ -132,6 +149,7 @@ export class ListingService {
     }
 
     async createOrUpdate(data: Partial<ListingModel>): Promise<ListingDocument> {
+        this.assertHasStoreId(data);
         let doc: ListingDocument;
         if (data.externalId && data.marketplaceId) {
             doc = await this.listingModel.findOneAndUpdate(

@@ -23,10 +23,14 @@ export class ListingModel {
     // Resolvida uma única vez, no momento da criação do listing (usuário logado
     // → user.storeId), e gravada como snapshot imutável — nunca reinferida a
     // cada sync. Trocar a loja de um usuário depois não reroteia listings já
-    // criados. Opcional durante a migração: listings pré-backfill ficam sem
-    // storeId até o script de backfill resolver o dono.
-    @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'StoreModel', index: true })
-    storeId?: Types.ObjectId;
+    // criados. Obrigatório desde 2026-08-14 (ver
+    // docs/superpowers/specs/2026-08-12-store-as-aggregate-root-design.md) —
+    // ListingService.create/createOrUpdate rejeitam explicitamente qualquer
+    // escrita sem storeId; migração dos 329 listings legados que antecediam essa
+    // exigência já rodou em produção (0 documentos sem o campo confirmado antes
+    // desta mudança).
+    @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'StoreModel', required: true, index: true })
+    storeId: Types.ObjectId;
 
     @Prop({ type: String, sparse: true })
     externalId?: string; // ID do anúncio no marketplace
@@ -96,11 +100,11 @@ ListingSchema.index({ productId: 1, marketplaceId: 1 });
 // {marketplaceId, externalId} logo abaixo (globalmente mais forte: dois documentos só
 // colidem aqui se JÁ colidissem lá, já que ambos compartilham marketplaceId+externalId) —
 // por isso NÃO é unique aqui, só um índice de suporte a query por
-// (productId, marketplaceId, storeId, externalId) sem se transformar em constraint
-// duplicada/redundante.
+// (productId, marketplaceId, storeId, externalId). storeId agora é sempre presente
+// (required no schema); o filtro cobre só o caso de externalId ainda pendente.
 ListingSchema.index(
     { productId: 1, marketplaceId: 1, storeId: 1, externalId: 1 },
-    { partialFilterExpression: { storeId: { $exists: true }, externalId: { $type: 'string' } } },
+    { partialFilterExpression: { externalId: { $type: 'string' } } },
 );
 
 // Índice único parcial: garante unicidade do externalId APENAS se ele existir e for
@@ -117,8 +121,5 @@ ListingSchema.index(
 
 // Roteamento de saída por loja dona: UPDATE/DELETE/operacional resolvem a conta de
 // publicação a partir de storeId → store.accounts[marketplaceTag] (não pela conta
-// ativa da tela).
-ListingSchema.index(
-    { marketplaceId: 1, storeId: 1 },
-    { partialFilterExpression: { storeId: { $exists: true } } },
-);
+// ativa da tela). storeId agora é sempre presente (required no schema).
+ListingSchema.index({ marketplaceId: 1, storeId: 1 });
