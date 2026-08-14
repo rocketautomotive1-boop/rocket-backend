@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type ListingDocument = HydratedDocument<ListingModel>;
 
@@ -7,10 +7,14 @@ export type ListingDocument = HydratedDocument<ListingModel>;
 export class ListingModel {
     _id: Types.ObjectId;
 
-    @Prop({ type: Types.ObjectId, ref: 'ProductModel', required: true, index: true })
+    // type: MongooseSchema.Types.ObjectId (não mongoose.Types.ObjectId) — achado em
+    // 2026-08-14: o construtor de instância Types.ObjectId não é reconhecido como tipo de
+    // schema neste Mongoose e o campo silenciosamente vira Mixed, quebrando cast automático
+    // de string→ObjectId em queries (ver memória bug-mongoose-objectid-mixed-type).
+    @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'ProductModel', required: true, index: true })
     productId: Types.ObjectId;
 
-    @Prop({ type: Types.ObjectId, ref: 'MarketplaceModel', required: true, index: true })
+    @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'MarketplaceModel', required: true, index: true })
     marketplaceId: Types.ObjectId;
 
     // Loja DONA deste anúncio — parte da IDENTIDADE do listing (não decoração):
@@ -21,7 +25,7 @@ export class ListingModel {
     // cada sync. Trocar a loja de um usuário depois não reroteia listings já
     // criados. Opcional durante a migração: listings pré-backfill ficam sem
     // storeId até o script de backfill resolver o dono.
-    @Prop({ type: Types.ObjectId, ref: 'StoreModel', index: true })
+    @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'StoreModel', index: true })
     storeId?: Types.ObjectId;
 
     @Prop({ type: String, sparse: true })
