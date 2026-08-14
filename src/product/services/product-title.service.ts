@@ -32,6 +32,7 @@ export class ProductTitleService {
       externalId: listing.externalId,
       marketplaceData: listing.marketplaceData,
       _id: listing._id ? listing._id.toString() : undefined,
+      storeId: listing.storeId ? listing.storeId.toString() : undefined,
     };
   }
 
@@ -40,6 +41,20 @@ export class ProductTitleService {
     if (!pId) return [];
 
     const listings = await this.listingService.findByProduct(pId);
+    return listings.map(t => this.toDto(t));
+  }
+
+  /**
+   * Títulos restritos a UMA loja — usado pela tela de Títulos (isolamento por loja): cada
+   * loja só pode ver seus próprios anúncios. findByProductId (sem filtro) continua sendo
+   * usado por readiness/product.service, que legitimamente precisam saber "o produto tem
+   * título de QUALQUER loja", não de uma loja específica.
+   */
+  async findByProductIdAndStore(productId: number | string, storeId: string): Promise<any[]> {
+    const pId = await this.resolveProductId(productId);
+    if (!pId) return [];
+
+    const listings = await this.listingService.findByProductAndStore(pId, storeId);
     return listings.map(t => this.toDto(t));
   }
 
@@ -168,8 +183,12 @@ export class ProductTitleService {
     const pObjectId = new Types.ObjectId(pId);
     const storeObjectId = this.toStoreObjectId(storeId);
 
-    // 1. Get existing listings
-    const existingListings = await this.listingService.findByProduct(pObjectId);
+    // 1. Get existing listings — restrito à loja do usuário: sem isso, um batch de uma loja
+    // apagaria/reeditaria listings de OUTRA loja "que não vieram" no payload dela (bug real,
+    // ver docs/superpowers/specs/2026-08-14-titles-store-isolation-design.md).
+    const existingListings = storeObjectId
+      ? await this.listingService.findByProductAndStore(pObjectId, storeObjectId)
+      : [];
     const existingIds = new Set(existingListings.map(l => l._id.toString()));
 
     // 2. Identification

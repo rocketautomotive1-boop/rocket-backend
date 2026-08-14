@@ -67,6 +67,21 @@ export class ListingService {
         return this.listingModel.find({ productId: pId }).exec();
     }
 
+    /**
+     * Listings de um produto restritos a UMA loja — usado pela tela de Títulos (Fase 4,
+     * isolamento por loja), onde cada loja só pode ver/editar seus próprios anúncios.
+     * findByProduct (sem filtro) continua existindo intocado: adapters de marketplace,
+     * orchestrator e pricing legitimamente precisam ver listings de todas as lojas.
+     */
+    async findByProductAndStore(
+        productId: string | Types.ObjectId,
+        storeId: string | Types.ObjectId,
+    ): Promise<ListingDocument[]> {
+        const pId = typeof productId === 'string' ? new Types.ObjectId(productId) : productId;
+        const sId = typeof storeId === 'string' ? new Types.ObjectId(storeId) : storeId;
+        return this.listingModel.find({ productId: pId, storeId: sId }).exec();
+    }
+
     async findActiveByProduct(productId: string | Types.ObjectId): Promise<ListingDocument[]> {
         const pId = typeof productId === 'string' ? new Types.ObjectId(productId) : productId;
         return this.listingModel.find({ productId: pId, status: 'active' }).exec();

@@ -19,6 +19,7 @@ describe('ListingService', () => {
       create: jest.fn(),
       findByIdAndUpdate: jest.fn(),
       findOneAndUpdate: jest.fn(),
+      find: jest.fn(),
     };
     storeListingPortMock = {
       createOrGetStoreListing: jest.fn(),
@@ -102,6 +103,23 @@ describe('ListingService', () => {
 
       expect(result).toBe(created);
       expect(storeListingPortMock.upsertMarketplaceListing).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findByProductAndStore', () => {
+    it('queries by both productId and storeId, casting strings to ObjectId', async () => {
+      const productId = new Types.ObjectId().toHexString();
+      const storeId = new Types.ObjectId().toHexString();
+      const execMock = jest.fn().mockResolvedValue([{ _id: 'L1' }]);
+      listingModelMock.find.mockReturnValue({ exec: execMock });
+
+      const result = await service.findByProductAndStore(productId, storeId);
+
+      expect(listingModelMock.find).toHaveBeenCalledWith({
+        productId: new Types.ObjectId(productId),
+        storeId: new Types.ObjectId(storeId),
+      });
+      expect(result).toEqual([{ _id: 'L1' }]);
     });
   });
 });
