@@ -82,4 +82,27 @@ describe('ProductReadinessService.compute — inventory store-aware', () => {
 
     expect(result?.inventory).toBe(false);
   });
+
+  describe('com storeId explícito (usuário logado) — não usa findAnyByProduct nem outra loja', () => {
+    it('regressão: produto com StoreListing vazio numa loja mais antiga e saldo real noutra — storeId explícito ignora a mais antiga', async () => {
+      // Reproduz o bug real: findAnyByProduct pegaria sempre o StoreListing mais antigo
+      // (Rocket, vazio); com storeId explícito de MAXESHOP, nunca deve nem chamar
+      // findAnyByProduct — vai direto no saldo da loja pedida.
+      storeListingPort.getStockSummary.mockResolvedValue({ onHand: 1, reserved: 0, available: 1, avgCost: 5 });
+
+      const result = await service.compute('P1', 'store-maxeshop');
+
+      expect(storeListingPort.findAnyByProduct).not.toHaveBeenCalled();
+      expect(storeListingPort.getStockSummary).toHaveBeenCalledWith('P1', 'store-maxeshop');
+      expect(result?.inventory).toBe(true);
+    });
+
+    it('inventory é false quando a loja pedida não tem saldo, mesmo que outra loja do produto tenha', async () => {
+      storeListingPort.getStockSummary.mockResolvedValue({ onHand: 0, reserved: 0, available: 0, avgCost: 0 });
+
+      const result = await service.compute('P1', 'store-rocket-vazia');
+
+      expect(result?.inventory).toBe(false);
+    });
+  });
 });

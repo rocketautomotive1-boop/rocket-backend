@@ -82,8 +82,17 @@ export class ProductReadinessService {
    * Pure compute: derives the canonical completion state from product data.
    * No writes, no events. Always reflects current state — this is the
    * single source of truth.
+   *
+   * storeId: quando informado (usuário logado — GET /products/:id/completion), a leitura de
+   * estoque é EXATAMENTE dessa loja, sem fallback para outra — um produto pode ter
+   * StoreListings em múltiplas lojas (cada uma publica seu próprio anúncio), e "inventory"
+   * precisa refletir o saldo da loja de quem está olhando, não de qualquer uma.
+   * Quando ausente (gate de publish via internal-product.controller, listener assíncrono —
+   * nenhum dos dois tem storeId de usuário disponível hoje), mantém o comportamento anterior
+   * (primeira loja com StoreListing) até o publish multi-loja ser desenhado — ver
+   * docs/superpowers/specs sobre a decomposição desse trabalho.
    */
-  async compute(productId: string): Promise<ProductCompletionResult | null> {
+  async compute(productId: string, storeId?: string): Promise<ProductCompletionResult | null> {
     const product = await this.productRepository.findByIdClean(productId);
     if (!product) return null;
 
@@ -101,12 +110,9 @@ export class ProductReadinessService {
 
     const category = !!(product as any).category;
 
-    // Estoque store-aware (Fase 4): resolve a loja DONA do produto (hoje um produto
-    // pertence a no máximo uma loja) — sem StoreListing ainda, sem estoque, inventory
-    // fica false. Nunca soma/herda estoque de outra loja (mesma invariante da tela).
-    const ownerListing = await this.storeListingPort.findAnyByProduct(productId);
-    const stockQty = ownerListing
-      ? (await this.storeListingPort.getStockSummary(productId, String(ownerListing.storeId))).onHand
+    const resolvedStoreId = storeId ?? (await this.storeListingPort.findAnyByProduct(productId))?.storeId;
+    const stockQty = resolvedStoreId
+      ? (await this.storeListingPort.getStockSummary(productId, String(resolvedStoreId))).onHand
       : 0;
     // Sale price lives in PricingModule (removed from Product in the pricing refactor).
     const priceRaw = await this.pricing.getBasePrice(productId);

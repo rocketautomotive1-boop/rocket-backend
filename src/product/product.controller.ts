@@ -1616,8 +1616,8 @@ export class ProductController {
   @Get(':id/completion')
   @ApiOperation({ summary: 'Obter status de preenchimento do produto para as abas' })
   @ApiResponse({ status: 200, description: 'Status retornado com sucesso' })
-  async getCompletionStatus(@Param('id') id: string) {
-    return this.productService.getProductCompletion(id);
+  async getCompletionStatus(@Param('id') id: string, @Req() req: any) {
+    return this.productService.getProductCompletion(id, req?.user?.storeId ?? undefined);
   }
 
   @SkipJwtAuth()

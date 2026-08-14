@@ -14,6 +14,7 @@ import { PaginatedResponseDto, ProductFilterDto, ProductStatus } from './dto/pro
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
 import { ProductRepository } from './product.repository';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
+import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
 import { StockService } from '../stock/stock.service';
 import { resolveMovementCondition, resolveMovementType } from '../stock/domain/movement-type';
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
@@ -66,6 +67,7 @@ export class ProductService {
   constructor(
     private readonly productRepository: ProductRepository,
     @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+    @Inject(STORE_LISTING_PORT) private readonly storeListingPort: StoreListingPort,
     @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     private readonly queueService: QueueService,
     private readonly productCompatibilityService: ProductCompatibilityService,
@@ -162,7 +164,7 @@ export class ProductService {
   }
 
   @ValidateMongoId()
-  async getProductCompletion(id: string) {
+  async getProductCompletion(id: string, storeId?: string) {
     // Source of truth: always compute on read. Persisted `completion.*` fields
     // were a cache that drifted whenever product data was mutated through a
     // path that didn't emit a section-saved event (imports, discovery direct
@@ -173,8 +175,8 @@ export class ProductService {
     // Itens gerais (saúde/beleza/alimentos) têm regra de completude própria —
     // não têm partNumber, títulos por marketplace nem dimensões obrigatórias.
     const computed = (product as any).domain === 'general'
-      ? await this.computeGeneralCompletion(id, product)
-      : await this.productReadinessService.compute(id);
+      ? await this.computeGeneralCompletion(id, product, storeId)
+      : await this.productReadinessService.compute(id, storeId);
     if (!computed) throw new NotFoundException('Produto não encontrado');
 
     const compatibilitiesComplete = await this.productRepository.existsCompatibility({ product: id });
@@ -192,7 +194,7 @@ export class ProductService {
    * inventory exige preço > 0 E estoque > 0 (igual autopeças), com estoque
    * vindo da agregação de stock_movements (fonte única).
    */
-  private async computeGeneralCompletion(id: string, product: any) {
+  private async computeGeneralCompletion(id: string, product: any, storeId?: string) {
     const brandObj = product.brand || product.brands;
     // No general a marca costuma vir como atributo BRAND (de marketplace), não
     // no relacionamento brand do produto.
@@ -205,7 +207,13 @@ export class ProductService {
     const images = Array.isArray(product.images) && product.images.length > 0;
     const category = !!product.category;
 
-    const stockQty = (await this.stockQuery.getProductStock(id)).onHand;
+    // Estoque store-aware (mesmo critério de ProductReadinessService.compute): com storeId
+    // (usuário logado), lê exatamente essa loja, sem fallback. Sem storeId (chamadores sem
+    // usuário), cai na primeira loja com StoreListing — comportamento anterior preservado.
+    const resolvedStoreId = storeId ?? (await this.storeListingPort.findAnyByProduct(id))?.storeId;
+    const stockQty = resolvedStoreId
+      ? (await this.storeListingPort.getStockSummary(id, String(resolvedStoreId))).onHand
+      : 0;
     const priceRaw = await this.pricing.getBasePrice(id);
     const inventory = stockQty > 0 && priceRaw > 0;
 
