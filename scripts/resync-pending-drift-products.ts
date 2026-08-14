@@ -36,7 +36,7 @@ async function main() {
       .lean()
       .exec();
 
-    const productIds: string[] = [...new Set(pending.map((l: any) => String(l.productId)))];
+    const productIds: string[] = [...new Set<string>(pending.map((l: any) => String(l.productId)))];
     console.log(`Produtos pendentes de resync: ${productIds.length}`);
 
     for (const productId of productIds) {
