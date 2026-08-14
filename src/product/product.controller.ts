@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, Put, Delete, BadRequestException, UseInterceptors, UploadedFiles, Logger, Query, HttpStatus, HttpException, HttpCode, Req, Inject, forwardRef } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Put, Delete, BadRequestException, ForbiddenException, UseInterceptors, UploadedFiles, Logger, Query, HttpStatus, HttpException, HttpCode, Req, Inject, forwardRef } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBody, ApiBearerAuth, ApiExtraModels, ApiQuery, ApiParam } from '@nestjs/swagger';
@@ -1316,9 +1316,13 @@ export class ProductController {
     }
 
     const userId = req?.user?.id || null;
+    const storeId = req?.user?.storeId ?? null;
+    if (!storeId) {
+      throw new BadRequestException('Usuário sem loja configurada — não é possível salvar títulos.');
+    }
 
     // Atualizar o produto com os novos títulos usando o serviço atualizado
-    const updatedProduct = await this.productService.updateTitles(id, titlesData, userId);
+    const updatedProduct = await this.productService.updateTitles(id, titlesData, userId, storeId);
 
     // Auto-publish removed (GlobalWatcher handles it)
     // this.triggerAutoPublish(updatedProduct._id, 'updateTitles');
@@ -1455,25 +1459,41 @@ export class ProductController {
   @ApiOperation({ summary: 'Obter títulos de um produto' })
   @ApiResponse({ status: 200, description: 'Títulos encontrados com sucesso', type: [ProductTitle] })
   @ApiResponse({ status: 404, description: 'Produto não encontrado' })
-  async getTitles(@Param('id') id: string): Promise<ProductTitle[]> {
+  async getTitles(@Param('id') id: string, @Req() req: any): Promise<ProductTitle[]> {
     // Verificar se o produto existe
     const product = await this.productService.findOne(id);
     if (!product) {
       throw new BadRequestException(`Produto com ID ${id} não encontrado`);
     }
 
-    // [REF] Fetch from service
-    return this.productTitleService.findByProductId(id);
+    const storeId = req?.user?.storeId;
+    if (!storeId) {
+      throw new BadRequestException('Usuário sem loja configurada — não é possível acessar títulos.');
+    }
+
+    // Isolamento por loja (Fase 4) — cada loja só vê seus próprios títulos/anúncios.
+    return this.productTitleService.findByProductIdAndStore(id, storeId);
   }
 
   @Put(':id/titles/:titleId')
   @ApiOperation({ summary: 'Atualizar título específico do produto' })
   @ApiResponse({ status: 200, description: 'Título atualizado com sucesso' })
+  @ApiResponse({ status: 403, description: 'Título pertence a outra loja' })
   async updateTitle(
     @Param('id') productId: string,
     @Param('titleId') titleId: string,
-    @Body() updateData: Partial<ProductTitle>
+    @Body() updateData: Partial<ProductTitle>,
+    @Req() req: any,
   ): Promise<any> {
+    const storeId = req?.user?.storeId;
+    if (!storeId) {
+      throw new BadRequestException('Usuário sem loja configurada — não é possível editar títulos.');
+    }
+    const existing = await this.productTitleService.findById(titleId);
+    if (!existing?.storeId || String(existing.storeId) !== String(storeId)) {
+      throw new ForbiddenException('Este título pertence a outra loja.');
+    }
+
     const updatedProduct = await this.productService.updateTitle(productId, titleId, updateData);
 
     // this.triggerAutoPublish(productId, 'updateTitle');

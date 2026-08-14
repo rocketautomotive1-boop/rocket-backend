@@ -920,13 +920,13 @@ export class ProductService {
     title: string;
     locale?: string;
     marketplaceId?: string;  // Changed from number to string to match ProductTitleService
-  }[], userId?: number): Promise<ProductModel> {
+  }[], userId?: number, storeId?: string | null): Promise<ProductModel> {
     try {
       // FIXED: Delegate to ProductTitleService which has proper externalId preservation and deduplication
       // The old implementation was naively replacing the entire titles array and setting externalId: null
       // This caused the watcher to treat all titles as new, creating duplicate products in marketplaces
 
-      await this.productTitleService.updateTitles(id, titleDataList, userId);
+      await this.productTitleService.updateTitles(id, titleDataList, userId, storeId);
 
       // Return the updated product
       return this.productRepository.findByIdClean(id);
