@@ -128,7 +128,22 @@ async function main() {
 
     const closeOnMarketplace = async (externalId: string) => {
       if (dryRun) return;
-      await axios.put(`https://api.mercadolibre.com/items/${externalId}`, { status: 'closed' }, { headers });
+      try {
+        await axios.put(`https://api.mercadolibre.com/items/${externalId}`, { status: 'closed' }, { headers });
+      } catch (err: any) {
+        // Item em moderação (status:under_review, sub_status:forbidden) rejeita
+        // qualquer transição de status ("item.status.not_modifiable") — o ML
+        // trata isso como estado terminal e exige deleted:true diretamente em vez
+        // de closed (confirmado em produção 2026-08-14: closed falha com 400,
+        // deleted:true funciona e retorna status:inactive,
+        // sub_status:[forbidden,deleted]).
+        const code = err?.response?.data?.cause?.[0]?.code;
+        if (code === 'item.status.not_modifiable') {
+          await axios.put(`https://api.mercadolibre.com/items/${externalId}`, { deleted: 'true' }, { headers });
+          return;
+        }
+        throw err;
+      }
     };
 
     const clearListing = async (listingId: any) => {
