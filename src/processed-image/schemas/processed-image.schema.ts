@@ -33,10 +33,12 @@ export class ProcessedImage {
    * Identity of the rembg job that produced this image. Unique (sparse) so a retried
    * or duplicated success callback upserts the SAME row instead of creating a second
    * repository entry — the guarantee that a paid processing result is recorded exactly
-   * once. Null for images created outside the rembg job flow (legacy/other sources).
+   * once. Omitted (not stored) for images created outside the rembg job flow (AI
+   * generation, repository imports) — a sparse index only skips fields that are
+   * absent, so an explicit `null` here would still collide across those documents.
    */
-  @Prop({ default: null })
-  jobId?: string | null;
+  @Prop()
+  jobId?: string;
 }
 
 export const ProcessedImageSchema = SchemaFactory.createForClass(ProcessedImage);
