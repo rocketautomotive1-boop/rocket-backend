@@ -1,5 +1,6 @@
 import { StoreListingModel } from '../schemas/store-listing.schema';
 import { MarketplaceListingModel, MarketplaceListingStatus } from '../schemas/marketplace-listing.schema';
+import { StoreListingWarehouseModel } from '../schemas/store-listing-warehouse.schema';
 import { StockMovementType } from '../../stock/domain/movement-type';
 import { StockCondition } from '../../stock/schemas/stock-lot.schema';
 
@@ -83,4 +84,12 @@ export interface StoreListingPort {
     productId: string,
     storeId: string,
   ): Promise<Record<string, { count: number; quantity: number }>>;
+
+  createWarehouse(
+    storeId: string,
+    name: string,
+    address?: string,
+  ): Promise<StoreListingWarehouseModel & { id: string }>;
+  listWarehouses(storeId: string): Promise<Array<StoreListingWarehouseModel & { id: string }>>;
+  findWarehouseById(warehouseId: string): Promise<(StoreListingWarehouseModel & { id: string }) | null>;
 }

@@ -12,10 +12,16 @@ describe('StoreListingService', () => {
 
   let service: StoreListingService;
   let modelMock: any;
+  let warehouseModelMock: any;
 
   beforeEach(async () => {
     modelMock = {
       findOne: jest.fn(),
+      findById: jest.fn(),
+      create: jest.fn(),
+    };
+    warehouseModelMock = {
+      find: jest.fn(),
       findById: jest.fn(),
       create: jest.fn(),
     };
@@ -28,6 +34,7 @@ describe('StoreListingService', () => {
         { provide: getModelToken('StoreListingStockLotModel'), useValue: {} },
         { provide: getModelToken('StoreListingStockBalanceModel'), useValue: {} },
         { provide: getModelToken('StoreListingStockMovementModel'), useValue: {} },
+        { provide: getModelToken('StoreListingWarehouseModel'), useValue: warehouseModelMock },
       ],
     }).compile();
 
@@ -90,6 +97,57 @@ describe('StoreListingService', () => {
     modelMock.findById.mockReturnValue({ exec: async () => null });
     const result = await service.findById('SL1');
     expect(result).toBeNull();
+  });
+
+  describe('warehouses', () => {
+    it('createWarehouse: cria um depósito novo para a loja', async () => {
+      const created = {
+        _id: 'WH1',
+        storeId: STORE_ID,
+        name: 'Depósito Central',
+        toObject: () => ({ storeId: STORE_ID, name: 'Depósito Central' }),
+      };
+      warehouseModelMock.create.mockResolvedValue(created);
+
+      const result = await service.createWarehouse(STORE_ID, 'Depósito Central');
+
+      expect(result.id).toBe('WH1');
+      expect(warehouseModelMock.create).toHaveBeenCalledWith({
+        storeId: STORE_ID,
+        name: 'Depósito Central',
+        address: undefined,
+      });
+    });
+
+    it('createWarehouse: rejeita nome duplicado na mesma loja (erro 11000)', async () => {
+      warehouseModelMock.create.mockRejectedValue({ code: 11000 });
+
+      await expect(service.createWarehouse(STORE_ID, 'Depósito Central')).rejects.toThrow(BadRequestException);
+    });
+
+    it('listWarehouses: retorna os depósitos da loja com id normalizado', async () => {
+      warehouseModelMock.find.mockReturnValue({
+        exec: async () => [
+          {
+            _id: 'WH1',
+            storeId: STORE_ID,
+            name: 'Depósito Central',
+            toObject: () => ({ storeId: STORE_ID, name: 'Depósito Central' }),
+          },
+        ],
+      });
+
+      const result = await service.listWarehouses(STORE_ID);
+
+      expect(result).toEqual([{ id: 'WH1', storeId: STORE_ID, name: 'Depósito Central' }]);
+      expect(warehouseModelMock.find).toHaveBeenCalledWith({ storeId: STORE_ID });
+    });
+
+    it('findWarehouseById: retorna null quando não existe', async () => {
+      warehouseModelMock.findById.mockReturnValue({ exec: async () => null });
+      const result = await service.findWarehouseById('68c5e6a0aabbccddeeff0011');
+      expect(result).toBeNull();
+    });
   });
 
   describe('createOrGetStoreListing', () => {
@@ -193,6 +251,7 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingStockLotModel'), useValue: {} },
           { provide: getModelToken('StoreListingStockBalanceModel'), useValue: {} },
           { provide: getModelToken('StoreListingStockMovementModel'), useValue: {} },
+          { provide: getModelToken('StoreListingWarehouseModel'), useValue: {} },
         ],
       }).compile();
 
@@ -540,6 +599,7 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingStockLotModel'), useValue: stockLotModelMock },
           { provide: getModelToken('StoreListingStockBalanceModel'), useValue: stockBalanceModelMock },
           { provide: getModelToken('StoreListingStockMovementModel'), useValue: stockMovementModelMock },
+          { provide: getModelToken('StoreListingWarehouseModel'), useValue: {} },
         ],
       }).compile();
 

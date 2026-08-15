@@ -19,6 +19,10 @@ import {
   StoreListingStockMovementModel,
   StoreListingStockMovementDocument,
 } from './schemas/store-listing-stock-movement.schema';
+import {
+  StoreListingWarehouseModel,
+  StoreListingWarehouseDocument,
+} from './schemas/store-listing-warehouse.schema';
 import { StoreListingPort } from './ports/store-listing.port';
 import { StockMovementType } from '../stock/domain/movement-type';
 import { StockCondition } from '../stock/schemas/stock-lot.schema';
@@ -37,6 +41,8 @@ export class StoreListingService implements StoreListingPort {
     private readonly storeListingStockBalanceModel: Model<StoreListingStockBalanceDocument>,
     @InjectModel(StoreListingStockMovementModel.name)
     private readonly storeListingStockMovementModel: Model<StoreListingStockMovementDocument>,
+    @InjectModel(StoreListingWarehouseModel.name)
+    private readonly storeListingWarehouseModel: Model<StoreListingWarehouseDocument>,
   ) {}
 
   async create(productId: string, storeId: string): Promise<StoreListingModel & { id: string }> {
@@ -398,5 +404,35 @@ export class StoreListingService implements StoreListingPort {
     const out: Record<string, { count: number; quantity: number }> = {};
     for (const r of rows) out[r._id] = { count: r.count, quantity: r.quantity };
     return out;
+  }
+
+  async createWarehouse(
+    storeId: string,
+    name: string,
+    address?: string,
+  ): Promise<StoreListingWarehouseModel & { id: string }> {
+    try {
+      const doc = await this.storeListingWarehouseModel.create({ storeId, name, address });
+      return { ...doc.toObject(), id: String(doc._id) };
+    } catch (err: any) {
+      if (err?.code === 11000) {
+        throw new BadRequestException(`Já existe um depósito chamado "${name}" nesta loja.`);
+      }
+      throw err;
+    }
+  }
+
+  async listWarehouses(storeId: string): Promise<Array<StoreListingWarehouseModel & { id: string }>> {
+    const docs = await this.storeListingWarehouseModel.find({ storeId }).exec();
+    return docs.map((doc: any) => ({ ...(doc.toObject?.() ?? doc), id: String(doc._id) }));
+  }
+
+  async findWarehouseById(
+    warehouseId: string,
+  ): Promise<(StoreListingWarehouseModel & { id: string }) | null> {
+    if (!Types.ObjectId.isValid(warehouseId)) return null;
+    const doc = await this.storeListingWarehouseModel.findById(warehouseId).exec();
+    if (!doc) return null;
+    return { ...((doc as any).toObject?.() ?? doc), id: String((doc as any)._id) };
   }
 }
