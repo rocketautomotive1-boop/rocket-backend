@@ -71,6 +71,18 @@ export class InternalProductController {
         // ProductReadinessService (primeira loja com StoreListing).
         const completion = await this.productService.getProductCompletion(id, storeId);
         normalized.readyToPublish = !!completion?.readyToPublish;
+        // Gate alternativo pro orchestrator-ms usar em resync de listing JÁ PUBLICADO
+        // (action=UPDATE — tem externalId): estoque zerar não deve travar atualização de
+        // preço/conteúdo em um anúncio que já está no ar, só a CRIAÇÃO de um listing novo
+        // exige estoque > 0. AND de todo componente de completion exceto inventory.
+        normalized.readyToPublishExcludingStock = !!(
+          completion &&
+          completion.data &&
+          completion.images &&
+          completion.titles &&
+          completion.category &&
+          completion.dimensions
+        );
 
         // Resolve o category_id do ML a partir do marketplaceMappings quando o campo
         // direto (mlCategoryId) estiver ausente — itens general têm o mapping do ML

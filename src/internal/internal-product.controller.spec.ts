@@ -313,6 +313,61 @@ describe('InternalProductController — getProduct (gate de readiness por loja)'
     expect(result.readyToPublish).toBe(false);
   });
 
+  describe('readyToPublishExcludingStock (gate de resync sem exigir estoque > 0)', () => {
+    // Um listing JÁ PUBLICADO (tem externalId) precisa continuar sincronizando preço/conteúdo
+    // mesmo com estoque zerado — só a criação de um listing novo deve exigir estoque > 0.
+    // Esse campo dá ao orchestrator-ms o AND de todos os componentes MENOS inventory, pra
+    // usar como gate alternativo no caminho de UPDATE (ver publication-context.service.ts).
+
+    it('true quando só inventory é false e todo o resto está ok', async () => {
+      productService.getProductCompletion.mockResolvedValue({
+        data: true,
+        images: true,
+        titles: true,
+        category: true,
+        inventory: false,
+        dimensions: true,
+        readyToPublish: false,
+      });
+
+      const result = await controller.getProduct(productId, undefined, 'store-x');
+
+      expect(result.readyToPublishExcludingStock).toBe(true);
+    });
+
+    it('false quando um componente diferente de inventory falha (ex.: sem imagens), mesmo com estoque ok', async () => {
+      productService.getProductCompletion.mockResolvedValue({
+        data: true,
+        images: false,
+        titles: true,
+        category: true,
+        inventory: true,
+        dimensions: true,
+        readyToPublish: false,
+      });
+
+      const result = await controller.getProduct(productId, undefined, 'store-x');
+
+      expect(result.readyToPublishExcludingStock).toBe(false);
+    });
+
+    it('true quando readyToPublish já é true (todos os componentes ok, incluindo inventory)', async () => {
+      productService.getProductCompletion.mockResolvedValue({
+        data: true,
+        images: true,
+        titles: true,
+        category: true,
+        inventory: true,
+        dimensions: true,
+        readyToPublish: true,
+      });
+
+      const result = await controller.getProduct(productId, undefined, 'store-x');
+
+      expect(result.readyToPublishExcludingStock).toBe(true);
+    });
+  });
+
   describe('stockQuantity (estoque multi-loja)', () => {
     it('com storeId, usa o saldo DESSA loja (StoreListing), não o agregado entre lojas', async () => {
       const storeId = new Types.ObjectId().toHexString();
