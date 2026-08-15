@@ -136,6 +136,28 @@ export class ProductVehicleSearchService {
     limit: number,
     options: ByTextOptions,
   ): Promise<CompatibilitySearchResponseDto> {
+    // Admin cola o _id direto na busca (não é um caso do storefront) — nenhum dos três
+    // canais de retrieval abaixo (Atlas Search / autocomplete / regex) trata a query como
+    // id, então um ObjectId válido nunca teria candidatos e a busca voltava vazia.
+    const trimmedQuery = q.trim();
+    if (Types.ObjectId.isValid(trimmedQuery)) {
+      const doc = await this.productModel.findOne({ _id: new Types.ObjectId(trimmedQuery), active: true } as any).lean().exec();
+      if (!doc) {
+        return { ...this.emptyResponse(page, limit), facets: this.emptyFacets() };
+      }
+      const [priceById, availableById] = await Promise.all([
+        this.pricing.getBasePrices([String((doc as any)._id)]),
+        this.stockQuery.getAvailableBulk([String((doc as any)._id)]),
+      ]);
+      const facets = await this.computeFacets([doc], priceById);
+      const data = [{
+        ...(doc as any),
+        price: priceById.get(String((doc as any)._id)) ?? 0,
+        stockQuantity: availableById.get(String((doc as any)._id)) ?? 0,
+      }];
+      return { ...this.toPaginatedResponse(data, page, limit, 1), facets };
+    }
+
     const words = q.trim().split(/\s+/).filter(Boolean);
     // Resolvido uma única vez aqui (índice único, sub-ms) e reaproveitado tanto pra montar a
     // boost clause do retrieval (buildProductTextClauses, via productTextSearchIds) quanto
