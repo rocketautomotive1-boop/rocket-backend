@@ -132,7 +132,8 @@ describe('backfillStock', () => {
 describe('backfillBalances', () => {
   const productId = new Types.ObjectId();
   const originalLotId = new Types.ObjectId();
-  const newLotId = 'new-lot-1';
+  const newLotIdObjectId = new Types.ObjectId();
+  const newLotId = String(newLotIdObjectId);
   const storeListingId = 'SL1';
 
   function makeBalance(overrides: Partial<StockBalanceRow> = {}): StockBalanceRow {
@@ -165,16 +166,22 @@ describe('backfillBalances', () => {
       dryRun: false,
     });
 
+    // lotId must be cast to a real ObjectId before persisting — writing the raw string from
+    // lotIdMap (Map<string,string>) leaves the field mistyped in Mongo, breaking equality
+    // matches like recordStockMovement's {storeListingId, lotId, boxId} balance upsert
+    // (string !== ObjectId), which silently creates a duplicate balance instead of updating.
     expect(balanceModel.create).toHaveBeenCalledWith(
       expect.objectContaining({
         storeListingId,
-        lotId: newLotId,
+        lotId: newLotIdObjectId,
         originalBalanceId: balance._id,
         condition: 'new',
         onHand: 5,
         reserved: 1,
       }),
     );
+    const createArg = balanceModel.create.mock.calls[0][0];
+    expect(createArg.lotId).toBeInstanceOf(Types.ObjectId);
     expect(result.created).toBe(1);
     expect(result.total).toBe(1);
   });
@@ -268,7 +275,8 @@ describe('backfillBalances', () => {
 describe('backfillMovements', () => {
   const productId = new Types.ObjectId();
   const originalLotId = new Types.ObjectId();
-  const newLotId = 'new-lot-1';
+  const newLotIdObjectId = new Types.ObjectId();
+  const newLotId = String(newLotIdObjectId);
   const storeListingId = 'SL1';
 
   function makeMovement(overrides: Partial<StockMovementRow> = {}): StockMovementRow {
@@ -301,15 +309,19 @@ describe('backfillMovements', () => {
       dryRun: false,
     });
 
+    // Same ObjectId-cast requirement as backfillBalances: writing the raw lotIdMap string
+    // leaves store_listing_stock_movements.lotId mistyped, breaking equality matches downstream.
     expect(movementModel.create).toHaveBeenCalledWith(
       expect.objectContaining({
         storeListingId,
-        lotId: newLotId,
+        lotId: newLotIdObjectId,
         originalMovementId: movement._id,
         type: 'entry',
         quantity: 3,
       }),
     );
+    const createArg = movementModel.create.mock.calls[0][0];
+    expect(createArg.lotId).toBeInstanceOf(Types.ObjectId);
     expect(result.created).toBe(1);
   });
 

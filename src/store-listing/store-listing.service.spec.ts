@@ -522,6 +522,7 @@ describe('StoreListingService', () => {
       stockLotModelMock = {
         findOne: jest.fn(),
         findById: jest.fn(),
+        findOneAndUpdate: jest.fn(),
         create: jest.fn(),
       };
       stockBalanceModelMock = {
@@ -545,9 +546,8 @@ describe('StoreListingService', () => {
       service = moduleRef.get(StoreListingService);
     });
 
-    it('cria um novo lote quando nenhum existe para (storeListingId, condition) e faz upsert atômico do saldo', async () => {
-      stockLotModelMock.findOne.mockReturnValue({ exec: async () => null });
-      stockLotModelMock.create.mockResolvedValue({ _id: LOT1_OID });
+    it('cria um novo lote quando nenhum existe para (storeListingId, condition) via upsert atômico e faz upsert atômico do saldo', async () => {
+      stockLotModelMock.findOneAndUpdate.mockReturnValue({ exec: async () => ({ _id: LOT1_OID }) });
       stockBalanceModelMock.updateOne.mockResolvedValue({ acknowledged: true });
       stockMovementModelMock.create.mockResolvedValue({ _id: 'MOV1' });
 
@@ -559,12 +559,12 @@ describe('StoreListingService', () => {
 
       expect(result.lotId).toBe(String(LOT1_OID));
       expect(result.movementId).toBe('MOV1');
-      expect(stockLotModelMock.findOne).toHaveBeenCalledWith(
-        expect.objectContaining({ storeListingId: STORE_LISTING_OID, condition: 'new' }),
+      expect(stockLotModelMock.findOneAndUpdate).toHaveBeenCalledWith(
+        { storeListingId: STORE_LISTING_OID, condition: 'new' },
+        expect.objectContaining({ $setOnInsert: expect.objectContaining({ storeListingId: STORE_LISTING_OID, condition: 'new' }) }),
+        expect.objectContaining({ upsert: true, new: true }),
       );
-      expect(stockLotModelMock.create).toHaveBeenCalledWith(
-        expect.objectContaining({ storeListingId: STORE_LISTING_OID, condition: 'new' }),
-      );
+      expect(stockLotModelMock.create).not.toHaveBeenCalled();
       expect(stockBalanceModelMock.updateOne).toHaveBeenCalledWith(
         { storeListingId: STORE_LISTING_OID, lotId: LOT1_OID, boxId: null },
         { $inc: { onHand: 5, reserved: 0 }, $setOnInsert: { condition: 'new' } },
@@ -573,7 +573,7 @@ describe('StoreListingService', () => {
     });
 
     it('reusa um lote existente para a mesma (storeListingId, condition) sem recriar', async () => {
-      stockLotModelMock.findOne.mockReturnValue({ exec: async () => ({ _id: LOT1_OID }) });
+      stockLotModelMock.findOneAndUpdate.mockReturnValue({ exec: async () => ({ _id: LOT1_OID }) });
       stockBalanceModelMock.updateOne.mockResolvedValue({ acknowledged: true });
       stockMovementModelMock.create.mockResolvedValue({ _id: 'MOV2' });
 
@@ -592,8 +592,29 @@ describe('StoreListingService', () => {
       );
     });
 
+    it('duas chamadas concorrentes para (storeListingId, condition) sem lotId explícito resolvem o MESMO lote (upsert atômico evita corrida)', async () => {
+      // findOneAndUpdate com upsert:true é atômico no Mongo real: a segunda chamada concorrente
+      // enxerga o documento que a primeira acabou de inserir, em vez de cada uma criar o seu.
+      // Aqui simulamos isso fazendo o mock sempre devolver o mesmo lote already-resolved.
+      stockLotModelMock.findOneAndUpdate.mockReturnValue({ exec: async () => ({ _id: LOT1_OID }) });
+      stockBalanceModelMock.updateOne.mockResolvedValue({ acknowledged: true });
+      stockMovementModelMock.create.mockResolvedValue({ _id: 'MOV1' });
+
+      const [r1, r2] = await Promise.all([
+        service.recordStockMovement({ storeListingId: STORE_LISTING_ID, type: StockMovementType.INBOUND, quantity: 1 }),
+        service.recordStockMovement({ storeListingId: STORE_LISTING_ID, type: StockMovementType.INBOUND, quantity: 1 }),
+      ]);
+
+      expect(r1.lotId).toBe(String(LOT1_OID));
+      expect(r2.lotId).toBe(String(LOT1_OID));
+      expect(stockLotModelMock.create).not.toHaveBeenCalled();
+      // Ambas as chamadas devem ter usado findOneAndUpdate (nunca um find-then-create de duas etapas,
+      // que é a race que produz dois lotes para a mesma (storeListingId, condition) em produção).
+      expect(stockLotModelMock.findOneAndUpdate).toHaveBeenCalledTimes(2);
+    });
+
     it('acumula onHand via $inc (não overwrite) numa segunda movimentação contra o mesmo (lotId, boxId)', async () => {
-      stockLotModelMock.findOne.mockReturnValue({ exec: async () => ({ _id: LOT1_OID }) });
+      stockLotModelMock.findOneAndUpdate.mockReturnValue({ exec: async () => ({ _id: LOT1_OID }) });
       stockBalanceModelMock.updateOne.mockResolvedValue({ acknowledged: true });
       stockMovementModelMock.create.mockResolvedValue({ _id: 'MOV1' });
 
@@ -628,7 +649,7 @@ describe('StoreListingService', () => {
     });
 
     it('usa fromBoxId/toBoxId como chave boxId no saldo quando informado (transfer usa toBoxId)', async () => {
-      stockLotModelMock.findOne.mockReturnValue({ exec: async () => ({ _id: LOT1_OID }) });
+      stockLotModelMock.findOneAndUpdate.mockReturnValue({ exec: async () => ({ _id: LOT1_OID }) });
       stockBalanceModelMock.updateOne.mockResolvedValue({ acknowledged: true });
       stockMovementModelMock.create.mockResolvedValue({ _id: 'MOV3' });
 
@@ -648,7 +669,7 @@ describe('StoreListingService', () => {
     });
 
     it('registra o movimento com os campos informados, sem original*Id (documento novo, não migrado)', async () => {
-      stockLotModelMock.findOne.mockReturnValue({ exec: async () => ({ _id: LOT1_OID }) });
+      stockLotModelMock.findOneAndUpdate.mockReturnValue({ exec: async () => ({ _id: LOT1_OID }) });
       stockBalanceModelMock.updateOne.mockResolvedValue({ acknowledged: true });
       stockMovementModelMock.create.mockResolvedValue({ _id: 'MOV1' });
 

@@ -120,4 +120,28 @@ describe('StoreListing Phase 2 backfill (e2e)', () => {
     const count = await stockLotModel.countDocuments({ originalLotId: lot._id });
     expect(count).toBe(1);
   });
+
+  it('rejects a second lot for the same (storeListingId, condition) even when the first has no originalLotId (organic dual-write lot)', async () => {
+    // Reproduces the production bug: a lot created organically via
+    // StoreListingService.recordStockMovement (no originalLotId — see
+    // recordStockMovement's $setOnInsert) already exists for (storeListingId,
+    // condition) when the backfill script later runs and tries to insert its
+    // own migrated lot for the SAME pair. The originalLotId unique-sparse
+    // index does nothing here (the organic lot has no originalLotId to
+    // collide on) — only a unique index on {storeListingId, condition} stops
+    // the duplicate.
+    const rocket = await storeService.findByName('Rocket Automotive');
+    const productId = new Types.ObjectId();
+    const created = await storeListingService.create(String(productId), rocket!.id);
+    const storeListingId = new Types.ObjectId(created.id);
+
+    await stockLotModel.create({ storeListingId, condition: 'new', unitCost: '10.00' });
+
+    await expect(
+      stockLotModel.create({ storeListingId, condition: 'new', unitCost: '20.00', originalLotId: new Types.ObjectId() }),
+    ).rejects.toThrow(/duplicate key|E11000/);
+
+    const count = await stockLotModel.countDocuments({ storeListingId, condition: 'new' });
+    expect(count).toBe(1);
+  });
 });

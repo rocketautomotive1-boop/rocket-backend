@@ -231,20 +231,26 @@ export class StoreListingService implements StoreListingPort {
     // comparação de igualdade em aggregation ($match) que espera o tipo BSON correto.
     const storeListingId = new Types.ObjectId(params.storeListingId);
 
-    const lot = params.lotId
+    // findOneAndUpdate com upsert:true é atômico no Mongo: sob concorrência, a segunda
+    // chamada para o mesmo (storeListingId, condition) enxerga o lote que a primeira acabou
+    // de inserir, em vez de cada uma criar o seu (era exatamente essa race, num find-then-create
+    // de duas etapas, que produziu lotes duplicados em produção — ver stock-lot dedupe script).
+    const resolvedLot = params.lotId
       ? await this.storeListingStockLotModel.findById(params.lotId).exec()
       : await this.storeListingStockLotModel
-          .findOne({ storeListingId, condition })
+          .findOneAndUpdate(
+            { storeListingId, condition },
+            {
+              $setOnInsert: {
+                storeListingId,
+                condition,
+                unitCost: params.unitCost,
+                // originalLotId deliberately omitted — this is a net-new lot, not migrated.
+              },
+            },
+            { upsert: true, new: true },
+          )
           .exec();
-
-    const resolvedLot =
-      lot ??
-      (await this.storeListingStockLotModel.create({
-        storeListingId,
-        condition,
-        unitCost: params.unitCost,
-        // originalLotId deliberately omitted — this is a net-new lot, not migrated.
-      }));
 
     const lotId: Types.ObjectId = (resolvedLot as any)._id;
     const boxIdRaw = params.toBoxId ?? params.fromBoxId ?? null;

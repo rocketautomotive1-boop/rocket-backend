@@ -199,7 +199,7 @@ export async function backfillBalances(params: {
 
     await balanceModel.create({
       storeListingId,
-      lotId: newLotId,
+      lotId: new Types.ObjectId(newLotId),
       originalBalanceId: balance._id,
       condition: balance.condition,
       boxId: balance.boxId,
@@ -265,7 +265,7 @@ export async function backfillMovements(params: {
 
     await movementModel.create({
       storeListingId,
-      lotId: newLotId,
+      lotId: newLotId != null ? new Types.ObjectId(newLotId) : undefined,
       originalMovementId: movement._id,
       orderId: movement.orderId,
       type: movement.type,

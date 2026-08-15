@@ -48,4 +48,8 @@ export class StoreListingStockLotModel {
 
 export const StoreListingStockLotSchema = SchemaFactory.createForClass(StoreListingStockLotModel);
 
-StoreListingStockLotSchema.index({ storeListingId: 1, condition: 1 });
+// unique (não só um índice de lookup): garante no máximo um lote por (storeListingId, condition),
+// independente de originalLotId estar presente (migrado) ou ausente (dual-write orgânico) — o
+// índice unique-sparse de originalLotId sozinho não cobre esse caso, pois nunca compara dois
+// documentos onde o campo está ausente entre si.
+StoreListingStockLotSchema.index({ storeListingId: 1, condition: 1 }, { unique: true });
