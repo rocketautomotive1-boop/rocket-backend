@@ -90,7 +90,7 @@ describe('MercadoLivreCompatibilityAdapter — sincronização de compatibilidad
     adapter = moduleRef.get(MercadoLivreCompatibilityAdapter);
   });
 
-  it('syncCompatibility sempre posta em /items/{id}/compatibilities, mesmo para User Product', async () => {
+  it('syncCompatibility posta em /items/{id}/compatibilities para item normal (não User Product)', async () => {
     httpPost.mockResolvedValue({ created_compatibilities_count: 1 });
 
     await adapter.syncCompatibility('MLB123', { vehicle_ids: ['MLB999'] });
@@ -100,16 +100,60 @@ describe('MercadoLivreCompatibilityAdapter — sincronização de compatibilidad
       expect.objectContaining({ context: expect.any(String) }),
       expect.objectContaining({ products: [{ id: 'MLB999' }], site_id: 'MLB', domain_id: 'MLB-CARS_AND_VANS' }),
     );
-    // nunca deve consultar /items/{id} pra decidir rota — não há mais rota alternativa.
     expect(httpGet).not.toHaveBeenCalled();
   });
 
-  it('syncCompatibility lança erro quando ML aceita mas cria 0 compatibilidades (falso-sucesso do endpoint user-products)', async () => {
+  it('syncCompatibility lança erro quando ML aceita mas cria 0 compatibilidades', async () => {
     httpPost.mockResolvedValue({ created_compatibilities_count: 0 });
 
     await expect(
       adapter.syncCompatibility('MLB123', { vehicle_ids: ['MLB999'] }),
     ).rejects.toThrow(InternalServerErrorException);
+  });
+
+  it('syncCompatibility retenta via /user-products/{up_id}/compatibilities quando o item já é User Product', async () => {
+    const userProductError = {
+      response: {
+        status: 400,
+        data: { error: 'bad_request', message: 'This Item MLB123 has User Product compatibilities. Use the corresponding User Product resources.', status: 400 },
+      },
+    };
+    httpPost
+      .mockRejectedValueOnce(userProductError) // POST /items/MLB123/compatibilities — rejeitado
+      .mockResolvedValueOnce({ created_compatibilities_count: 1 }); // POST /user-products/{up_id}/compatibilities
+    httpGet.mockResolvedValue({ id: 'MLB123', user_product_id: 'MLBU4615173703' });
+
+    const result = await adapter.syncCompatibility('MLB123', { vehicle_ids: ['MLB999'], domain_id: 'MLB-CARS_AND_VANS' });
+
+    expect(httpGet).toHaveBeenCalledWith('/items/MLB123', expect.objectContaining({ context: expect.any(String) }));
+    expect(httpPost).toHaveBeenNthCalledWith(
+      2,
+      '/user-products/MLBU4615173703/compatibilities',
+      expect.objectContaining({ context: expect.any(String) }),
+      { domain_id: 'MLB-CARS_AND_VANS', products: [{ id: 'MLB999', creation_source: 'DEFAULT' }] },
+    );
+    expect(result).toEqual({ created_compatibilities_count: 1 });
+  });
+
+  it('syncCompatibility lança erro claro se o item sinaliza User Product mas /items não devolve user_product_id', async () => {
+    const userProductError = {
+      response: { status: 400, data: { message: 'This Item MLB123 has User Product compatibilities. Use the corresponding User Product resources.' } },
+    };
+    httpPost.mockRejectedValueOnce(userProductError);
+    httpGet.mockResolvedValue({ id: 'MLB123' }); // sem user_product_id
+
+    await expect(
+      adapter.syncCompatibility('MLB123', { vehicle_ids: ['MLB999'] }),
+    ).rejects.toThrow(InternalServerErrorException);
+  });
+
+  it('syncCompatibility NÃO retenta via user-products para um erro 400 não relacionado', async () => {
+    httpPost.mockRejectedValueOnce({ response: { status: 400, data: { message: 'invalid domain_id' } } });
+
+    await expect(
+      adapter.syncCompatibility('MLB123', { vehicle_ids: ['MLB999'] }),
+    ).rejects.toThrow(InternalServerErrorException);
+    expect(httpGet).not.toHaveBeenCalled();
   });
 
   it('getCompatibilities devolve a lista de products da resposta', async () => {

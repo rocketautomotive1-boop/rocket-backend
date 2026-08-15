@@ -199,30 +199,44 @@ export class MercadoLivreCompatibilityAdapter {
       }
 
       /**
+       * Item já migrado ao modelo User Products rejeita POST /items/{id}/compatibilities
+       * com 400 "This Item has User Product compatibilities. Use the corresponding User
+       * Product resources." (confirmado ao vivo, item MLB7358353254 → user_product_id
+       * MLBU4615173703). Sinal específico — não usar o cause genérico.
+       */
+      private isUserProductCompatibilitiesError(error: any): boolean {
+        const msg = String(error?.response?.data?.message || '');
+        return error?.response?.status === 400 && /has User Product compatibilities/i.test(msg);
+      }
+
+      /**
        * POST /items/{id}/compatibilities é ADITIVO (confirmado ao vivo contra a API:
        * chamadas sucessivas ou um único payload com N produtos apenas acrescentam,
-       * nunca substituem a lista existente) e funciona tanto para itens normais
-       * quanto para itens no modelo User Product — não há necessidade de rotear
-       * para `/user-products/{id}/compatibilities` (esse endpoint aceita o mesmo
-       * payload mas responde 200 com created_compatibilities_count:0, um "sucesso"
-       * que na verdade não grava nada).
+       * nunca substituem a lista existente) e funciona para itens normais. Itens já
+       * migrados ao modelo User Products REJEITAM esse endpoint (ver
+       * isUserProductCompatibilitiesError) — nesse caso é preciso resolver o
+       * user_product_id do item e rotear para POST /user-products/{up_id}/compatibilities,
+       * que exige domain_id no corpo (fora de products/products_families) e
+       * creation_source obrigatório por produto (contrato oficial ML, doc de
+       * compatibilidades entre itens e produtos de autopeças).
        */
       async syncCompatibility(itemId: string, compatibilityData: any): Promise<any> {
-        const body: Record<string, any> = {
-          ...compatibilityData,
-          site_id: compatibilityData?.site_id || 'MLB',
-          domain_id: compatibilityData?.domain_id || 'MLB-CARS_AND_VANS',
-        };
-        if (!body.products && Array.isArray(compatibilityData?.vehicle_ids)) {
-          body.products = compatibilityData.vehicle_ids.map((id: string) => ({ id }));
-        }
+        const siteId = compatibilityData?.site_id || 'MLB';
+        const domainId = compatibilityData?.domain_id || 'MLB-CARS_AND_VANS';
+        const products = Array.isArray(compatibilityData?.products)
+          ? compatibilityData.products
+          : Array.isArray(compatibilityData?.vehicle_ids)
+            ? compatibilityData.vehicle_ids.map((id: string) => ({ id }))
+            : [];
+
+        const body: Record<string, any> = { ...compatibilityData, site_id: siteId, domain_id: domainId, products };
 
         this.logger.log(`Sincronizando compatibilidade item=${itemId}`);
         this.logger.log(`Payload: ${JSON.stringify(body)}`);
 
         try {
           const result = await this.http.post<any>(`/items/${itemId}/compatibilities`, CTX('syncCompat'), body);
-          if (result?.created_compatibilities_count === 0 && Array.isArray(body.products) && body.products.length > 0) {
+          if (result?.created_compatibilities_count === 0 && products.length > 0) {
             throw new InternalServerErrorException(
               `ML aceitou a requisição mas não criou nenhuma compatibilidade (item=${itemId}).`,
             );
@@ -230,6 +244,12 @@ export class MercadoLivreCompatibilityAdapter {
           return result;
         } catch (error: any) {
           if (error instanceof InternalServerErrorException) throw error;
+
+          if (this.isUserProductCompatibilitiesError(error)) {
+            this.logger.warn(`Item ${itemId} é User Product — retentando via /user-products/{id}/compatibilities.`);
+            return this.syncUserProductCompatibilities(itemId, domainId, products);
+          }
+
           this.logger.error(`Erro ao sincronizar compatibilidade para o item ${itemId}:`, error.response?.data || error.message);
           if (error.response?.status) {
             this.logger.error(`Status code: ${error.response.status}`);
@@ -237,6 +257,46 @@ export class MercadoLivreCompatibilityAdapter {
           const mlMsg = error.response?.data?.message;
           throw new InternalServerErrorException(
             mlMsg || 'Erro ao sincronizar compatibilidade com a API do Mercado Livre.',
+          );
+        }
+      }
+
+      /**
+       * Resolve o user_product_id do item e cria as compatibilidades via
+       * POST /user-products/{up_id}/compatibilities. creation_source: 'DEFAULT' — nosso
+       * fluxo não distingue sugestão de veículo novo, então usa o valor padrão do ML.
+       */
+      private async syncUserProductCompatibilities(itemId: string, domainId: string, products: any[]): Promise<any> {
+        const item = await this.http.get<any>(`/items/${itemId}`, CTX('resolveUserProductId'));
+        const userProductId = item?.user_product_id;
+        if (!userProductId) {
+          throw new InternalServerErrorException(
+            `Item ${itemId} sinalizou User Product mas não tem user_product_id no /items — não é possível sincronizar.`,
+          );
+        }
+
+        const body = {
+          domain_id: domainId,
+          products: products.map((p: any) => ({ ...p, creation_source: p.creation_source || 'DEFAULT' })),
+        };
+
+        this.logger.log(`Sincronizando compatibilidade user_product=${userProductId} (item=${itemId})`);
+        this.logger.log(`Payload: ${JSON.stringify(body)}`);
+
+        try {
+          const result = await this.http.post<any>(`/user-products/${userProductId}/compatibilities`, CTX('syncCompatUP'), body);
+          if (result?.created_compatibilities_count === 0 && products.length > 0) {
+            throw new InternalServerErrorException(
+              `ML aceitou a requisição mas não criou nenhuma compatibilidade (user_product=${userProductId}).`,
+            );
+          }
+          return result;
+        } catch (error: any) {
+          if (error instanceof InternalServerErrorException) throw error;
+          this.logger.error(`Erro ao sincronizar compatibilidade para o user_product ${userProductId}:`, error.response?.data || error.message);
+          const mlMsg = error.response?.data?.message;
+          throw new InternalServerErrorException(
+            mlMsg || 'Erro ao sincronizar compatibilidade (User Product) com a API do Mercado Livre.',
           );
         }
       }
