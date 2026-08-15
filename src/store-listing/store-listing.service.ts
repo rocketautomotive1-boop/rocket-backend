@@ -27,7 +27,12 @@ import {
   StoreListingDamagedUnitModel,
   StoreListingDamagedUnitDocument,
   DamagedUnitCondition,
+  DamagedUnitStatus,
 } from './schemas/store-listing-damaged-unit.schema';
+import {
+  StoreListingDamagedAllocationModel,
+  StoreListingDamagedAllocationDocument,
+} from './schemas/store-listing-damaged-allocation.schema';
 import { StoreListingPort } from './ports/store-listing.port';
 import { StockMovementType } from '../stock/domain/movement-type';
 import { StockCondition } from '../stock/schemas/stock-lot.schema';
@@ -50,6 +55,8 @@ export class StoreListingService implements StoreListingPort {
     private readonly storeListingWarehouseModel: Model<StoreListingWarehouseDocument>,
     @InjectModel(StoreListingDamagedUnitModel.name)
     private readonly storeListingDamagedUnitModel: Model<StoreListingDamagedUnitDocument>,
+    @InjectModel(StoreListingDamagedAllocationModel.name)
+    private readonly storeListingDamagedAllocationModel: Model<StoreListingDamagedAllocationDocument>,
   ) {}
 
   async create(productId: string, storeId: string): Promise<StoreListingModel & { id: string }> {
@@ -476,5 +483,62 @@ export class StoreListingService implements StoreListingPort {
     }
 
     return { unitIds };
+  }
+
+  async updateDamagedUnit(
+    unitId: string,
+    patch: { photos?: string[]; damageNotes?: string; price?: number },
+  ): Promise<StoreListingDamagedUnitModel & { id: string }> {
+    const set: Record<string, any> = {};
+    if (patch.photos !== undefined) set.photos = patch.photos;
+    if (patch.damageNotes !== undefined) set.damageNotes = patch.damageNotes;
+    if (patch.price !== undefined) set.price = patch.price;
+
+    const updated = await this.storeListingDamagedUnitModel
+      .findByIdAndUpdate(unitId, { $set: set }, { new: true })
+      .exec();
+    return { ...(updated as any).toObject(), id: String((updated as any)._id) };
+  }
+
+  async allocateDamagedUnit(
+    unitId: string,
+    warehouseId: string,
+    position?: string,
+  ): Promise<StoreListingDamagedAllocationModel & { id: string }> {
+    const unit = await this.storeListingDamagedUnitModel.findById(unitId).exec();
+    if (!unit) throw new BadRequestException(`Unidade avariada ${unitId} não encontrada.`);
+
+    const listing = await this.storeListingModel.findById((unit as any).storeListingId).exec();
+    if (!listing) throw new BadRequestException(`StoreListing da unidade ${unitId} não encontrado.`);
+
+    const warehouse = await this.storeListingWarehouseModel.findById(warehouseId).exec();
+    if (!warehouse) throw new BadRequestException(`Depósito ${warehouseId} não encontrado.`);
+    if (String((warehouse as any).storeId) !== String((listing as any).storeId)) {
+      throw new BadRequestException('O depósito informado pertence a outra loja.');
+    }
+
+    const doc = await this.storeListingDamagedAllocationModel.findOneAndUpdate(
+      { damagedUnitId: unitId },
+      { $set: { warehouseId, position } },
+      { upsert: true, new: true },
+    );
+    return { ...(doc as any).toObject(), id: String((doc as any)._id) };
+  }
+
+  async isDamagedUnitPublishable(unitId: string): Promise<boolean> {
+    const unit = await this.storeListingDamagedUnitModel.findById(unitId).exec();
+    if (!unit) return false;
+    const u: any = unit;
+    return (u.photos?.length ?? 0) >= 1 && !!u.damageNotes && u.price != null;
+  }
+
+  async listDamagedUnits(
+    storeListingId: string,
+    status?: DamagedUnitStatus,
+  ): Promise<Array<StoreListingDamagedUnitModel & { id: string }>> {
+    const filter: Record<string, any> = { storeListingId };
+    if (status) filter.status = status;
+    const docs = await this.storeListingDamagedUnitModel.find(filter).exec();
+    return docs.map((doc: any) => ({ ...(doc.toObject?.() ?? doc), id: String(doc._id) }));
   }
 }

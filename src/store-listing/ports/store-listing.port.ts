@@ -1,7 +1,12 @@
 import { StoreListingModel } from '../schemas/store-listing.schema';
 import { MarketplaceListingModel, MarketplaceListingStatus } from '../schemas/marketplace-listing.schema';
 import { StoreListingWarehouseModel } from '../schemas/store-listing-warehouse.schema';
-import { DamagedUnitCondition } from '../schemas/store-listing-damaged-unit.schema';
+import {
+  DamagedUnitCondition,
+  DamagedUnitStatus,
+  StoreListingDamagedUnitModel,
+} from '../schemas/store-listing-damaged-unit.schema';
+import { StoreListingDamagedAllocationModel } from '../schemas/store-listing-damaged-allocation.schema';
 import { StockMovementType } from '../../stock/domain/movement-type';
 import { StockCondition } from '../../stock/schemas/stock-lot.schema';
 
@@ -101,4 +106,19 @@ export interface StoreListingPort {
     targetCondition: DamagedUnitCondition;
     reason?: string;
   }): Promise<{ unitIds: string[] }>;
+
+  updateDamagedUnit(
+    unitId: string,
+    patch: { photos?: string[]; damageNotes?: string; price?: number },
+  ): Promise<StoreListingDamagedUnitModel & { id: string }>;
+  allocateDamagedUnit(
+    unitId: string,
+    warehouseId: string,
+    position?: string,
+  ): Promise<StoreListingDamagedAllocationModel & { id: string }>;
+  isDamagedUnitPublishable(unitId: string): Promise<boolean>;
+  listDamagedUnits(
+    storeListingId: string,
+    status?: DamagedUnitStatus,
+  ): Promise<Array<StoreListingDamagedUnitModel & { id: string }>>;
 }

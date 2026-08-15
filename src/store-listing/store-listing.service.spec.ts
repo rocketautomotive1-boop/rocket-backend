@@ -36,6 +36,7 @@ describe('StoreListingService', () => {
         { provide: getModelToken('StoreListingStockMovementModel'), useValue: {} },
         { provide: getModelToken('StoreListingWarehouseModel'), useValue: warehouseModelMock },
         { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: {} },
+        { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: {} },
       ],
     }).compile();
 
@@ -254,6 +255,7 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingStockMovementModel'), useValue: {} },
           { provide: getModelToken('StoreListingWarehouseModel'), useValue: {} },
           { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: {} },
+          { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: {} },
         ],
       }).compile();
 
@@ -603,6 +605,7 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingStockMovementModel'), useValue: stockMovementModelMock },
           { provide: getModelToken('StoreListingWarehouseModel'), useValue: {} },
           { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: {} },
+          { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: {} },
         ],
       }).compile();
 
@@ -799,6 +802,7 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingStockMovementModel'), useValue: movementModelMock },
           { provide: getModelToken('StoreListingWarehouseModel'), useValue: {} },
           { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: damagedUnitModelMock },
+          { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: {} },
         ],
       }).compile();
 
@@ -841,6 +845,138 @@ describe('StoreListingService', () => {
         }),
       ).rejects.toThrow(BadRequestException);
       expect(damagedUnitModelMock.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('damaged unit completion', () => {
+    let listingModelMock2: any;
+    let warehouseModelMock2: any;
+    let damagedUnitModelMock2: any;
+    let damagedAllocationModelMock: any;
+
+    beforeEach(async () => {
+      listingModelMock2 = { findById: jest.fn() };
+      warehouseModelMock2 = { findById: jest.fn() };
+      damagedUnitModelMock2 = { findById: jest.fn(), findByIdAndUpdate: jest.fn(), find: jest.fn() };
+      damagedAllocationModelMock = { findOneAndUpdate: jest.fn() };
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          StoreListingService,
+          { provide: getModelToken(StoreListingModel.name), useValue: listingModelMock2 },
+          { provide: getModelToken('MarketplaceListingModel'), useValue: {} },
+          { provide: getModelToken('StoreListingStockLotModel'), useValue: {} },
+          { provide: getModelToken('StoreListingStockBalanceModel'), useValue: {} },
+          { provide: getModelToken('StoreListingStockMovementModel'), useValue: {} },
+          { provide: getModelToken('StoreListingWarehouseModel'), useValue: warehouseModelMock2 },
+          { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: damagedUnitModelMock2 },
+          { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: damagedAllocationModelMock },
+        ],
+      }).compile();
+
+      service = moduleRef.get(StoreListingService);
+    });
+
+    it('updateDamagedUnit: atualiza fotos, descrição e preço', async () => {
+      damagedUnitModelMock2.findByIdAndUpdate.mockReturnValue({
+        exec: async () => ({
+          _id: 'DU1',
+          toObject: () => ({ photos: ['url1'], damageNotes: 'Risco na lateral', price: '99.90' }),
+        }),
+      });
+
+      const result = await service.updateDamagedUnit('DU1', {
+        photos: ['url1'],
+        damageNotes: 'Risco na lateral',
+        price: 99.9,
+      });
+
+      expect(result.id).toBe('DU1');
+      expect(damagedUnitModelMock2.findByIdAndUpdate).toHaveBeenCalledWith(
+        'DU1',
+        { $set: { photos: ['url1'], damageNotes: 'Risco na lateral', price: 99.9 } },
+        { new: true },
+      );
+    });
+
+    it('allocateDamagedUnit: rejeita quando o depósito é de outra loja', async () => {
+      damagedUnitModelMock2.findById.mockReturnValue({
+        exec: async () => ({ _id: 'DU1', storeListingId: 'SL1' }),
+      });
+      listingModelMock2.findById.mockReturnValue({ exec: async () => ({ _id: 'SL1', storeId: STORE_ID }) });
+      warehouseModelMock2.findById.mockReturnValue({ exec: async () => ({ _id: 'WH1', storeId: 'OTHER_STORE' }) });
+
+      await expect(service.allocateDamagedUnit('DU1', 'WH1')).rejects.toThrow(BadRequestException);
+    });
+
+    it('allocateDamagedUnit: cria a allocation quando o depósito é da mesma loja', async () => {
+      damagedUnitModelMock2.findById.mockReturnValue({
+        exec: async () => ({ _id: 'DU1', storeListingId: 'SL1' }),
+      });
+      listingModelMock2.findById.mockReturnValue({ exec: async () => ({ _id: 'SL1', storeId: STORE_ID }) });
+      warehouseModelMock2.findById.mockReturnValue({ exec: async () => ({ _id: 'WH1', storeId: STORE_ID }) });
+      damagedAllocationModelMock.findOneAndUpdate.mockResolvedValue({
+        _id: 'ALLOC1',
+        toObject: () => ({ damagedUnitId: 'DU1', warehouseId: 'WH1' }),
+      });
+
+      const result = await service.allocateDamagedUnit('DU1', 'WH1', 'Prateleira 3');
+
+      expect(result.id).toBe('ALLOC1');
+      expect(damagedAllocationModelMock.findOneAndUpdate).toHaveBeenCalledWith(
+        { damagedUnitId: 'DU1' },
+        { $set: { warehouseId: 'WH1', position: 'Prateleira 3' } },
+        { upsert: true, new: true },
+      );
+    });
+
+    it('isDamagedUnitPublishable: false quando falta preço', async () => {
+      damagedUnitModelMock2.findById.mockReturnValue({
+        exec: async () => ({ photos: ['url1'], damageNotes: 'Risco', price: null }),
+      });
+
+      const result = await service.isDamagedUnitPublishable('DU1');
+
+      expect(result).toBe(false);
+    });
+
+    it('isDamagedUnitPublishable: false quando falta foto', async () => {
+      damagedUnitModelMock2.findById.mockReturnValue({
+        exec: async () => ({ photos: [], damageNotes: 'Risco', price: { toString: () => '99.9' } }),
+      });
+
+      const result = await service.isDamagedUnitPublishable('DU1');
+
+      expect(result).toBe(false);
+    });
+
+    it('isDamagedUnitPublishable: true quando fotos, descrição e preço presentes', async () => {
+      damagedUnitModelMock2.findById.mockReturnValue({
+        exec: async () => ({ photos: ['url1'], damageNotes: 'Risco', price: { toString: () => '99.9' } }),
+      });
+
+      const result = await service.isDamagedUnitPublishable('DU1');
+
+      expect(result).toBe(true);
+    });
+
+    it('listDamagedUnits: filtra por status quando informado', async () => {
+      damagedUnitModelMock2.find.mockReturnValue({
+        exec: async () => [{ _id: 'DU1', toObject: () => ({ storeListingId: 'SL1', status: 'in_stock' }) }],
+      });
+
+      const result = await service.listDamagedUnits('SL1', 'in_stock');
+
+      expect(result).toEqual([{ id: 'DU1', storeListingId: 'SL1', status: 'in_stock' }]);
+      expect(damagedUnitModelMock2.find).toHaveBeenCalledWith({ storeListingId: 'SL1', status: 'in_stock' });
+    });
+
+    it('listDamagedUnits: sem status filtra só por storeListingId', async () => {
+      damagedUnitModelMock2.find.mockReturnValue({ exec: async () => [] });
+
+      await service.listDamagedUnits('SL1');
+
+      expect(damagedUnitModelMock2.find).toHaveBeenCalledWith({ storeListingId: 'SL1' });
     });
   });
 });
