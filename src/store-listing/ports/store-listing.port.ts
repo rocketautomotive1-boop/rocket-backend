@@ -1,6 +1,7 @@
 import { StoreListingModel } from '../schemas/store-listing.schema';
 import { MarketplaceListingModel, MarketplaceListingStatus } from '../schemas/marketplace-listing.schema';
 import { StoreListingWarehouseModel } from '../schemas/store-listing-warehouse.schema';
+import { DamagedUnitCondition } from '../schemas/store-listing-damaged-unit.schema';
 import { StockMovementType } from '../../stock/domain/movement-type';
 import { StockCondition } from '../../stock/schemas/stock-lot.schema';
 
@@ -92,4 +93,12 @@ export interface StoreListingPort {
   ): Promise<StoreListingWarehouseModel & { id: string }>;
   listWarehouses(storeId: string): Promise<Array<StoreListingWarehouseModel & { id: string }>>;
   findWarehouseById(warehouseId: string): Promise<(StoreListingWarehouseModel & { id: string }) | null>;
+
+  markUnitsAsDamaged(params: {
+    storeListingId: string;
+    sourceCondition: 'new';
+    quantity: number;
+    targetCondition: DamagedUnitCondition;
+    reason?: string;
+  }): Promise<{ unitIds: string[] }>;
 }

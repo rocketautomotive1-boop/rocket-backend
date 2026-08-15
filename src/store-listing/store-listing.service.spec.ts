@@ -35,6 +35,7 @@ describe('StoreListingService', () => {
         { provide: getModelToken('StoreListingStockBalanceModel'), useValue: {} },
         { provide: getModelToken('StoreListingStockMovementModel'), useValue: {} },
         { provide: getModelToken('StoreListingWarehouseModel'), useValue: warehouseModelMock },
+        { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: {} },
       ],
     }).compile();
 
@@ -252,6 +253,7 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingStockBalanceModel'), useValue: {} },
           { provide: getModelToken('StoreListingStockMovementModel'), useValue: {} },
           { provide: getModelToken('StoreListingWarehouseModel'), useValue: {} },
+          { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: {} },
         ],
       }).compile();
 
@@ -600,6 +602,7 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingStockBalanceModel'), useValue: stockBalanceModelMock },
           { provide: getModelToken('StoreListingStockMovementModel'), useValue: stockMovementModelMock },
           { provide: getModelToken('StoreListingWarehouseModel'), useValue: {} },
+          { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: {} },
         ],
       }).compile();
 
@@ -771,6 +774,73 @@ describe('StoreListingService', () => {
       expect(result.lotId).toBe('LOT9');
       expect(stockLotModelMock.findById).toHaveBeenCalledWith('LOT9');
       expect(stockLotModelMock.findOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('markUnitsAsDamaged', () => {
+    let lotModelMock: any;
+    let balanceModelMock: any;
+    let movementModelMock: any;
+    let damagedUnitModelMock: any;
+
+    beforeEach(async () => {
+      lotModelMock = { findOneAndUpdate: jest.fn(), findById: jest.fn() };
+      balanceModelMock = { updateOne: jest.fn() };
+      movementModelMock = { create: jest.fn() };
+      damagedUnitModelMock = { create: jest.fn() };
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          StoreListingService,
+          { provide: getModelToken(StoreListingModel.name), useValue: modelMock },
+          { provide: getModelToken('MarketplaceListingModel'), useValue: {} },
+          { provide: getModelToken('StoreListingStockLotModel'), useValue: lotModelMock },
+          { provide: getModelToken('StoreListingStockBalanceModel'), useValue: balanceModelMock },
+          { provide: getModelToken('StoreListingStockMovementModel'), useValue: movementModelMock },
+          { provide: getModelToken('StoreListingWarehouseModel'), useValue: {} },
+          { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: damagedUnitModelMock },
+        ],
+      }).compile();
+
+      service = moduleRef.get(StoreListingService);
+    });
+
+    it('debita do lote fungível e cria N unidades avariadas', async () => {
+      const LOT_OID = new Types.ObjectId('6955b688dfe7143a30376c11');
+      lotModelMock.findOneAndUpdate.mockReturnValue({ exec: async () => ({ _id: LOT_OID }) });
+      balanceModelMock.updateOne.mockResolvedValue({});
+      movementModelMock.create.mockResolvedValue({ _id: 'MOV1' });
+      damagedUnitModelMock.create
+        .mockResolvedValueOnce({ _id: 'DU1', toObject: () => ({}) })
+        .mockResolvedValueOnce({ _id: 'DU2', toObject: () => ({}) });
+
+      const result = await service.markUnitsAsDamaged({
+        storeListingId: '6955b688dfe7143a30376c03',
+        sourceCondition: 'new',
+        quantity: 2,
+        targetCondition: 'damaged',
+      });
+
+      expect(result.unitIds).toEqual(['DU1', 'DU2']);
+      expect(damagedUnitModelMock.create).toHaveBeenCalledTimes(2);
+      expect(damagedUnitModelMock.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          condition: 'damaged',
+          status: 'in_stock',
+        }),
+      );
+    });
+
+    it('rejeita quantidade <= 0', async () => {
+      await expect(
+        service.markUnitsAsDamaged({
+          storeListingId: '6955b688dfe7143a30376c03',
+          sourceCondition: 'new',
+          quantity: 0,
+          targetCondition: 'damaged',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(damagedUnitModelMock.create).not.toHaveBeenCalled();
     });
   });
 });

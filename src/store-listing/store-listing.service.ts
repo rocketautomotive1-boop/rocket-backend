@@ -23,6 +23,11 @@ import {
   StoreListingWarehouseModel,
   StoreListingWarehouseDocument,
 } from './schemas/store-listing-warehouse.schema';
+import {
+  StoreListingDamagedUnitModel,
+  StoreListingDamagedUnitDocument,
+  DamagedUnitCondition,
+} from './schemas/store-listing-damaged-unit.schema';
 import { StoreListingPort } from './ports/store-listing.port';
 import { StockMovementType } from '../stock/domain/movement-type';
 import { StockCondition } from '../stock/schemas/stock-lot.schema';
@@ -43,6 +48,8 @@ export class StoreListingService implements StoreListingPort {
     private readonly storeListingStockMovementModel: Model<StoreListingStockMovementDocument>,
     @InjectModel(StoreListingWarehouseModel.name)
     private readonly storeListingWarehouseModel: Model<StoreListingWarehouseDocument>,
+    @InjectModel(StoreListingDamagedUnitModel.name)
+    private readonly storeListingDamagedUnitModel: Model<StoreListingDamagedUnitDocument>,
   ) {}
 
   async create(productId: string, storeId: string): Promise<StoreListingModel & { id: string }> {
@@ -434,5 +441,40 @@ export class StoreListingService implements StoreListingPort {
     const doc = await this.storeListingWarehouseModel.findById(warehouseId).exec();
     if (!doc) return null;
     return { ...((doc as any).toObject?.() ?? doc), id: String((doc as any)._id) };
+  }
+
+  async markUnitsAsDamaged(params: {
+    storeListingId: string;
+    sourceCondition: 'new';
+    quantity: number;
+    targetCondition: DamagedUnitCondition;
+    reason?: string;
+  }): Promise<{ unitIds: string[] }> {
+    if (params.quantity <= 0) {
+      throw new BadRequestException('A quantidade de unidades avariadas deve ser maior que zero.');
+    }
+
+    // Debita do lote fungível via o mesmo mecanismo de ajuste usado por correções de estoque
+    // (StockService.correctTo reusa adjust() da mesma forma — nenhuma primitiva nova de escrita).
+    const { lotId } = await this.recordStockMovement({
+      storeListingId: params.storeListingId,
+      type: StockMovementType.ADJUSTMENT,
+      quantity: -params.quantity,
+      condition: params.sourceCondition,
+      reason: params.reason ?? `Marcado como ${params.targetCondition}`,
+    });
+
+    const unitIds: string[] = [];
+    for (let i = 0; i < params.quantity; i++) {
+      const doc = await this.storeListingDamagedUnitModel.create({
+        storeListingId: new Types.ObjectId(params.storeListingId),
+        sourceLotId: new Types.ObjectId(lotId),
+        condition: params.targetCondition,
+        status: 'in_stock',
+      });
+      unitIds.push(String((doc as any)._id));
+    }
+
+    return { unitIds };
   }
 }
