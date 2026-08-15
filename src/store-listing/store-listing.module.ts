@@ -7,6 +7,7 @@ import { StoreListingStockBalanceModel, StoreListingStockBalanceSchema } from '.
 import { StoreListingStockMovementModel, StoreListingStockMovementSchema } from './schemas/store-listing-stock-movement.schema';
 import { StoreListingWarehouseModel, StoreListingWarehouseSchema } from './schemas/store-listing-warehouse.schema';
 import { StoreListingDamagedUnitModel, StoreListingDamagedUnitSchema } from './schemas/store-listing-damaged-unit.schema';
+import { StoreListingDamagedAllocationModel, StoreListingDamagedAllocationSchema } from './schemas/store-listing-damaged-allocation.schema';
 import { StoreListingService } from './store-listing.service';
 import { STORE_LISTING_PORT } from './ports/store-listing.port';
 
@@ -34,6 +35,7 @@ import { STORE_LISTING_PORT } from './ports/store-listing.port';
       { name: StoreListingStockMovementModel.name, schema: StoreListingStockMovementSchema },
       { name: StoreListingWarehouseModel.name, schema: StoreListingWarehouseSchema },
       { name: StoreListingDamagedUnitModel.name, schema: StoreListingDamagedUnitSchema },
+      { name: StoreListingDamagedAllocationModel.name, schema: StoreListingDamagedAllocationSchema },
     ]),
   ],
   providers: [StoreListingService, { provide: STORE_LISTING_PORT, useExisting: StoreListingService }],
