@@ -450,8 +450,39 @@ export class StoreListingService implements StoreListingPort {
     return { ...((doc as any).toObject?.() ?? doc), id: String((doc as any)._id) };
   }
 
+  /**
+   * Resolve o StoreListing de (productId, storeId) e garante que existe — usado por todo
+   * endpoint de damaged units que recebe productId do client (nunca storeListingId cru, que
+   * permitiria uma loja ler/escrever unidades de outra passando qualquer id por engano ou
+   * má-fé). Mesmo padrão de StockController/ProductMovementController.
+   */
+  private async requireStoreListing(productId: string, storeId: string): Promise<string> {
+    const listing = await this.findByProductAndStore(productId, storeId);
+    if (!listing) {
+      throw new BadRequestException(`Produto ${productId} não tem StoreListing na loja ${storeId}.`);
+    }
+    return listing.id;
+  }
+
+  /**
+   * Garante que a unidade avariada pertence à loja informada antes de qualquer leitura/escrita
+   * por unitId — sem isso, um unitId de outra loja passaria despercebido (unitId sozinho não
+   * carrega informação de loja nenhuma).
+   */
+  private async requireDamagedUnitInStore(unitId: string, storeId: string): Promise<StoreListingDamagedUnitDocument> {
+    const unit = await this.storeListingDamagedUnitModel.findById(unitId).exec();
+    if (!unit) throw new BadRequestException(`Unidade avariada ${unitId} não encontrada.`);
+
+    const listing = await this.storeListingModel.findById((unit as any).storeListingId).exec();
+    if (!listing || String((listing as any).storeId) !== String(storeId)) {
+      throw new BadRequestException(`Unidade avariada ${unitId} não encontrada.`);
+    }
+    return unit;
+  }
+
   async markUnitsAsDamaged(params: {
-    storeListingId: string;
+    productId: string;
+    storeId: string;
     sourceCondition: 'new';
     quantity: number;
     targetCondition: DamagedUnitCondition;
@@ -461,10 +492,12 @@ export class StoreListingService implements StoreListingPort {
       throw new BadRequestException('A quantidade de unidades avariadas deve ser maior que zero.');
     }
 
+    const storeListingId = await this.requireStoreListing(params.productId, params.storeId);
+
     // Debita do lote fungível via o mesmo mecanismo de ajuste usado por correções de estoque
     // (StockService.correctTo reusa adjust() da mesma forma — nenhuma primitiva nova de escrita).
     const { lotId } = await this.recordStockMovement({
-      storeListingId: params.storeListingId,
+      storeListingId,
       type: StockMovementType.ADJUSTMENT,
       quantity: -params.quantity,
       condition: params.sourceCondition,
@@ -474,7 +507,7 @@ export class StoreListingService implements StoreListingPort {
     const unitIds: string[] = [];
     for (let i = 0; i < params.quantity; i++) {
       const doc = await this.storeListingDamagedUnitModel.create({
-        storeListingId: new Types.ObjectId(params.storeListingId),
+        storeListingId: new Types.ObjectId(storeListingId),
         sourceLotId: new Types.ObjectId(lotId),
         condition: params.targetCondition,
         status: 'in_stock',
@@ -487,8 +520,11 @@ export class StoreListingService implements StoreListingPort {
 
   async updateDamagedUnit(
     unitId: string,
+    storeId: string,
     patch: { photos?: string[]; damageNotes?: string; price?: number },
   ): Promise<StoreListingDamagedUnitModel & { id: string }> {
+    await this.requireDamagedUnitInStore(unitId, storeId);
+
     const set: Record<string, any> = {};
     if (patch.photos !== undefined) set.photos = patch.photos;
     if (patch.damageNotes !== undefined) set.damageNotes = patch.damageNotes;
@@ -502,18 +538,15 @@ export class StoreListingService implements StoreListingPort {
 
   async allocateDamagedUnit(
     unitId: string,
+    storeId: string,
     warehouseId: string,
     position?: string,
   ): Promise<StoreListingDamagedAllocationModel & { id: string }> {
-    const unit = await this.storeListingDamagedUnitModel.findById(unitId).exec();
-    if (!unit) throw new BadRequestException(`Unidade avariada ${unitId} não encontrada.`);
-
-    const listing = await this.storeListingModel.findById((unit as any).storeListingId).exec();
-    if (!listing) throw new BadRequestException(`StoreListing da unidade ${unitId} não encontrado.`);
+    await this.requireDamagedUnitInStore(unitId, storeId);
 
     const warehouse = await this.storeListingWarehouseModel.findById(warehouseId).exec();
     if (!warehouse) throw new BadRequestException(`Depósito ${warehouseId} não encontrado.`);
-    if (String((warehouse as any).storeId) !== String((listing as any).storeId)) {
+    if (String((warehouse as any).storeId) !== String(storeId)) {
       throw new BadRequestException('O depósito informado pertence a outra loja.');
     }
 
@@ -533,10 +566,14 @@ export class StoreListingService implements StoreListingPort {
   }
 
   async listDamagedUnits(
-    storeListingId: string,
+    productId: string,
+    storeId: string,
     status?: DamagedUnitStatus,
   ): Promise<Array<StoreListingDamagedUnitModel & { id: string }>> {
-    const filter: Record<string, any> = { storeListingId };
+    const listing = await this.findByProductAndStore(productId, storeId);
+    if (!listing) return [];
+
+    const filter: Record<string, any> = { storeListingId: listing.id };
     if (status) filter.status = status;
     const docs = await this.storeListingDamagedUnitModel.find(filter).exec();
     return docs.map((doc: any) => ({ ...(doc.toObject?.() ?? doc), id: String(doc._id) }));

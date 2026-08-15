@@ -100,7 +100,8 @@ export interface StoreListingPort {
   findWarehouseById(warehouseId: string): Promise<(StoreListingWarehouseModel & { id: string }) | null>;
 
   markUnitsAsDamaged(params: {
-    storeListingId: string;
+    productId: string;
+    storeId: string;
     sourceCondition: 'new';
     quantity: number;
     targetCondition: DamagedUnitCondition;
@@ -109,16 +110,19 @@ export interface StoreListingPort {
 
   updateDamagedUnit(
     unitId: string,
+    storeId: string,
     patch: { photos?: string[]; damageNotes?: string; price?: number },
   ): Promise<StoreListingDamagedUnitModel & { id: string }>;
   allocateDamagedUnit(
     unitId: string,
+    storeId: string,
     warehouseId: string,
     position?: string,
   ): Promise<StoreListingDamagedAllocationModel & { id: string }>;
   isDamagedUnitPublishable(unitId: string): Promise<boolean>;
   listDamagedUnits(
-    storeListingId: string,
+    productId: string,
+    storeId: string,
     status?: DamagedUnitStatus,
   ): Promise<Array<StoreListingDamagedUnitModel & { id: string }>>;
 }

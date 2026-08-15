@@ -54,14 +54,17 @@ export class StoreListingController {
     return this.storeListing.listWarehouses(storeId);
   }
 
-  @Post(':storeListingId/damaged-units')
+  @Post('products/:productId/damaged-units')
   @ApiOperation({ summary: 'Marca K unidades do lote fungível "new" como avariadas' })
   async markUnitsAsDamaged(
-    @Param('storeListingId') storeListingId: string,
+    @Param('productId') productId: string,
+    @Req() req: any,
     @Body() body: MarkUnitsAsDamagedDto,
   ) {
+    const storeId = this.requireStoreId(req);
     return this.storeListing.markUnitsAsDamaged({
-      storeListingId,
+      productId,
+      storeId,
       sourceCondition: body.sourceCondition,
       quantity: body.quantity,
       targetCondition: body.targetCondition,
@@ -69,24 +72,36 @@ export class StoreListingController {
     });
   }
 
-  @Get(':storeListingId/damaged-units')
-  @ApiOperation({ summary: 'Lista as unidades avariadas de um StoreListing' })
+  @Get('products/:productId/damaged-units')
+  @ApiOperation({ summary: 'Lista as unidades avariadas do produto na loja do usuário autenticado' })
   async listDamagedUnits(
-    @Param('storeListingId') storeListingId: string,
+    @Param('productId') productId: string,
+    @Req() req: any,
     @Query('status') status?: string,
   ) {
-    return this.storeListing.listDamagedUnits(storeListingId, status as any);
+    const storeId = this.requireStoreId(req);
+    return this.storeListing.listDamagedUnits(productId, storeId, status as any);
   }
 
   @Put('damaged-units/:unitId')
   @ApiOperation({ summary: 'Atualiza fotos, descrição do dano e/ou preço de uma unidade avariada' })
-  async updateDamagedUnit(@Param('unitId') unitId: string, @Body() body: UpdateDamagedUnitDto) {
-    return this.storeListing.updateDamagedUnit(unitId, body);
+  async updateDamagedUnit(
+    @Param('unitId') unitId: string,
+    @Req() req: any,
+    @Body() body: UpdateDamagedUnitDto,
+  ) {
+    const storeId = this.requireStoreId(req);
+    return this.storeListing.updateDamagedUnit(unitId, storeId, body);
   }
 
   @Put('damaged-units/:unitId/allocation')
   @ApiOperation({ summary: 'Aloca uma unidade avariada num depósito' })
-  async allocateDamagedUnit(@Param('unitId') unitId: string, @Body() body: AllocateDamagedUnitDto) {
-    return this.storeListing.allocateDamagedUnit(unitId, body.warehouseId, body.position);
+  async allocateDamagedUnit(
+    @Param('unitId') unitId: string,
+    @Req() req: any,
+    @Body() body: AllocateDamagedUnitDto,
+  ) {
+    const storeId = this.requireStoreId(req);
+    return this.storeListing.allocateDamagedUnit(unitId, storeId, body.warehouseId, body.position);
   }
 }

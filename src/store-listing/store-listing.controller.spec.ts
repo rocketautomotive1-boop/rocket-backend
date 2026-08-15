@@ -47,10 +47,10 @@ describe('StoreListingController', () => {
     expect(portMock.listWarehouses).toHaveBeenCalledWith('S1');
   });
 
-  it('markUnitsAsDamaged: delega para o port com storeListingId da rota', async () => {
+  it('markUnitsAsDamaged: delega para o port com productId da rota e storeId do usuário autenticado', async () => {
     portMock.markUnitsAsDamaged.mockResolvedValue({ unitIds: ['DU1', 'DU2'] });
 
-    const result = await controller.markUnitsAsDamaged('SL1', {
+    const result = await controller.markUnitsAsDamaged('P1', reqWithStore, {
       sourceCondition: 'new',
       quantity: 2,
       targetCondition: 'damaged',
@@ -58,7 +58,8 @@ describe('StoreListingController', () => {
 
     expect(result).toEqual({ unitIds: ['DU1', 'DU2'] });
     expect(portMock.markUnitsAsDamaged).toHaveBeenCalledWith({
-      storeListingId: 'SL1',
+      productId: 'P1',
+      storeId: 'S1',
       sourceCondition: 'new',
       quantity: 2,
       targetCondition: 'damaged',
@@ -66,27 +67,41 @@ describe('StoreListingController', () => {
     });
   });
 
-  it('listDamagedUnits: delega para o port com storeListingId e status opcional', async () => {
+  it('markUnitsAsDamaged: rejeita quando o usuário não tem loja configurada', async () => {
+    await expect(
+      controller.markUnitsAsDamaged('P1', reqWithoutStore, {
+        sourceCondition: 'new',
+        quantity: 2,
+        targetCondition: 'damaged',
+      } as any),
+    ).rejects.toThrow(BadRequestException);
+    expect(portMock.markUnitsAsDamaged).not.toHaveBeenCalled();
+  });
+
+  it('listDamagedUnits: delega para o port com productId, storeId do usuário e status opcional', async () => {
     portMock.listDamagedUnits.mockResolvedValue([]);
 
-    await controller.listDamagedUnits('SL1', 'in_stock');
+    await controller.listDamagedUnits('P1', reqWithStore, 'in_stock');
 
-    expect(portMock.listDamagedUnits).toHaveBeenCalledWith('SL1', 'in_stock');
+    expect(portMock.listDamagedUnits).toHaveBeenCalledWith('P1', 'S1', 'in_stock');
   });
 
-  it('updateDamagedUnit: delega para o port com o patch informado', async () => {
+  it('updateDamagedUnit: delega para o port com o storeId do usuário e o patch informado', async () => {
     portMock.updateDamagedUnit.mockResolvedValue({ id: 'DU1' });
 
-    await controller.updateDamagedUnit('DU1', { damageNotes: 'Risco' } as any);
+    await controller.updateDamagedUnit('DU1', reqWithStore, { damageNotes: 'Risco' } as any);
 
-    expect(portMock.updateDamagedUnit).toHaveBeenCalledWith('DU1', { damageNotes: 'Risco' });
+    expect(portMock.updateDamagedUnit).toHaveBeenCalledWith('DU1', 'S1', { damageNotes: 'Risco' });
   });
 
-  it('allocateDamagedUnit: delega para o port com warehouseId e position', async () => {
+  it('allocateDamagedUnit: delega para o port com storeId do usuário, warehouseId e position', async () => {
     portMock.allocateDamagedUnit.mockResolvedValue({ id: 'ALLOC1' });
 
-    await controller.allocateDamagedUnit('DU1', { warehouseId: 'WH1', position: 'Prateleira 3' } as any);
+    await controller.allocateDamagedUnit('DU1', reqWithStore, {
+      warehouseId: 'WH1',
+      position: 'Prateleira 3',
+    } as any);
 
-    expect(portMock.allocateDamagedUnit).toHaveBeenCalledWith('DU1', 'WH1', 'Prateleira 3');
+    expect(portMock.allocateDamagedUnit).toHaveBeenCalledWith('DU1', 'S1', 'WH1', 'Prateleira 3');
   });
 });

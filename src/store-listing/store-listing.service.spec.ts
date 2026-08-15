@@ -811,6 +811,10 @@ describe('StoreListingService', () => {
 
     it('debita do lote fungível e cria N unidades avariadas', async () => {
       const LOT_OID = new Types.ObjectId('6955b688dfe7143a30376c11');
+      const SL_OID = new Types.ObjectId('6955b688dfe7143a30376c03');
+      modelMock.findOne.mockReturnValue({
+        exec: async () => ({ _id: SL_OID, productId: PRODUCT_ID, storeId: STORE_ID }),
+      });
       lotModelMock.findOneAndUpdate.mockReturnValue({ exec: async () => ({ _id: LOT_OID }) });
       balanceModelMock.updateOne.mockResolvedValue({});
       movementModelMock.create.mockResolvedValue({ _id: 'MOV1' });
@@ -819,7 +823,8 @@ describe('StoreListingService', () => {
         .mockResolvedValueOnce({ _id: 'DU2', toObject: () => ({}) });
 
       const result = await service.markUnitsAsDamaged({
-        storeListingId: '6955b688dfe7143a30376c03',
+        productId: PRODUCT_ID,
+        storeId: STORE_ID,
         sourceCondition: 'new',
         quantity: 2,
         targetCondition: 'damaged',
@@ -838,9 +843,25 @@ describe('StoreListingService', () => {
     it('rejeita quantidade <= 0', async () => {
       await expect(
         service.markUnitsAsDamaged({
-          storeListingId: '6955b688dfe7143a30376c03',
+          productId: PRODUCT_ID,
+          storeId: STORE_ID,
           sourceCondition: 'new',
           quantity: 0,
+          targetCondition: 'damaged',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(damagedUnitModelMock.create).not.toHaveBeenCalled();
+    });
+
+    it('rejeita quando o produto não tem StoreListing na loja', async () => {
+      modelMock.findOne.mockReturnValue({ exec: async () => null });
+
+      await expect(
+        service.markUnitsAsDamaged({
+          productId: PRODUCT_ID,
+          storeId: STORE_ID,
+          sourceCondition: 'new',
+          quantity: 2,
           targetCondition: 'damaged',
         }),
       ).rejects.toThrow(BadRequestException);
@@ -878,6 +899,10 @@ describe('StoreListingService', () => {
     });
 
     it('updateDamagedUnit: atualiza fotos, descrição e preço', async () => {
+      damagedUnitModelMock2.findById.mockReturnValue({
+        exec: async () => ({ _id: 'DU1', storeListingId: 'SL1' }),
+      });
+      listingModelMock2.findById.mockReturnValue({ exec: async () => ({ _id: 'SL1', storeId: STORE_ID }) });
       damagedUnitModelMock2.findByIdAndUpdate.mockReturnValue({
         exec: async () => ({
           _id: 'DU1',
@@ -885,7 +910,7 @@ describe('StoreListingService', () => {
         }),
       });
 
-      const result = await service.updateDamagedUnit('DU1', {
+      const result = await service.updateDamagedUnit('DU1', STORE_ID, {
         photos: ['url1'],
         damageNotes: 'Risco na lateral',
         price: 99.9,
@@ -899,6 +924,18 @@ describe('StoreListingService', () => {
       );
     });
 
+    it('updateDamagedUnit: rejeita quando a unidade pertence a outra loja', async () => {
+      damagedUnitModelMock2.findById.mockReturnValue({
+        exec: async () => ({ _id: 'DU1', storeListingId: 'SL1' }),
+      });
+      listingModelMock2.findById.mockReturnValue({ exec: async () => ({ _id: 'SL1', storeId: 'OTHER_STORE' }) });
+
+      await expect(
+        service.updateDamagedUnit('DU1', STORE_ID, { damageNotes: 'Tentativa de outra loja' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(damagedUnitModelMock2.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
     it('allocateDamagedUnit: rejeita quando o depósito é de outra loja', async () => {
       damagedUnitModelMock2.findById.mockReturnValue({
         exec: async () => ({ _id: 'DU1', storeListingId: 'SL1' }),
@@ -906,7 +943,17 @@ describe('StoreListingService', () => {
       listingModelMock2.findById.mockReturnValue({ exec: async () => ({ _id: 'SL1', storeId: STORE_ID }) });
       warehouseModelMock2.findById.mockReturnValue({ exec: async () => ({ _id: 'WH1', storeId: 'OTHER_STORE' }) });
 
-      await expect(service.allocateDamagedUnit('DU1', 'WH1')).rejects.toThrow(BadRequestException);
+      await expect(service.allocateDamagedUnit('DU1', STORE_ID, 'WH1')).rejects.toThrow(BadRequestException);
+    });
+
+    it('allocateDamagedUnit: rejeita quando a unidade pertence a outra loja', async () => {
+      damagedUnitModelMock2.findById.mockReturnValue({
+        exec: async () => ({ _id: 'DU1', storeListingId: 'SL1' }),
+      });
+      listingModelMock2.findById.mockReturnValue({ exec: async () => ({ _id: 'SL1', storeId: 'OTHER_STORE' }) });
+
+      await expect(service.allocateDamagedUnit('DU1', STORE_ID, 'WH1')).rejects.toThrow(BadRequestException);
+      expect(warehouseModelMock2.findById).not.toHaveBeenCalled();
     });
 
     it('allocateDamagedUnit: cria a allocation quando o depósito é da mesma loja', async () => {
@@ -920,7 +967,7 @@ describe('StoreListingService', () => {
         toObject: () => ({ damagedUnitId: 'DU1', warehouseId: 'WH1' }),
       });
 
-      const result = await service.allocateDamagedUnit('DU1', 'WH1', 'Prateleira 3');
+      const result = await service.allocateDamagedUnit('DU1', STORE_ID, 'WH1', 'Prateleira 3');
 
       expect(result.id).toBe('ALLOC1');
       expect(damagedAllocationModelMock.findOneAndUpdate).toHaveBeenCalledWith(
@@ -961,22 +1008,37 @@ describe('StoreListingService', () => {
     });
 
     it('listDamagedUnits: filtra por status quando informado', async () => {
+      listingModelMock2.findOne = jest.fn().mockReturnValue({
+        exec: async () => ({ _id: 'SL1', productId: PRODUCT_ID, storeId: STORE_ID }),
+      });
       damagedUnitModelMock2.find.mockReturnValue({
         exec: async () => [{ _id: 'DU1', toObject: () => ({ storeListingId: 'SL1', status: 'in_stock' }) }],
       });
 
-      const result = await service.listDamagedUnits('SL1', 'in_stock');
+      const result = await service.listDamagedUnits(PRODUCT_ID, STORE_ID, 'in_stock');
 
       expect(result).toEqual([{ id: 'DU1', storeListingId: 'SL1', status: 'in_stock' }]);
       expect(damagedUnitModelMock2.find).toHaveBeenCalledWith({ storeListingId: 'SL1', status: 'in_stock' });
     });
 
     it('listDamagedUnits: sem status filtra só por storeListingId', async () => {
+      listingModelMock2.findOne = jest.fn().mockReturnValue({
+        exec: async () => ({ _id: 'SL1', productId: PRODUCT_ID, storeId: STORE_ID }),
+      });
       damagedUnitModelMock2.find.mockReturnValue({ exec: async () => [] });
 
-      await service.listDamagedUnits('SL1');
+      await service.listDamagedUnits(PRODUCT_ID, STORE_ID);
 
       expect(damagedUnitModelMock2.find).toHaveBeenCalledWith({ storeListingId: 'SL1' });
+    });
+
+    it('listDamagedUnits: sem StoreListing na loja retorna vazio', async () => {
+      listingModelMock2.findOne = jest.fn().mockReturnValue({ exec: async () => null });
+
+      const result = await service.listDamagedUnits(PRODUCT_ID, STORE_ID);
+
+      expect(result).toEqual([]);
+      expect(damagedUnitModelMock2.find).not.toHaveBeenCalled();
     });
   });
 });
