@@ -41,4 +41,27 @@ describe('parseVehicleQuery', () => {
     expect(result.freeText).toBe('');
     expect(result.yearRange).toEqual({ from: 2016, to: 2021 });
   });
+
+  it('extrai potência "Duster 118cv"', () => {
+    const result = parseVehicleQuery('Duster 118cv');
+    expect(result.freeText).toBe('Duster');
+    expect(result.powerHp).toBe(118);
+  });
+
+  it('extrai potência com espaço "118 cv"', () => {
+    const result = parseVehicleQuery('Duster 118 cv');
+    expect(result.freeText).toBe('Duster');
+    expect(result.powerHp).toBe(118);
+  });
+
+  it('extrai potência no meio da string "com 118cv turbo"', () => {
+    const result = parseVehicleQuery('Duster com 118cv turbo');
+    expect(result.freeText).toBe('Duster com turbo');
+    expect(result.powerHp).toBe(118);
+  });
+
+  it('não seta powerHp quando não há "cv"', () => {
+    const result = parseVehicleQuery('Corolla');
+    expect(result.powerHp).toBeUndefined();
+  });
 });

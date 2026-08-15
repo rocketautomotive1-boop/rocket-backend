@@ -6,10 +6,12 @@ export interface ParsedVehicleQuery {
   yearRange?: { from: number; to: number };
   fuelTags?: string[];
   engineDisplay?: string;
+  powerHp?: number;
 }
 
 const YEAR_RANGE_RE = /\b(\d{4})\s*-\s*(\d{4})\b/;
 const DISPLACEMENT_RE = /\b\d\.\d\b/;
+const POWER_RE = /\b(\d{2,3})\s?cv\b/i;
 
 /**
  * Separa uma query de busca livre de veículo ("Fiat Toro 2.0 2016-2021 Diesel") em tokens
@@ -47,10 +49,18 @@ export function parseVehicleQuery(raw: string): ParsedVehicleQuery {
     remaining = remaining.replace(DISPLACEMENT_RE, ' ');
   }
 
+  let powerHp: number | undefined;
+  const powerMatch = remaining.match(POWER_RE);
+  if (powerMatch) {
+    powerHp = parseInt(powerMatch[1], 10);
+    remaining = remaining.replace(POWER_RE, ' ');
+  }
+
   return {
     freeText: collapseSpaces(remaining),
     yearRange,
     fuelTags: fuelTags.length > 0 ? [...new Set(fuelTags)] : undefined,
     engineDisplay,
+    powerHp,
   };
 }

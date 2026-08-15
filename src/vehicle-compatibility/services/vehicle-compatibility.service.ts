@@ -282,6 +282,11 @@ export class VehicleCompatibilityService {
         equals: { path: 'engineDisplay', value: parsed.engineDisplay },
       });
     }
+    if (parsed?.powerHp !== undefined) {
+      searchStage.$search.compound.filter.push({
+        range: { path: 'engine.powerHp', gte: parsed.powerHp - 2, lte: parsed.powerHp + 2 },
+      });
+    }
 
     try {
       const result = await this.model.aggregate([
@@ -311,6 +316,9 @@ export class VehicleCompatibilityService {
       }
       if (parsed?.engineDisplay !== undefined) {
         filter.engineDisplay = parsed.engineDisplay;
+      }
+      if (parsed?.powerHp !== undefined) {
+        filter['engine.powerHp'] = { $gte: parsed.powerHp - 2, $lte: parsed.powerHp + 2 };
       }
 
       const [data, total] = await Promise.all([

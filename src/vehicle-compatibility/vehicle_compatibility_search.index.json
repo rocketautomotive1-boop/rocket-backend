@@ -40,6 +40,14 @@
       },
       "engineDisplay": {
         "type": "token"
+      },
+      "engine": {
+        "type": "document",
+        "fields": {
+          "powerHp": {
+            "type": "number"
+          }
+        }
       }
     }
   }
