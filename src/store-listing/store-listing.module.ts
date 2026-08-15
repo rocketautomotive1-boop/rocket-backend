@@ -5,6 +5,7 @@ import { MarketplaceListingModel, MarketplaceListingSchema } from './schemas/mar
 import { StoreListingStockLotModel, StoreListingStockLotSchema } from './schemas/store-listing-stock-lot.schema';
 import { StoreListingStockBalanceModel, StoreListingStockBalanceSchema } from './schemas/store-listing-stock-balance.schema';
 import { StoreListingStockMovementModel, StoreListingStockMovementSchema } from './schemas/store-listing-stock-movement.schema';
+import { StoreListingWarehouseModel, StoreListingWarehouseSchema } from './schemas/store-listing-warehouse.schema';
 import { StoreListingService } from './store-listing.service';
 import { STORE_LISTING_PORT } from './ports/store-listing.port';
 
@@ -30,6 +31,7 @@ import { STORE_LISTING_PORT } from './ports/store-listing.port';
       { name: StoreListingStockLotModel.name, schema: StoreListingStockLotSchema },
       { name: StoreListingStockBalanceModel.name, schema: StoreListingStockBalanceSchema },
       { name: StoreListingStockMovementModel.name, schema: StoreListingStockMovementSchema },
+      { name: StoreListingWarehouseModel.name, schema: StoreListingWarehouseSchema },
     ]),
   ],
   providers: [StoreListingService, { provide: STORE_LISTING_PORT, useExisting: StoreListingService }],
