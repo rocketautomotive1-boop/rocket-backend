@@ -873,6 +873,11 @@ export class ProductService {
     await this.productRepository.markImageSlotFailed(productId, slotId);
   }
 
+  /** Mark an existing image slot as processing (atomic positional update by slotId). */
+  async markImageSlotProcessing(productId: string, slotId: string): Promise<void> {
+    await this.productRepository.markImageSlotProcessing(productId, slotId);
+  }
+
   @ValidateMongoId()
   async updateImages(id: string, imageDataList: {
     slotId?: string;

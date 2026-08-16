@@ -43,6 +43,14 @@ export class ProductRepository {
         ).exec();
     }
 
+    /** Mark an existing image slot as processing (atomic positional update by slotId). */
+    async markImageSlotProcessing(productId: string, slotId: string): Promise<void> {
+        await this.productModel.updateOne(
+            { _id: productId, 'images.slotId': slotId },
+            { $set: { 'images.$.status': 'processing' } },
+        ).exec();
+    }
+
     private toDto(doc: any): ProductModel {
         if (!doc) return null;
         const obj = doc.toObject ? doc.toObject() : doc;

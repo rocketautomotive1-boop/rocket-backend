@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { S3Client, PutObjectCommand, DeleteObjectCommand, GetBucketLocationCommand, ListObjectsV2Command, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, GetBucketLocationCommand, ListObjectsV2Command, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as crypto from 'crypto';
 
@@ -72,6 +72,21 @@ export class S3Service {
       }
       throw error;
     }
+  }
+
+  /**
+   * Baixa um objeto do S3 e devolve o conteúdo completo como Buffer.
+   * @param key Nome do arquivo no S3
+   */
+  async downloadFile(key: string): Promise<Buffer> {
+    const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
+    const response = await this.s3Client.send(command);
+    const stream = response.Body as any;
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
   }
 
   /**

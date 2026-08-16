@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, Put, Delete, BadRequestException, ForbiddenException, UseInterceptors, UploadedFiles, Logger, Query, HttpStatus, HttpException, HttpCode, Req, Inject, forwardRef } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Put, Delete, BadRequestException, ForbiddenException, NotFoundException, UseInterceptors, UploadedFiles, Logger, Query, HttpStatus, HttpException, HttpCode, Req, Inject, forwardRef } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiConsumes, ApiBody, ApiBearerAuth, ApiExtraModels, ApiQuery, ApiParam } from '@nestjs/swagger';
@@ -1285,6 +1285,61 @@ export class ProductController {
     }
 
     return this.productService.findOne(id);
+  }
+
+  @Post(':id/images/:slotId/rembg')
+  @ApiOperation({ summary: 'Envia uma imagem já salva do produto para remoção de fundo (rembg)' })
+  @ApiResponse({ status: 201, description: 'Job rembg enfileirado' })
+  async rembgExistingImage(
+    @Param('id') id: string,
+    @Param('slotId') slotId: string,
+    @Body() body: any,
+  ): Promise<{ jobId?: string; status: 'queued' | 'failed' }> {
+    const product = await this.productService.findOne(id);
+    if (!product) {
+      throw new NotFoundException(`Produto com ID ${id} não encontrado`);
+    }
+
+    const images: any[] = (product as any).images ?? [];
+    const slot = images.find((img) => img.slotId === slotId);
+    if (!slot) {
+      throw new BadRequestException(`Slot de imagem ${slotId} não encontrado no produto`);
+    }
+    if (!slot.key) {
+      throw new BadRequestException(`Slot de imagem ${slotId} não possui arquivo no S3`);
+    }
+
+    let rembgOptions: ReturnType<typeof rembgOptionsSchema.parse>;
+    try {
+      const rawOptions = typeof body?.rembgOptions === 'string' ? JSON.parse(body.rembgOptions) : body?.rembgOptions;
+      rembgOptions = rembgOptionsSchema.parse(rawOptions ?? {});
+    } catch (e: any) {
+      if (e instanceof ZodError) {
+        throw new BadRequestException(`Opções de rembg inválidas: ${e.issues.map(i => i.message).join('; ')}`);
+      }
+      throw new BadRequestException('Opções de rembg malformadas');
+    }
+
+    await this.productService.markImageSlotProcessing(id, slotId);
+
+    const batchCode = `RB-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    try {
+      const fileBuffer = await this.s3Service.downloadFile(slot.key);
+      const { jobId } = await this.rembgEnqueueService.enqueue({
+        productId: id,
+        slotId,
+        fileBuffer,
+        originalName: slot.originalName || slot.key.split('/').pop() || 'image.jpg',
+        mimeType: slot.mimeType || 'image/jpeg',
+        batchCode,
+        options: rembgOptions,
+      });
+      return { jobId, status: 'queued' };
+    } catch (err: any) {
+      this.logger.error(`Falha ao criar job rembg (slot ${slotId}, imagem existente): ${err?.message}`);
+      await this.productService.markImageSlotFailed(id, slotId).catch(() => {});
+      return { status: 'failed' };
+    }
   }
 
   @Post(':id/titles')
