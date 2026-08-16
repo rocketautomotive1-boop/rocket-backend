@@ -61,7 +61,12 @@ export class ModerationReconciler implements OnModuleInit {
       const accounts = await this.broker.listAccountsWithToken(marketplaceId);
       const targets = accounts.length ? accounts.map((a) => a.accountId) : [undefined];
       for (const accountId of targets) {
-        this.scheduleNext(marketplaceId, RECON.DAILY_MS, accountId);
+        // Run once right away — deploys happen more often than the 24h cadence, and this is a
+        // plain in-memory timer with no persisted "next run at", so waiting a full day here means
+        // a reconciler that restarts before completing a cycle never actually runs in production.
+        this.runFor(marketplaceId, accountId).catch((e) =>
+          this.logger.error(`[Moderation] ${this.key(marketplaceId, accountId)} failed: ${(e as Error).message}`),
+        );
       }
     }
   }
