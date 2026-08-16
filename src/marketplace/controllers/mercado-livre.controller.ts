@@ -131,20 +131,6 @@ export class MercadoLivreController {
         }
     }
 
-    @Post('discover-category')
-    @ApiOperation({ summary: 'Descobrir categoria no Mercado Livre' })
-    async discoverCategory(
-        @Body('title') title: string,
-        @Body('productId') productId: number,
-    ) {
-        const product = await this.productService.findDocument(String(productId));
-        if (!product) throw new NotFoundException(`Produto com ID ${productId} não encontrado`);
-
-        // Using ML service directly because this logic seems very specific (passing product doc)
-        // Could eventually be genericized but for now extract is safer.
-        return this.mercadoLivreService.discoverCategory(title, product);
-    }
-
     @Get('listing-prices')
     @ApiOperation({ summary: 'Simula custos de venda no Mercado Livre (somente leitura). Com targetMargin pode levar alguns segundos (múltiplas consultas à ML).' })
     @ApiResponse({ status: 200, description: 'Comissão, lucro líquido e comparação de listing types' })

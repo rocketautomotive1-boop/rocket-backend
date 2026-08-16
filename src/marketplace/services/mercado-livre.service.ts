@@ -535,36 +535,6 @@ export class MercadoLivreService {
     return this.productService.getProductStock(String(product._id));
   }
 
-  async discoverCategory(title: string, product: ProductDocument): Promise<any> {
-    try {
-      // Buscar o marketplace do Mercado Livre
-      // Note: Marketplace is still TypeORM for now
-      const marketplaceId = 1;
-
-      /*
-      if (!marketplace) {
-        throw new Error('Marketplace Mercado Livre não encontrado');
-      }
-      */
-
-      // Token/refresh/retry ficam no MlHttpClient dentro do adapter — não há mais
-      // retry manual de 403 nem token resolvido aqui.
-      const suggestedCategory = await this.mercadoLivreAdapter.discoverCategory(title);
-      this.logger.log('Categoria sugerida:', JSON.stringify(suggestedCategory, null, 2));
-
-      const categoryDetails = await this.mercadoLivreAdapter.getCategoryDetails(suggestedCategory.category_id);
-      this.logger.log('Detalhes da categoria:', JSON.stringify(categoryDetails, null, 2));
-
-      return {
-        ...suggestedCategory,
-        details: categoryDetails,
-      };
-    } catch (error) {
-      this.logger.error('Erro ao buscar categoria sugerida:', error);
-      throw error;
-    }
-  }
-
   async getProductAttributes(productId: number): Promise<{
     required: any[];
     optional: any[];
@@ -611,10 +581,6 @@ export class MercadoLivreService {
     }
   }
 
-  async domainDiscovery(title: string): Promise<any> {
-    return this.mercadoLivreCategoryAdapter.domainDiscovery(title);
-  }
-
   async getCategory(categoryId: string): Promise<any> {
     const response = await this.mercadoLivreCategoryAdapter.getCategory(categoryId);
     return response.data;
@@ -625,11 +591,4 @@ export class MercadoLivreService {
     return response.data;
   }
 
-  async getDomainWithCategories(title: string): Promise<any> {
-    return this.mercadoLivreCategoryAdapter.getDomainAndCategories(title);
-  }
-
-  async getDomainWithCategoryAndAttributes(title: string): Promise<any> {
-    return this.mercadoLivreCategoryAdapter.getDomainWithCategoryAndAttributes(title);
-  }
 }

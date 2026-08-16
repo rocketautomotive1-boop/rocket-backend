@@ -142,11 +142,6 @@ export class MercadoLivreAdapter extends MarketplaceAdapter {
     return this.categoryAdapter.getShippingPreferences(categoryId);
   }
 
-  async discoverCategory(title: string): Promise<any> {
-    // Delega ao categoryAdapter (token/refresh/retry no MlHttpClient).
-    return this.categoryAdapter.discoverCategory(title);
-  }
-
   // Q&A Methods — token/refresh/retry no MlHttpClient (conta via accountId).
   async answerQuestion(questionId: string, text: string, accountId?: string): Promise<any> {
     try {

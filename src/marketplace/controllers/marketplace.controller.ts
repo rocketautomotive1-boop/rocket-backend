@@ -270,14 +270,6 @@ export class MarketplaceController {
     }
   }
 
-  @Get(':marketplaceId/categories/discovery')
-  async domainDiscovery(
-    @Query('title') title: string,
-    @Param('marketplaceId') marketplaceId: string
-  ) {
-    return this.categoryService.domainDiscovery(marketplaceId, title);
-  }
-
   @Get(':marketplaceId/categories/:categoryId')
   async getCategory(
     @Param('categoryId') categoryId: string,
@@ -314,22 +306,6 @@ export class MarketplaceController {
     }
 
     return {};
-  }
-
-  @Get(':marketplaceId/categories/discovery/with-categories')
-  async getDomainWithCategories(
-    @Query('title') title: string,
-    @Param('marketplaceId') marketplaceId: string
-  ) {
-    return this.categoryService.getDomainWithCategories(marketplaceId, title);
-  }
-
-  @Get(':marketplaceId/categories/discovery/with-category-and-attributes')
-  async getDomainWithCategoryAndAttributes(
-    @Query('title') title: string,
-    @Param('marketplaceId') marketplaceId: string
-  ) {
-    return this.categoryService.getDomainWithCategoryAndAttributes(marketplaceId, title);
   }
 
   @Get(':marketplaceId/categories/:categoryId/attributes/with-values')

@@ -5,6 +5,7 @@ import { NOTIFICATION_EVENTS } from '../../notifications/events/notification.eve
 describe('WrongCategoryHandler', () => {
   let handler: WrongCategoryHandler;
   let events: { emit: jest.Mock };
+  let titleCategoryHintService: { invalidateHint: jest.Mock };
 
   const makeCtx = (over: Partial<ModerationHandlerContext> = {}): ModerationHandlerContext => {
     const listing: any = {
@@ -18,6 +19,8 @@ describe('WrongCategoryHandler', () => {
     };
     const product: any = {
       _id: 'P1',
+      titleId: 'T1',
+      category: 'CAT-OLD',
       warnings: [],
       updateOne: jest.fn().mockResolvedValue(undefined),
     };
@@ -41,7 +44,8 @@ describe('WrongCategoryHandler', () => {
 
   beforeEach(() => {
     events = { emit: jest.fn() };
-    handler = new WrongCategoryHandler(events as any);
+    titleCategoryHintService = { invalidateHint: jest.fn().mockResolvedValue(undefined) };
+    handler = new WrongCategoryHandler(events as any, titleCategoryHintService as any);
   });
 
   it('marks the listing pending_removal with a terminal syncIssue ONLY (no evidence in listing)', async () => {
@@ -117,5 +121,28 @@ describe('WrongCategoryHandler', () => {
     // but the listing block + notification still happen
     expect(ctx.listing.save).toHaveBeenCalled();
     expect(events.emit).toHaveBeenCalled();
+  });
+
+  it('invalidates the titleId->category hint so the auto-resolve does not repeat the ML-rejected category', async () => {
+    const ctx = makeCtx();
+    await handler.handle(ctx);
+
+    expect(titleCategoryHintService.invalidateHint).toHaveBeenCalledWith('T1', 'CAT-OLD');
+  });
+
+  it('does not invalidate a hint when the product has no titleId or no prior category', async () => {
+    const ctx = makeCtx();
+    ctx.product!.titleId = undefined;
+    await handler.handle(ctx);
+
+    expect(titleCategoryHintService.invalidateHint).not.toHaveBeenCalled();
+  });
+
+  it('does not invalidate a hint when the listing is already pending_removal (idempotent skip)', async () => {
+    const ctx = makeCtx();
+    ctx.listing.status = 'pending_removal';
+    await handler.handle(ctx);
+
+    expect(titleCategoryHintService.invalidateHint).not.toHaveBeenCalled();
   });
 });

@@ -92,75 +92,6 @@ export class MercadoLivreCategoryAdapter implements OnModuleInit {
     }
   }
 
-  async discoverCategory(title: string): Promise<any> {
-    try {
-      const data = await this.http.get<any>('/sites/MLB/domain_discovery/search', CTX('discoverCategory'), { q: title });
-      if (!data || data.length === 0) {
-        this.logger.error('Resposta vazia da API do Mercado Livre');
-        throw new Error('Nenhuma categoria encontrada para o título fornecido');
-      }
-      const suggested = data[0];
-      const mapped = {
-        category_id: suggested.category_id,
-        name: suggested.category_name,
-        domain_id: suggested.domain_id,
-        domain_name: suggested.domain_name,
-        attributes: suggested.attributes || [],
-      };
-      if (!mapped.category_id || !mapped.name) {
-        this.logger.error('Resposta inválida do Mercado Livre:', {
-          hasCategoryId: !!mapped.category_id,
-          hasName: !!mapped.name,
-          rawResponse: suggested,
-        });
-        throw new Error('Resposta inválida do Mercado Livre: categoria incompleta');
-      }
-      return mapped;
-    } catch (error: any) {
-      this.logger.error(`Erro na busca de categoria sugerida: ${error.message}`, error.stack);
-      throw new Error(`Falha na busca de categoria sugerida: ${error.message}`);
-    }
-  }
-
-  async domainDiscovery(title: string): Promise<any> {
-    if (!title) throw new Error('Título não fornecido para busca de domínio');
-    try {
-      const data = await this.http.get<any>('/sites/MLB/domain_discovery/search', CTX('domainDiscovery'), { q: title });
-      if (!data || data.length === 0) {
-        throw new Error('Nenhum domínio encontrado para o título fornecido');
-      }
-      return data;
-    } catch (error: any) {
-      this.logger.error(`Erro ao buscar domínio sugerido: ${error.message}`);
-      throw error;
-    }
-  }
-
-  async getDomainAndCategories(title: string): Promise<any> {
-    if (!title) throw new Error('Título não fornecido para busca de domínio e categorias');
-    try {
-      const domain = await this.domainDiscovery(title);
-      if (!Array.isArray(domain)) {
-        throw new Error('Resposta inválida do Mercado Livre: domínio não é um array.');
-      }
-      return await Promise.all(domain.map(async (domainItem: any) => {
-        const category = await this.getCategory(domainItem.category_id);
-        if (!category) {
-          throw new Error(`Não foi possível obter a categoria: ${domainItem.category_id}.`);
-        }
-        let dimensions = null;
-        try {
-          const prefs = await this.getShippingPreferences(domainItem.category_id);
-          if (prefs && prefs.dimensions) dimensions = prefs.dimensions;
-        } catch { /* preferences são best-effort */ }
-        return { ...domainItem, category: { ...category, dimensions } };
-      }));
-    } catch (error: any) {
-      this.logger.error(`Erro ao buscar domínio e categorias: ${error.message}`);
-      throw error;
-    }
-  }
-
   async getCategory(categoryId: string): Promise<any> {
     const cacheKey = `category:${categoryId}`;
     return this.getCachedRequest(cacheKey, async () => {
@@ -191,19 +122,4 @@ export class MercadoLivreCategoryAdapter implements OnModuleInit {
     return [];
   }
 
-  async getDomainWithCategoryAndAttributes(title: any): Promise<any> {
-    try {
-      const domain = await this.domainDiscovery(title);
-      for (const domainItem of domain) {
-        const category = await this.getCategory(domainItem.category_id);
-        if (!category) throw new Error('Não foi possível obter a categoria');
-        const attributes = await this.getCategoryAttributes(domainItem.category_id);
-        if (!attributes) throw new Error('Não foi possível obter os atributos da categoria');
-        return { category, attributes };
-      }
-    } catch (error: any) {
-      this.logger.error(`Erro ao buscar domínio com categoria e atributos: ${error.message}`);
-      throw error;
-    }
-  }
 }

@@ -2,7 +2,6 @@ import { Injectable, Logger, NotFoundException, Inject, forwardRef } from '@nest
 import { CategoryQueryService, CategorySyncService, CategoryMappingService } from './category';
 import { ProductService } from '../../product/product.service';
 import { MercadoLivreAdapter } from '../adapters/mercado-livre/mercado-livre.adapter';
-import { CategorySuggestionService } from './category-suggestion.service';
 
 import { MarketplaceAdapterRegistry } from '../registries/marketplace-adapter.registry';
 import { MarketplaceRegistryService } from './marketplace-registry.service'; // For name resolution
@@ -18,7 +17,6 @@ export class CategoryService {
     private categoryMappingService: CategoryMappingService,
     @Inject(forwardRef(() => ProductService)) private productService: ProductService,
     private mercadoLivreAdapter: MercadoLivreAdapter,
-    private categorySuggestionService: CategorySuggestionService,
     private adapterRegistry: MarketplaceAdapterRegistry,
     private registryService: MarketplaceRegistryService
   ) { }
@@ -112,10 +110,6 @@ export class CategoryService {
     return this.categoryMappingService.findMappingsByMarketplaceCategory(marketplaceCategoryId);
   }
 
-  async suggestAndMapCategory(productId: string | number, marketplaceId: number | string): Promise<any> {
-    return this.categorySuggestionService.suggestAndMapCategory(String(productId), marketplaceId as any);
-  }
-
   async getShippingPreferences(marketplaceId: number | string, categoryId: string): Promise<any> {
     try {
       // Token/refresh ficam no MlHttpClient dentro do adapter (ML, conta default).
@@ -128,15 +122,6 @@ export class CategoryService {
 
   async getMarketplaceName(marketplaceId: string): Promise<string> {
     return this.registryService.getMarketplaceName(marketplaceId);
-  }
-
-  async domainDiscovery(marketplaceId: string, title: string): Promise<any> {
-    const marketplaceName = await this.getMarketplaceName(marketplaceId);
-    const adapter = this.adapterRegistry.getCategoryAdapter(marketplaceName);
-    if (adapter && adapter.domainDiscovery) {
-      return adapter.domainDiscovery(title);
-    }
-    throw new BadRequestException(`Descoberta de domínio não implementada para ${marketplaceName}.`);
   }
 
   async getCategory(marketplaceId: string, categoryId: string): Promise<any> {
@@ -181,33 +166,4 @@ export class CategoryService {
     throw new BadRequestException(`Descoberta de atributos de categoria com valores não implementada para ${marketplaceName}.`);
   }
 
-  async getDomainWithCategories(marketplaceId: string, title: string): Promise<any> {
-    const marketplaceName = await this.getMarketplaceName(marketplaceId);
-    const adapter = this.adapterRegistry.getCategoryAdapter(marketplaceName);
-
-    if (adapter && adapter.getDomainAndCategories) {
-      const results = await adapter.getDomainAndCategories(title);
-
-      // Persist results asynchronously
-      if (Array.isArray(results)) {
-        results.forEach(item => {
-          if (item.category) {
-            this.categorySyncService.saveDiscoveredCategory(marketplaceId, item.category)
-              .catch(err => this.logger.warn(`Failed to persist discovered category ${item.category.id}`, err));
-          }
-        });
-      }
-      return results;
-    }
-    throw new BadRequestException(`Descoberta de domínio com categorias não implementada para ${marketplaceName}.`);
-  }
-
-  async getDomainWithCategoryAndAttributes(marketplaceId: string, title: string): Promise<any> {
-    const marketplaceName = await this.getMarketplaceName(marketplaceId);
-    const adapter = this.adapterRegistry.getCategoryAdapter(marketplaceName);
-    if (adapter && adapter.getDomainWithCategoryAndAttributes) {
-      return adapter.getDomainWithCategoryAndAttributes(title);
-    }
-    throw new BadRequestException(`Descoberta de domínio com categoria e atributos não implementada para ${marketplaceName}.`);
-  }
 }

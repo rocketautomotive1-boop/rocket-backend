@@ -173,11 +173,4 @@ export class CategoryController {
     return this.categoryService.findMappingsByMarketplaceCategory(marketplaceCategoryId);
   }
 
-  @Post(':marketplaceId/products/:productId/suggest-category')
-  async suggestAndMapCategory(
-    @Param('marketplaceId') marketplaceId: string,
-    @Param('productId') productId: string,
-  ) {
-    return this.categoryService.suggestAndMapCategory(productId, marketplaceId);
-  }
 }

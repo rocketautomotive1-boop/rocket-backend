@@ -45,7 +45,6 @@ import { MarketplaceOrderService } from './services/marketplace-order.service';
 import { MercadoLivreService } from './services/mercado-livre.service';
 import { ShopeeService } from './services/shopee.service';
 import { CategoryAttributesService } from './services/category-attributes.service';
-import { CategorySuggestionService } from './services/category-suggestion.service';
 import { ProductAttributesService } from './services/product-attributes.service';
 import { MercadoLivreAttributesService } from './services/mercado-livre-attributes.service';
 import { MlDimensionsCalculatorService } from './services/ml-dimensions-calculator.service';
@@ -147,7 +146,6 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
     CategorySyncService,
     CategoryMappingService,
     CategoryAttributesService,
-    CategorySuggestionService,
     MercadoLivreAdapter,
     ShopeeAdapter,
     MercadoLivreProductAdapter,
@@ -212,7 +210,6 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
     CategoryMappingService,
     CategoryAttributesService,
     MarketplaceOrderService,
-    CategorySuggestionService,
     MercadoLivreAdapter,
     MercadoLivreCategoryAdapter,
     MercadoLivreCompatibilityAdapter,

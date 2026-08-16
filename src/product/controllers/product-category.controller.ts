@@ -84,21 +84,6 @@ export class ProductCategoryController {
     return this.productCategoryService.ensureCategoryFromMl(marketplaceTag, externalCategoryId, domain ?? 'autopecas');
   }
 
-  @Post('resolve-ml-leaf/:productId')
-  @ApiOperation({
-    summary: 'Resolve a categoria ML folha publicável de um produto e garante a categoria interna mapeada',
-    description:
-      'Quando a categoria escolhida mapeia para um nó ML NÃO-folha (não publicável), pede ao predictor do ML ' +
-      '(domain_discovery) a categoria folha a partir do texto do produto e materializa/mapeia a categoria interna ' +
-      '(idempotente). Retorna { categoryId, externalCategoryId, status }.',
-  })
-  async resolveMlLeaf(
-    @Param('productId') productId: string,
-    @Query('domain') domain?: string,
-  ) {
-    return this.productCategoryService.resolveMlLeafForProduct(productId, domain ?? 'autopecas');
-  }
-
   @Get('debug-counts')
   async debugCounts() {
     // Return top 10 categories with highest productCount

@@ -40,11 +40,6 @@ export interface CategorySnapshotDto {
   productId: string;
   product: any;
   internalCategory: HydratedCategoryDto | null;
-  discovery: {
-    resolvedCategoryId: string | null;
-    resolvedCategory: HydratedCategoryDto | null;
-    mlCategoryId: string | null;
-  };
   ml: MlSnapshotStateDto | null;
   mlResolution: MlResolutionDto;
 }

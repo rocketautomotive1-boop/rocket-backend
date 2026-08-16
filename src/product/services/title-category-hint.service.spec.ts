@@ -7,11 +7,11 @@ import { CategoryModel } from '../schemas/category.schema';
 
 describe('TitleCategoryHintService', () => {
     let service: TitleCategoryHintService;
-    let hintModel: { findOneAndUpdate: jest.Mock; findOne: jest.Mock };
+    let hintModel: { findOneAndUpdate: jest.Mock; findOne: jest.Mock; find: jest.Mock; deleteOne: jest.Mock };
     let categoryModel: { findById: jest.Mock };
 
     beforeEach(async () => {
-        hintModel = { findOneAndUpdate: jest.fn(), findOne: jest.fn() };
+        hintModel = { findOneAndUpdate: jest.fn(), findOne: jest.fn(), find: jest.fn(), deleteOne: jest.fn() };
         categoryModel = { findById: jest.fn() };
 
         const module = await Test.createTestingModule({
@@ -54,31 +54,54 @@ describe('TitleCategoryHintService', () => {
     });
 
     describe('suggestCategory', () => {
+        // suggestCategory agora busca os 2 hints de maior count (find().sort().limit(2)) em vez de
+        // findOne, para poder detectar empate/ambiguidade antes de sugerir.
+        function mockTopHints(hints: { categoryId: Types.ObjectId; count: number }[]) {
+            hintModel.find.mockReturnValue({
+                sort: jest.fn().mockReturnThis(),
+                limit: jest.fn().mockReturnThis(),
+                lean: jest.fn().mockReturnThis(),
+                exec: jest.fn().mockResolvedValue(hints),
+            });
+        }
+
         it('retorna null quando titleId é inválido', async () => {
             const result = await service.suggestCategory('not-an-object-id');
             expect(result).toBeNull();
-            expect(hintModel.findOne).not.toHaveBeenCalled();
+            expect(hintModel.find).not.toHaveBeenCalled();
         });
 
         it('retorna null quando não há hint para o titleId', async () => {
-            hintModel.findOne.mockReturnValue({
-                sort: jest.fn().mockReturnThis(),
-                lean: jest.fn().mockReturnThis(),
-                exec: jest.fn().mockResolvedValue(null),
-            });
+            mockTopHints([]);
 
             const result = await service.suggestCategory(new Types.ObjectId().toString());
             expect(result).toBeNull();
         });
 
-        it('retorna o hint de maior count, populando o nome da categoria', async () => {
+        it('retorna null quando o hint de maior count tem count menor que 2 (sem confiança suficiente)', async () => {
+            mockTopHints([{ categoryId: new Types.ObjectId(), count: 1 }]);
+
+            const result = await service.suggestCategory(new Types.ObjectId().toString());
+            expect(result).toBeNull();
+        });
+
+        it('retorna null quando os dois hints mais votados empatam em count (ambíguo)', async () => {
+            mockTopHints([
+                { categoryId: new Types.ObjectId(), count: 2 },
+                { categoryId: new Types.ObjectId(), count: 2 },
+            ]);
+
+            const result = await service.suggestCategory(new Types.ObjectId().toString());
+            expect(result).toBeNull();
+        });
+
+        it('retorna o hint de maior count quando count >= 2 e não há empate, populando o nome da categoria', async () => {
             const titleId = new Types.ObjectId().toString();
             const categoryId = new Types.ObjectId();
-            hintModel.findOne.mockReturnValue({
-                sort: jest.fn().mockReturnThis(),
-                lean: jest.fn().mockReturnThis(),
-                exec: jest.fn().mockResolvedValue({ categoryId, count: 7 }),
-            });
+            mockTopHints([
+                { categoryId, count: 7 },
+                { categoryId: new Types.ObjectId(), count: 3 },
+            ]);
             categoryModel.findById.mockReturnValue({
                 select: jest.fn().mockReturnThis(),
                 lean: jest.fn().mockReturnThis(),
@@ -87,16 +110,12 @@ describe('TitleCategoryHintService', () => {
 
             const result = await service.suggestCategory(titleId);
 
-            expect(hintModel.findOne).toHaveBeenCalledWith({ titleId: new Types.ObjectId(titleId) });
+            expect(hintModel.find).toHaveBeenCalledWith({ titleId: new Types.ObjectId(titleId) });
             expect(result).toEqual({ categoryId: String(categoryId), categoryName: 'Parafusos', count: 7 });
         });
 
         it('retorna null quando a categoria referenciada pelo hint não existe mais', async () => {
-            hintModel.findOne.mockReturnValue({
-                sort: jest.fn().mockReturnThis(),
-                lean: jest.fn().mockReturnThis(),
-                exec: jest.fn().mockResolvedValue({ categoryId: new Types.ObjectId(), count: 3 }),
-            });
+            mockTopHints([{ categoryId: new Types.ObjectId(), count: 3 }]);
             categoryModel.findById.mockReturnValue({
                 select: jest.fn().mockReturnThis(),
                 lean: jest.fn().mockReturnThis(),
@@ -105,6 +124,31 @@ describe('TitleCategoryHintService', () => {
 
             const result = await service.suggestCategory(new Types.ObjectId().toString());
             expect(result).toBeNull();
+        });
+    });
+
+    describe('invalidateHint', () => {
+        it('remove o hint específico titleId+categoryId', async () => {
+            const titleId = new Types.ObjectId().toString();
+            const categoryId = new Types.ObjectId().toString();
+            hintModel.deleteOne.mockResolvedValue({ deletedCount: 1 });
+
+            await service.invalidateHint(titleId, categoryId);
+
+            expect(hintModel.deleteOne).toHaveBeenCalledWith({
+                titleId: new Types.ObjectId(titleId),
+                categoryId: new Types.ObjectId(categoryId),
+            });
+        });
+
+        it('não chama o model quando titleId é inválido', async () => {
+            await service.invalidateHint('not-an-object-id', new Types.ObjectId().toString());
+            expect(hintModel.deleteOne).not.toHaveBeenCalled();
+        });
+
+        it('não chama o model quando categoryId é inválido', async () => {
+            await service.invalidateHint(new Types.ObjectId().toString(), 'not-an-object-id');
+            expect(hintModel.deleteOne).not.toHaveBeenCalled();
         });
     });
 });

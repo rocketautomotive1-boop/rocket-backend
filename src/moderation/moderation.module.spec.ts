@@ -16,6 +16,9 @@ import { ModerationStateModel } from './schemas/moderation-state.schema';
 import { MarketplaceTokenBrokerService } from '../marketplace/auth/services/marketplace-token-broker.service';
 import { OrchestratorPublisherService } from '../marketplace-orchestrator/orchestrator-publisher.service';
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
+import { TitleCategoryHintService } from '../product/services/title-category-hint.service';
+import { TitleCategoryHintModel } from '../product/schemas/title-category-hint.schema';
+import { CategoryModel } from '../product/schemas/category.schema';
 
 /**
  * Proves the moderation provider graph wires together: each service resolves with its declared
@@ -32,6 +35,7 @@ describe('Moderation DI graph', () => {
         MercadoLivreModerationProvider,
         MlModerationsClient,
         WrongCategoryHandler,
+        TitleCategoryHintService,
         MissingCompatibilityHandler,
         ModerationHandlerRegistry,
         ModerationIngestService,
@@ -40,6 +44,8 @@ describe('Moderation DI graph', () => {
         { provide: getModelToken(ListingModel.name), useValue: {} },
         { provide: getModelToken(ProductModel.name), useValue: {} },
         { provide: getModelToken(ModerationStateModel.name), useValue: {} },
+        { provide: getModelToken(TitleCategoryHintModel.name), useValue: {} },
+        { provide: getModelToken(CategoryModel.name), useValue: {} },
         { provide: MarketplaceTokenBrokerService, useValue: {} },
         { provide: OrchestratorPublisherService, useValue: {} },
         { provide: MarketplaceRegistryService, useValue: {} },

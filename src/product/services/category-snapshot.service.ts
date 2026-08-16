@@ -19,7 +19,6 @@ export class CategorySnapshotService {
   constructor(
     @InjectModel('ProductModel') private readonly productModel: Model<any>,
     @InjectModel('CategoryModel') private readonly categoryModel: Model<any>,
-    @InjectModel('ProductDiscoveryModel') private readonly discoveryModel: Model<any>,
     private readonly mlHydration: MlAttributeHydrationService,
     private readonly categoryService: CategoryService,
     private readonly configCache: MarketplaceConfigCacheService,
@@ -31,27 +30,13 @@ export class CategorySnapshotService {
     }
     const oid = new Types.ObjectId(productId);
 
-    const [product, discoveryDoc, mlMarketplace] = await Promise.all([
+    const [product, mlMarketplace] = await Promise.all([
       this.productModel.findById(oid).lean().exec(),
-      this.discoveryModel
-        .findOne({ productId: oid, isActiveIntent: true })
-        .sort({ createdAt: -1 })
-        .lean()
-        .exec(),
       this.configCache.getByName('Mercado Livre'),
     ]);
     if (!product) throw new NotFoundException(`Product not found: ${productId}`);
 
     const internalCategory = await this.hydrateInternalCategory(product.category);
-    const resolvedCategoryId = discoveryDoc?.resolvedCategoryId
-      ? String(discoveryDoc.resolvedCategoryId)
-      : null;
-    const resolvedCategory = resolvedCategoryId
-      ? await this.hydrateInternalCategory(new Types.ObjectId(resolvedCategoryId))
-      : null;
-    // category_id do ML (do discovery) — permite o auto-cadastro da categoria via IA
-    // quando não há categoria interna nem resolvedCategoryId.
-    const mlCategoryId: string | null = discoveryDoc?.final?.mlCategoryId ?? null;
 
     const { ml, resolution } = internalCategory && mlMarketplace
       ? await this.resolveMl(product, internalCategory, String(mlMarketplace._id))
@@ -61,7 +46,6 @@ export class CategorySnapshotService {
       productId: String(productId),
       product,
       internalCategory,
-      discovery: { resolvedCategoryId, resolvedCategory, mlCategoryId },
       ml,
       mlResolution: resolution,
     };

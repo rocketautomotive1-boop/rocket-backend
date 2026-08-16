@@ -4,6 +4,7 @@ import { ModerationHandler, ModerationHandlerContext } from './moderation-handle
 import { ModerationType } from '../providers/moderation-provider.types';
 import { ProductWarning } from '../../product/schemas/product.schema';
 import { NOTIFICATION_EVENTS, NotificationRequested } from '../../notifications/events/notification.events';
+import { TitleCategoryHintService } from '../../product/services/title-category-hint.service';
 
 /**
  * Wrong-category moderation (ML DOMAIN). The marketplace finalized the listing because it was in the
@@ -19,7 +20,10 @@ export class WrongCategoryHandler implements ModerationHandler {
   readonly type: ModerationType = 'WRONG_CATEGORY';
   private readonly logger = new Logger(WrongCategoryHandler.name);
 
-  constructor(private readonly events: EventEmitter2) {}
+  constructor(
+    private readonly events: EventEmitter2,
+    private readonly titleCategoryHintService: TitleCategoryHintService,
+  ) {}
 
   async handle(ctx: ModerationHandlerContext): Promise<void> {
     const { listing, product, state, canonical, session } = ctx;
@@ -55,6 +59,16 @@ export class WrongCategoryHandler implements ModerationHandler {
       },
     };
     await listing.save({ session });
+
+    // O ML comprovou que este titleId->categoria estava errado — invalida o hint pra não
+    // reforçar o mesmo erro no próximo produto com o mesmo shortTitle (ver TitleCategoryHintService).
+    if (product?.titleId && product?.category) {
+      this.titleCategoryHintService
+        .invalidateHint(String(product.titleId), String(product.category))
+        .catch((e) =>
+          this.logger.warn(`Falha ao invalidar title-category hint para produto ${product._id}: ${e?.message}`),
+        );
+    }
 
     // Domain decision on the product: drop the wrong category + record a single warning.
     if (product) {

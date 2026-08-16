@@ -14,6 +14,9 @@ import { ModerationHandlerRegistry } from './handlers/moderation-handler.registr
 import { ModerationIngestService } from './ingest/moderation-ingest.service';
 import { ModerationReconciler } from './reconcile/moderation-reconciler.service';
 import { ModerationWebhookListener } from './webhook/moderation-webhook.listener';
+import { TitleCategoryHintService } from '../product/services/title-category-hint.service';
+import { TitleCategoryHintModel, TitleCategoryHintSchema } from '../product/schemas/title-category-hint.schema';
+import { CategoryModel, CategorySchema } from '../product/schemas/category.schema';
 
 /**
  * Owns post-publication moderation, absorbed from the deleted moderations microservice.
@@ -34,6 +37,8 @@ import { ModerationWebhookListener } from './webhook/moderation-webhook.listener
       { name: ModerationStateModel.name, schema: ModerationStateSchema },
       { name: ListingModel.name, schema: ListingSchema },
       { name: ProductModel.name, schema: ProductSchema },
+      { name: TitleCategoryHintModel.name, schema: TitleCategoryHintSchema },
+      { name: CategoryModel.name, schema: CategorySchema },
     ]),
     MarketplaceAuthModule,
     OutboxModule,
@@ -43,6 +48,7 @@ import { ModerationWebhookListener } from './webhook/moderation-webhook.listener
     MercadoLivreModerationProvider,
     MlModerationsClient,
     WrongCategoryHandler,
+    TitleCategoryHintService,
     MissingCompatibilityHandler,
     ModerationHandlerRegistry,
     ModerationIngestService,

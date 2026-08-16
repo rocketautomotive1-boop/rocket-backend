@@ -309,41 +309,4 @@ export class CategorySyncService {
     }
   }
 
-  // Método para salvar categoria descoberta com dimensões
-  async saveDiscoveredCategory(marketplaceId: string | number, category: any): Promise<MarketplaceCategoryDocument> {
-    this.logger.log(`Salvando categoria descoberta: ${category.id} - ${category.name}`);
-
-    const marketplace = await this.configCache.getById(String(marketplaceId));
-    if (!marketplace) {
-      throw new Error(`Marketplace ID ${marketplaceId} não encontrado`);
-    }
-
-    const existingCategory = await this.categoryQueryService.findCategoryByExternalId(marketplace.id, category.id);
-
-    const categoryData: any = {
-      externalId: category.id,
-      name: category.name,
-      parentId: category.parent_id || null,
-      path: category.path_from_root?.map((c: any) => c.name).join(' > ') || (typeof category.path_from_root === 'string' ? category.path_from_root : null),
-      level: category.path_from_root?.length ? category.path_from_root.length - 1 : 0,
-      isLeaf: !category.children_categories?.length,
-      attributes: category.settings || category.attributes || null,
-      marketplace,
-    };
-
-    // Upsert Dimensions if present
-    if (category.dimensions) {
-      categoryData.dimensions = category.dimensions;
-    }
-
-    let savedCategory;
-    if (existingCategory) {
-      await this.marketplaceCategoryModel.updateOne({ _id: existingCategory._id }, categoryData).exec();
-      savedCategory = await this.categoryQueryService.findCategoryById(existingCategory.id);
-    } else {
-      const newCategory = new this.marketplaceCategoryModel(categoryData);
-      savedCategory = await newCategory.save();
-    }
-    return savedCategory;
-  }
 }
