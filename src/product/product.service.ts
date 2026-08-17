@@ -825,12 +825,12 @@ export class ProductService {
 
       // Alimenta a base de aprendizado titleId -> categoria (ver
       // docs/superpowers/specs/2026-07-25-product-title-subtitle-design.md). Usa
-      // product.titleId (já reflete tanto um title novo nesta chamada quanto um
-      // titleId salvo anteriormente) — não exige mais que title e category cheguem
-      // juntos no mesmo payload, que é o caso raro; o normal é o app salvá-los em
-      // telas/momentos separados.
-      if (product.titleId && data.category) {
-        const newCategoryId = String(data.category.id || data.category);
+      // product.titleId e product.category (já refletem tanto um valor novo nesta
+      // chamada quanto um valor salvo anteriormente) — não exige que title e category
+      // cheguem juntos no mesmo payload; o normal é o app salvá-los em telas/momentos
+      // separados (ex: atribuir um title novo a um produto que já tinha categoria).
+      if (product.titleId && product.category && (newShortTitle || data.category)) {
+        const newCategoryId = String(product.category);
         this.titleCategoryHintService.recordHint(String(product.titleId), newCategoryId)
           .catch(e => this.logger.error(`Failed to record category hint: ${e.message}`));
 

@@ -84,9 +84,21 @@ describe('ProductService.update — title/subtitle + category hint', () => {
         expect(titleCategoryHintService.recordHint).toHaveBeenCalledWith(String(shortTitleDoc._id), categoryId);
     });
 
-    it('não chama recordHint quando falta category', async () => {
+    it('não chama recordHint quando falta category e o produto não tem categoria salva', async () => {
         await service.update(String(existingProduct._id), { title: 'Disco de Embreagem' });
         expect(titleCategoryHintService.recordHint).not.toHaveBeenCalled();
+    });
+
+    it('chama recordHint com a categoria JÁ salva no produto quando só title é enviado', async () => {
+        const existingCategoryId = new Types.ObjectId();
+        existingProduct.category = existingCategoryId;
+
+        await service.update(String(existingProduct._id), { title: 'Disco de Embreagem' });
+
+        expect(titleCategoryHintService.recordHint).toHaveBeenCalledWith(
+            String(shortTitleDoc._id),
+            String(existingCategoryId),
+        );
     });
 
     it('não chama recordHint quando falta title e o produto não tem titleId salvo', async () => {
