@@ -127,6 +127,55 @@ describe('TitleCategoryHintService', () => {
         });
     });
 
+    describe('listHints', () => {
+        it('retorna [] quando titleId é inválido', async () => {
+            const result = await service.listHints('not-an-object-id');
+            expect(result).toEqual([]);
+            expect(hintModel.find).not.toHaveBeenCalled();
+        });
+
+        it('retorna todos os hints do título, ordenados por count desc, com nome da categoria populado', async () => {
+            const titleId = new Types.ObjectId().toString();
+            const categoryIdA = new Types.ObjectId();
+            const categoryIdB = new Types.ObjectId();
+            const lastUsedAtA = new Date('2026-08-01');
+            const lastUsedAtB = new Date('2026-08-10');
+
+            hintModel.find.mockReturnValue({
+                sort: jest.fn().mockReturnThis(),
+                populate: jest.fn().mockReturnThis(),
+                lean: jest.fn().mockReturnThis(),
+                exec: jest.fn().mockResolvedValue([
+                    { categoryId: { _id: categoryIdA, name: 'Parafusos' }, count: 7, lastUsedAt: lastUsedAtA },
+                    { categoryId: { _id: categoryIdB, name: 'Porcas' }, count: 3, lastUsedAt: lastUsedAtB },
+                ]),
+            });
+
+            const result = await service.listHints(titleId);
+
+            expect(hintModel.find).toHaveBeenCalledWith({ titleId: new Types.ObjectId(titleId) });
+            expect(result).toEqual([
+                { categoryId: String(categoryIdA), categoryName: 'Parafusos', count: 7, lastUsedAt: lastUsedAtA },
+                { categoryId: String(categoryIdB), categoryName: 'Porcas', count: 3, lastUsedAt: lastUsedAtB },
+            ]);
+        });
+
+        it('ignora hints cuja categoria referenciada não existe mais', async () => {
+            const titleId = new Types.ObjectId().toString();
+            hintModel.find.mockReturnValue({
+                sort: jest.fn().mockReturnThis(),
+                populate: jest.fn().mockReturnThis(),
+                lean: jest.fn().mockReturnThis(),
+                exec: jest.fn().mockResolvedValue([
+                    { categoryId: null, count: 5, lastUsedAt: new Date() },
+                ]),
+            });
+
+            const result = await service.listHints(titleId);
+            expect(result).toEqual([]);
+        });
+    });
+
     describe('invalidateHint', () => {
         it('remove o hint específico titleId+categoryId', async () => {
             const titleId = new Types.ObjectId().toString();

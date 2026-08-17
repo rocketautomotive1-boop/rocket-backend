@@ -65,6 +65,35 @@ export class TitleCategoryHintService {
         };
     }
 
+    /**
+     * Lista todos os hints titleId->categoria (sem filtro de confiança/ambiguidade — ao
+     * contrário de suggestCategory, aqui é para revisão humana na tela admin de Short Titles).
+     */
+    async listHints(
+        titleId: string,
+    ): Promise<Array<{ categoryId: string; categoryName: string; count: number; lastUsedAt: Date }>> {
+        if (!Types.ObjectId.isValid(titleId)) return [];
+
+        const hints = await this.titleCategoryHintModel
+            .find({ titleId: new Types.ObjectId(titleId) })
+            .sort({ count: -1 })
+            .populate('categoryId', 'name')
+            .lean()
+            .exec();
+
+        return hints
+            .filter((hint) => hint.categoryId)
+            .map((hint) => {
+                const category = hint.categoryId as unknown as { _id: Types.ObjectId; name: string };
+                return {
+                    categoryId: String(category._id),
+                    categoryName: category.name,
+                    count: hint.count,
+                    lastUsedAt: hint.lastUsedAt,
+                };
+            });
+    }
+
     /** Remove um hint específico — usado quando o ML rejeita a categoria (moderation WRONG_CATEGORY),
      * pra não reforçar um par titleId->categoria já comprovado errado. */
     async invalidateHint(titleId: string, categoryId: string): Promise<void> {

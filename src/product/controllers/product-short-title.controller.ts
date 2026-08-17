@@ -1,13 +1,17 @@
 import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ProductShortTitleService } from '../services/product-short-title.service';
+import { TitleCategoryHintService } from '../services/title-category-hint.service';
 
 // Admin curation surface (rocket-admin "Títulos curtos") — mesmo padrão sem guard
 // dos demais controllers admin deste módulo (ver CrossReferenceConflictsController).
 @ApiTags('Product Short Titles')
 @Controller('product-short-titles')
 export class ProductShortTitleController {
-    constructor(private readonly shortTitleService: ProductShortTitleService) { }
+    constructor(
+        private readonly shortTitleService: ProductShortTitleService,
+        private readonly titleCategoryHintService: TitleCategoryHintService,
+    ) { }
 
     @Get('autocomplete')
     @ApiOperation({ summary: 'Busca títulos curtos por texto ou sinônimo, ordenado por popularidade' })
@@ -32,5 +36,18 @@ export class ProductShortTitleController {
     @ApiOperation({ summary: 'Mescla este título (origem) em outro (destino): move produtos, soma usageCount, herda o texto como sinônimo, apaga a origem' })
     async merge(@Param('id') id: string, @Body('targetId') targetId: string) {
         return this.shortTitleService.merge(id, targetId);
+    }
+
+    @Get(':id/category-hints')
+    @ApiOperation({ summary: 'Lista as categorias aprendidas (title_category_hints) para este título, ordenadas por uso' })
+    async listCategoryHints(@Param('id') id: string) {
+        return this.titleCategoryHintService.listHints(id);
+    }
+
+    @Delete(':id/category-hints/:categoryId')
+    @ApiOperation({ summary: 'Remove um vínculo titleId->categoria aprendido incorretamente' })
+    async removeCategoryHint(@Param('id') id: string, @Param('categoryId') categoryId: string) {
+        await this.titleCategoryHintService.invalidateHint(id, categoryId);
+        return { success: true };
     }
 }
