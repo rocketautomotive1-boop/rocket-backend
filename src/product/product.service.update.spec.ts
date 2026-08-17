@@ -9,7 +9,7 @@ import { ProductService } from './product.service';
 describe('ProductService.update — title/subtitle + category hint', () => {
     let service: ProductService;
     let productRepository: { save: jest.Mock; findOne: jest.Mock; findOneRaw: jest.Mock; findByIdClean: jest.Mock };
-    let titleCategoryHintService: { recordHint: jest.Mock };
+    let titleCategoryHintService: { recordHint: jest.Mock; invalidateHint: jest.Mock };
     let productShortTitleService: { createOrGet: jest.Mock };
     let productCategoryService: { updateProductCounts: jest.Mock };
     let existingProduct: any;
@@ -34,7 +34,10 @@ describe('ProductService.update — title/subtitle + category hint', () => {
             save: jest.fn().mockImplementation(async (doc) => doc),
             findByIdClean: jest.fn().mockResolvedValue({ id: String(existingProduct._id) }),
         };
-        titleCategoryHintService = { recordHint: jest.fn().mockResolvedValue(undefined) };
+        titleCategoryHintService = {
+            recordHint: jest.fn().mockResolvedValue(undefined),
+            invalidateHint: jest.fn().mockResolvedValue(undefined),
+        };
         productShortTitleService = {
             createOrGet: jest.fn().mockImplementation((text: string) =>
                 Promise.resolve({ ...shortTitleDoc, text, synonyms: [] }),
@@ -86,11 +89,58 @@ describe('ProductService.update — title/subtitle + category hint', () => {
         expect(titleCategoryHintService.recordHint).not.toHaveBeenCalled();
     });
 
-    it('não chama recordHint quando falta title', async () => {
+    it('não chama recordHint quando falta title e o produto não tem titleId salvo', async () => {
         const categoryId = new Types.ObjectId().toString();
         await service.update(String(existingProduct._id), { category: categoryId });
         expect(titleCategoryHintService.recordHint).not.toHaveBeenCalled();
         expect(productShortTitleService.createOrGet).not.toHaveBeenCalled();
+    });
+
+    it('chama recordHint com o titleId JÁ salvo no produto quando só category é enviado', async () => {
+        const existingTitleId = new Types.ObjectId();
+        existingProduct.titleId = existingTitleId;
+        const categoryId = new Types.ObjectId().toString();
+
+        await service.update(String(existingProduct._id), { category: categoryId });
+
+        expect(productShortTitleService.createOrGet).not.toHaveBeenCalled();
+        expect(titleCategoryHintService.recordHint).toHaveBeenCalledWith(String(existingTitleId), categoryId);
+    });
+
+    it('invalida o hint da categoria anterior ao trocar a categoria de um produto com titleId', async () => {
+        const existingTitleId = new Types.ObjectId();
+        const oldCategoryId = new Types.ObjectId();
+        existingProduct.titleId = existingTitleId;
+        existingProduct.category = oldCategoryId;
+        const newCategoryId = new Types.ObjectId().toString();
+
+        await service.update(String(existingProduct._id), { category: newCategoryId });
+
+        expect(titleCategoryHintService.invalidateHint).toHaveBeenCalledWith(String(existingTitleId), String(oldCategoryId));
+        expect(titleCategoryHintService.recordHint).toHaveBeenCalledWith(String(existingTitleId), newCategoryId);
+    });
+
+    it('não invalida hint quando a categoria enviada é a mesma que o produto já tinha', async () => {
+        const existingTitleId = new Types.ObjectId();
+        const sameCategoryId = new Types.ObjectId();
+        existingProduct.titleId = existingTitleId;
+        existingProduct.category = sameCategoryId;
+
+        await service.update(String(existingProduct._id), { category: String(sameCategoryId) });
+
+        expect(titleCategoryHintService.invalidateHint).not.toHaveBeenCalled();
+    });
+
+    it('não invalida hint quando o produto não tinha categoria anterior', async () => {
+        const existingTitleId = new Types.ObjectId();
+        existingProduct.titleId = existingTitleId;
+        existingProduct.category = undefined;
+        const newCategoryId = new Types.ObjectId().toString();
+
+        await service.update(String(existingProduct._id), { category: newCategoryId });
+
+        expect(titleCategoryHintService.invalidateHint).not.toHaveBeenCalled();
+        expect(titleCategoryHintService.recordHint).toHaveBeenCalledWith(String(existingTitleId), newCategoryId);
     });
 
     it('persiste titleId/titleText/titleSynonyms no documento do produto', async () => {

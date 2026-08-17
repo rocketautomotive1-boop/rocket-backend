@@ -772,6 +772,7 @@ export class ProductService {
         };
       }
 
+      const oldCategoryId = product.category ? String(product.category) : null;
       if (data.category) {
         product.category = new Types.ObjectId(data.category.id || data.category);
       }
@@ -823,11 +824,22 @@ export class ProductService {
       }
 
       // Alimenta a base de aprendizado titleId -> categoria (ver
-      // docs/superpowers/specs/2026-07-25-product-title-subtitle-design.md)
-      if (newShortTitle && data.category) {
-        const categoryId = data.category.id || data.category;
-        this.titleCategoryHintService.recordHint(String(newShortTitle._id), String(categoryId))
+      // docs/superpowers/specs/2026-07-25-product-title-subtitle-design.md). Usa
+      // product.titleId (já reflete tanto um title novo nesta chamada quanto um
+      // titleId salvo anteriormente) — não exige mais que title e category cheguem
+      // juntos no mesmo payload, que é o caso raro; o normal é o app salvá-los em
+      // telas/momentos separados.
+      if (product.titleId && data.category) {
+        const newCategoryId = String(data.category.id || data.category);
+        this.titleCategoryHintService.recordHint(String(product.titleId), newCategoryId)
           .catch(e => this.logger.error(`Failed to record category hint: ${e.message}`));
+
+        // Categoria trocada (não só confirmada de novo) — invalida o hint antigo pra
+        // não continuar sugerindo uma categoria que o usuário acabou de corrigir.
+        if (oldCategoryId && oldCategoryId !== newCategoryId) {
+          this.titleCategoryHintService.invalidateHint(String(product.titleId), oldCategoryId)
+            .catch(e => this.logger.error(`Failed to invalidate old category hint: ${e.message}`));
+        }
       }
 
       const clean = await this.productRepository.findByIdClean(updatedProduct.id);
