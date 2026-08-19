@@ -4,8 +4,11 @@ import { Model, Types } from 'mongoose';
 import { ProductShortTitleModel, ProductShortTitleDocument } from '../schemas/product-short-title.schema';
 import { ProductModel, ProductDocument } from '../schemas/product.schema';
 
+// NFC antes do trim/lowercase — acentos digitados/colados em forma decomposta (NFD, comum
+// em macOS/alguns teclados) senão comparam diferente de "í" pré-composto, criando um
+// ProductShortTitle duplicado silenciosamente (ver incidente 2026-08-19).
 function normalize(text: string): string {
-    return text.trim().toLowerCase();
+    return text.normalize('NFC').trim().toLowerCase();
 }
 
 /**

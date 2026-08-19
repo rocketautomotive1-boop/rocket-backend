@@ -829,12 +829,9 @@ export class ProductService {
       // chamada quanto um valor salvo anteriormente) — não exige que title e category
       // cheguem juntos no mesmo payload; o normal é o app salvá-los em telas/momentos
       // separados (ex: atribuir um title novo a um produto que já tinha categoria).
-      this.logger.warn(`[DEBUG category-hint] product=${id} titleId=${product.titleId} category=${product.category} newShortTitle=${!!newShortTitle} data.category=${!!data.category} data.title=${JSON.stringify(data.title)}`);
       if (product.titleId && product.category && (newShortTitle || data.category)) {
         const newCategoryId = String(product.category);
-        this.logger.warn(`[DEBUG category-hint] recordHint firing titleId=${product.titleId} categoryId=${newCategoryId}`);
         this.titleCategoryHintService.recordHint(String(product.titleId), newCategoryId)
-          .then(() => this.logger.warn(`[DEBUG category-hint] recordHint SUCCESS`))
           .catch(e => this.logger.error(`Failed to record category hint: ${e.message}`));
 
         // Categoria trocada (não só confirmada de novo) — invalida o hint antigo pra
