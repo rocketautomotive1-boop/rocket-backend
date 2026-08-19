@@ -121,6 +121,8 @@ import { SourceRefreshResponseConsumer } from './consumers/source-refresh-respon
 import { ProductReadinessService } from './services/product-readiness.service';
 import { PublicationTriggerListener } from './listeners/publication-trigger.listener';
 import { ContentResyncListener } from './listeners/content-resync.listener';
+import { ShortTitleDiscoveryService } from './services/short-title-discovery.service';
+import { ShortTitleDiscoveryListener } from './listeners/short-title-discovery.listener';
 import { ReadinessRecoveryJob } from './jobs/readiness-recovery.job';
 import { CategorySnapshotService } from './services/category-snapshot.service';
 
@@ -254,6 +256,8 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
     ProductReadinessService,
     PublicationTriggerListener,
     ContentResyncListener,
+    ShortTitleDiscoveryService,
+    ShortTitleDiscoveryListener,
     ReadinessRecoveryJob,
     CategorySnapshotService,
     // Hexagonal port implementations consumed by OrderModule

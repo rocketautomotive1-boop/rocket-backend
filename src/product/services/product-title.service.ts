@@ -154,12 +154,21 @@ export class ProductTitleService {
       synchronized: true
     });
 
+    try {
+      this.eventEmitter.emit(PRODUCT_SECTION_EVENTS.TITLES_SAVED, new ProductTitlesSavedEvent(pId));
+    } catch {}
+
     return { ...this.toDto(newListing), product: { id: pId } };
   }
 
   async update(id: number | string, titleData: Partial<ProductTitle>): Promise<any> {
     const listing = await this.listingService.update(String(id), titleData as any);
     if (!listing) throw new NotFoundException(`Title ${id} not found`);
+
+    try {
+      this.eventEmitter.emit(PRODUCT_SECTION_EVENTS.TITLES_SAVED, new ProductTitlesSavedEvent(listing.productId.toString()));
+    } catch {}
+
     return { ...this.toDto(listing), product: { id: listing.productId.toString() } };
   }
 

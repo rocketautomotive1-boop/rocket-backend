@@ -1,0 +1,16 @@
+{
+  "name": "short_title_search",
+  "mappings": {
+    "dynamic": false,
+    "fields": {
+      "text": {
+        "type": "string",
+        "analyzer": "lucene.standard"
+      },
+      "synonyms": {
+        "type": "string",
+        "analyzer": "lucene.standard"
+      }
+    }
+  }
+}
