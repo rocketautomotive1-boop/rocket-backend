@@ -101,6 +101,21 @@ describe('ProductService.update — title/subtitle + category hint', () => {
         );
     });
 
+    it('chama recordHint com o _id extraído quando product.category vem populado (ProductRepository.findOne)', async () => {
+        // findDocument() usa ProductRepository.findOne, que faz .populate('category') — product.category
+        // chega como o documento inteiro (não um ObjectId bruto). String() nesse objeto vira
+        // "[object Object]", que falha Types.ObjectId.isValid() e silenciosamente não grava o hint.
+        const existingCategoryId = new Types.ObjectId();
+        existingProduct.category = { _id: existingCategoryId, name: 'Categoria Populada', hidden: false };
+
+        await service.update(String(existingProduct._id), { title: 'Disco de Embreagem' });
+
+        expect(titleCategoryHintService.recordHint).toHaveBeenCalledWith(
+            String(shortTitleDoc._id),
+            String(existingCategoryId),
+        );
+    });
+
     it('não chama recordHint quando falta title e o produto não tem titleId salvo', async () => {
         const categoryId = new Types.ObjectId().toString();
         await service.update(String(existingProduct._id), { category: categoryId });
