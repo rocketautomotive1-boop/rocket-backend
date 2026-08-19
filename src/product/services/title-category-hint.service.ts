@@ -20,13 +20,17 @@ export class TitleCategoryHintService {
     ) { }
 
     async recordHint(titleId: string, categoryId: string): Promise<void> {
-        if (!Types.ObjectId.isValid(titleId) || !Types.ObjectId.isValid(categoryId)) return;
+        if (!Types.ObjectId.isValid(titleId) || !Types.ObjectId.isValid(categoryId)) {
+            console.warn(`[DEBUG3] recordHint EARLY RETURN invalid ids titleId=${titleId} categoryId=${categoryId}`);
+            return;
+        }
 
-        await this.titleCategoryHintModel.findOneAndUpdate(
+        const result = await this.titleCategoryHintModel.findOneAndUpdate(
             { titleId: new Types.ObjectId(titleId), categoryId: new Types.ObjectId(categoryId) },
             { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
             { upsert: true, new: true },
         );
+        console.warn(`[DEBUG3] recordHint result=${JSON.stringify(result)}`);
     }
 
     /**
