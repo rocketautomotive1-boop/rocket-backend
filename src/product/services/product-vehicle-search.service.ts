@@ -166,10 +166,11 @@ export class ProductVehicleSearchService {
     const compoundCodeKeys = await this.resolveCompoundBrandCodeMatches(words);
     const compoundCodeKeySet = new Set(compoundCodeKeys);
 
-    const [linkedResults, universalProductIds, textMatchIds, vehicleProductIds] = await Promise.all([
+    const [linkedResults, universalProductIds, textMatchIds, barcodeMatchIds, vehicleProductIds] = await Promise.all([
       this.atlasSearchProductIds(q.trim()),
       this.matchUniversalProductsByName(q.trim()),
       this.productTextSearchIds(q.trim(), compoundCodeKeys),
+      this.matchByBarcode(q.trim()),
       options.vehicleId ? this.resolveProductIdsForVehicles([options.vehicleId]) : Promise.resolve(null),
     ]);
 
@@ -184,17 +185,17 @@ export class ProductVehicleSearchService {
 
     if (vehicleProductIds) {
       const restrictedLinkedIds = linkedResults.map((r) => r.id).filter((id) => vehicleProductIds.includes(id));
-      candidateIds = [...new Set([...restrictedLinkedIds, ...universalProductIds])]
+      candidateIds = [...new Set([...restrictedLinkedIds, ...universalProductIds, ...barcodeMatchIds])]
         .filter((id) => Types.ObjectId.isValid(id))
         .map((id) => new Types.ObjectId(id));
     } else {
-      // Sem veículo ativo, os três canais competem por relevância — mas via
+      // Sem veículo ativo, os canais competem por relevância — mas via
       // ProductSearchRankingService (design doc 2026-07-24-product-search-ranking-pipeline-design.md),
       // não score de Lucene. Precisa dos docs completos (ownText/applicationTexts por produto)
       // ANTES de rankear, então a ordem inverte em relação ao fluxo anterior: junta os IDs
       // brutos primeiro, busca os docs, monta os candidatos com texto real, só então rankeia.
       const rawIds = [
-        ...new Set([...linkedResults.map((r) => r.id), ...textMatchIds, ...universalProductIds]),
+        ...new Set([...linkedResults.map((r) => r.id), ...textMatchIds, ...universalProductIds, ...barcodeMatchIds]),
       ].filter((id) => Types.ObjectId.isValid(id));
 
       if (rawIds.length === 0) {
@@ -942,6 +943,25 @@ export class ProductVehicleSearchService {
     const regex = new RegExp(q.split(/\s+/).filter(Boolean).join('|'), 'i');
     const rows = await this.productModel
       .find({ isUniversalFit: true, name: regex })
+      .select('_id')
+      .lean()
+      .exec();
+    return rows.map((r: any) => String(r._id));
+  }
+
+  /**
+   * Match exato por código de barras — canal simples fora do índice Atlas Search
+   * (que mapeia só titleText/titleSynonyms/subtitle/partNumber; estender o mapeamento
+   * do índice em produção é mudança de infra separada). Mesmo padrão de
+   * matchUniversalProductsByName: canal de retrieval independente, mesclado com os
+   * demais IDs em computeSearchByText. Só match exato (barcode é código, não texto
+   * livre — fuzzy geraria falsos positivos entre códigos numéricos próximos).
+   */
+  private async matchByBarcode(q: string): Promise<string[]> {
+    const trimmed = q.trim();
+    if (!trimmed) return [];
+    const rows = await this.productModel
+      .find({ barcode: trimmed })
       .select('_id')
       .lean()
       .exec();

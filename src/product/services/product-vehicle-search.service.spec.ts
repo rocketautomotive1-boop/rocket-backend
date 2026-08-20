@@ -88,6 +88,7 @@ describe('ProductVehicleSearchService — facets e filtros de busca por compatib
     jest.spyOn(service as any, 'atlasSearchProductIds').mockResolvedValue([]);
     jest.spyOn(service as any, 'matchUniversalProductsByName').mockResolvedValue([]);
     jest.spyOn(service as any, 'productTextSearchIds').mockResolvedValue([]);
+    jest.spyOn(service as any, 'matchByBarcode').mockResolvedValue([]);
 
     return products;
   }
@@ -175,6 +176,7 @@ describe('ProductVehicleSearchService — facets e filtros de busca por compatib
     jest.spyOn(service as any, 'atlasSearchProductIds').mockResolvedValue([]);
     jest.spyOn(service as any, 'matchUniversalProductsByName').mockResolvedValue([]);
     jest.spyOn(service as any, 'productTextSearchIds').mockResolvedValue([]);
+    jest.spyOn(service as any, 'matchByBarcode').mockResolvedValue([]);
 
     const result = await service.searchByText('nada encontrado');
     expect(result.data).toEqual([]);
@@ -285,6 +287,26 @@ describe('ProductVehicleSearchService — facets e filtros de busca por compatib
         String(products[1]._id),
         String(products[0]._id),
       ]);
+    });
+  });
+
+  describe('canal de código de barras (matchByBarcode)', () => {
+    it('acha produto por barcode exato mesmo sem match em nenhum outro canal', async () => {
+      const products = await seed();
+      await productModel.updateOne({ _id: products[2]._id }, { $set: { barcode: '7891234567890' } });
+      jest.spyOn(service as any, 'matchByBarcode').mockRestore();
+
+      const result = await service.searchByText('7891234567890');
+      expect(result.data.map((p: any) => String(p._id))).toEqual([String(products[2]._id)]);
+    });
+
+    it('não faz match parcial — barcode diferente não retorna nada', async () => {
+      const products = await seed();
+      await productModel.updateOne({ _id: products[2]._id }, { $set: { barcode: '7891234567890' } });
+      jest.spyOn(service as any, 'matchByBarcode').mockRestore();
+
+      const result = await service.searchByText('789123456');
+      expect(result.data).toEqual([]);
     });
   });
 
