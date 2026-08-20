@@ -236,7 +236,11 @@ export class FiscalService {
                 if (product) {
                     item.ncm = product.ncm?.code || item.ncm;
                     item.title = product.name || item.title;
-                    item.cfop = product.cfop || '5102';
+                    // Sem fallback fixo aqui: CFOP depende de a operação ser interna/interestadual
+                    // (calculado só em XmlBuilderService, que tem o endereço do destinatário).
+                    // '5102' fixo nesse ponto sobrescrevia o cálculo correto — item sempre saía
+                    // como venda interna mesmo em operação interestadual, rejeitado pela SEFAZ.
+                    item.cfop = product.cfop || item.cfop;
                     item.cest = product.cest || item.cest;
                     item.origin = product.origin || '0';
                     item.uCom = product.unit?.code || 'UN';
