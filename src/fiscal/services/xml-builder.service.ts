@@ -129,8 +129,10 @@ export class XmlBuilderService {
             // Contribuinte. Destinatário PJ com IE informada é contribuinte — declarar como
             // "9" nesse caso causa rejeição SEFAZ 232 "IE do destinatário não informada"
             // (a SEFAZ cruza o CNPJ com o cadastro estadual e espera a IE quando ela existe).
+            // ORDEM IMPORTA: o schema XSD da NFe (TDest, xsd:sequence) exige indIEDest
+            // ANTES de IE — invertido, o schema é violado mesmo com os dois campos corretos.
             ...(orderData.buyer.ie
-              ? { IE: orderData.buyer.ie.replace(/\D/g, ''), indIEDest: '1' }
+              ? { indIEDest: '1', IE: orderData.buyer.ie.replace(/\D/g, '') }
               : { indIEDest: '9' }),
           },
           det: orderData.items.map((item: any, index: number) => {

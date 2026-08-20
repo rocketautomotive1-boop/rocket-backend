@@ -81,6 +81,9 @@ describe('XmlBuilderService — indIEDest / IE do destinatário', () => {
 
         expect(xml).toContain('<IE>0580097323</IE>');
         expect(xml).toContain('<indIEDest>1</indIEDest>');
+        // Schema XSD (TDest, xsd:sequence) exige indIEDest ANTES de IE — invertido, a SEFAZ
+        // rejeita o lote por violação de schema mesmo com os dois campos presentes/corretos.
+        expect(xml.indexOf('<indIEDest>')).toBeLessThan(xml.indexOf('<IE>0580097323</IE>'));
     });
 
     it('indIEDest=9 sem <IE> quando o destinatário não informa IE (não contribuinte)', async () => {
