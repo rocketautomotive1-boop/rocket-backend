@@ -98,3 +98,23 @@ describe('MarketplaceOrderGatewayProvider.listOrdersSince', () => {
     expect(getOrders).not.toHaveBeenCalled();
   });
 });
+
+describe('MarketplaceOrderGatewayProvider.fetchOrder', () => {
+  const MKT = '650000000000000000000099';
+
+  it('propaga mkt.tag (tag técnica) além de mkt.name (nome de exibição) — resolução fiscal depende da tag', async () => {
+    const getOrderDetails = jest.fn().mockResolvedValue({ id: 'O1', status: 'paid', total_amount: 10 });
+    const adapter = { getOrderDetails };
+    const registry = { findOne: jest.fn().mockResolvedValue({ _id: MKT, name: 'Mercado Livre', tag: 'mercadolivre' }) };
+    const adapters = {
+      hasOrderAdapter: jest.fn().mockReturnValue(true),
+      getOrderAdapter: jest.fn().mockReturnValue(adapter),
+    };
+    const provider = new MarketplaceOrderGatewayProvider(registry as any, adapters as any);
+
+    const result = await provider.fetchOrder('O1', MKT);
+
+    expect(result?.marketplaceName).toBe('Mercado Livre');
+    expect(result?.marketplaceTag).toBe('mercadolivre');
+  });
+});

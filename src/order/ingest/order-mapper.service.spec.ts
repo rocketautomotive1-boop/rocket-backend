@@ -42,4 +42,33 @@ describe('OrderMapperService', () => {
 
     expect(domain.marketplaceCreatedAt).toBeUndefined();
   });
+
+  it('prefers marketplaceTag (technical tag) over marketplaceName (display name) — resolução fiscal depende da tag', async () => {
+    const externalOrder = {
+      id: 'EXT-3',
+      status: 'paid',
+      total_amount: 10,
+      items: [],
+      marketplaceName: 'Mercado Livre',
+      marketplaceTag: 'mercadolivre',
+    };
+
+    const domain = await mapper.mapToDomain(externalOrder, marketplaceId);
+
+    expect(domain.marketplaceTag).toBe('mercadolivre');
+  });
+
+  it('falls back to marketplaceName when marketplaceTag is absent (adapter ainda não migrado)', async () => {
+    const externalOrder = {
+      id: 'EXT-4',
+      status: 'paid',
+      total_amount: 10,
+      items: [],
+      marketplaceName: 'Mercado Livre',
+    };
+
+    const domain = await mapper.mapToDomain(externalOrder, marketplaceId);
+
+    expect(domain.marketplaceTag).toBe('Mercado Livre');
+  });
 });

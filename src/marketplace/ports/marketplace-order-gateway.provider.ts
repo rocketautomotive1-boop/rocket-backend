@@ -33,6 +33,7 @@ export class MarketplaceOrderGatewayProvider implements MarketplaceOrderGateway 
       ...(detail as any),
       marketplaceId: String(mkt._id),
       marketplaceName: mkt.name,
+      marketplaceTag: mkt.tag,
     } as ExternalOrder;
   }
 

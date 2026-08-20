@@ -124,10 +124,13 @@ export class OrderMapperService {
                 : undefined,
             // ML-specific: pack_id is needed for fiscal document upload
             packId: externalOrder.pack_id ? String(externalOrder.pack_id) : undefined,
-            marketplaceTag: externalOrder.marketplaceName || undefined,
+            // Tag técnica (ex: 'mercadolivre'), não o nome de exibição — é a chave usada
+            // pela resolução fiscal (Store.marketplaceAccounts/fiscalChannels). Fallback pro
+            // name só para adapters que ainda não populam marketplaceTag no ExternalOrder.
+            marketplaceTag: externalOrder.marketplaceTag || externalOrder.marketplaceName || undefined,
             // Informativo (analytics/notificação) — venda balcão é a única origem hoje que
             // não vem de webhook/reconcile de marketplace externo.
-            originChannel: externalOrder.marketplaceName === 'Rocket' ? 'balcao' : undefined,
+            originChannel: externalOrder.marketplaceTag === 'rocket' ? 'balcao' : undefined,
             customer: {
                 name: buyer.name || `${buyer.first_name || ''} ${buyer.last_name || ''}`.trim() || buyer.nickname || '',
                 document: buyer.document || buyer.billing_info?.doc_number || '',

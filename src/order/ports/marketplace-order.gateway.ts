@@ -5,6 +5,10 @@ export interface ExternalOrder {
   id: string;
   marketplaceId: string;
   marketplaceName?: string;
+  /** Tag técnica do marketplace (ex: 'mercadolivre', 'rocket') — chave usada pela
+   * resolução fiscal (Store.marketplaceAccounts/fiscalChannels), distinta de
+   * marketplaceName (nome de exibição, ex: 'Mercado Livre'). */
+  marketplaceTag?: string;
   status: string;
   date_created: string;
   date_last_updated?: string;
