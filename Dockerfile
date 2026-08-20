@@ -24,6 +24,15 @@ FROM node:22-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
+# Chromium do Debian (apt já resolve as libs de sistema — libnss3, libatk, libgtk etc —
+# que node:22-slim não tem; o download interno do Puppeteer falha silenciosamente sem
+# elas). PUPPETEER_SKIP_DOWNLOAD evita baixar de novo via npm; FiscalDanfeService (DANFE
+# em PDF) aponta pro binário via PUPPETEER_EXECUTABLE_PATH.
+RUN apt-get update && apt-get install -y --no-install-recommends chromium \
+    && rm -rf /var/lib/apt/lists/*
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
 COPY package*.json ./
 RUN npm ci --omit=dev --legacy-peer-deps && npm cache clean --force
 

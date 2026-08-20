@@ -108,7 +108,13 @@ export class FiscalDanfeService {
         barcodeDataUri: string | null,
     ): Promise<Buffer> {
         const html = this.buildDanfeHtml(event, nfe, qrCodeDataUri, barcodeDataUri);
-        const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
+        // Chromium do apt (Dockerfile) via PUPPETEER_EXECUTABLE_PATH — imagem node:22-slim
+        // não tem as libs de sistema que o download interno do puppeteer precisaria.
+        const browser = await puppeteer.launch({
+            headless: true,
+            args: ['--no-sandbox'],
+            ...(process.env.PUPPETEER_EXECUTABLE_PATH ? { executablePath: process.env.PUPPETEER_EXECUTABLE_PATH } : {}),
+        });
         try {
             const page = await browser.newPage();
             await page.setContent(html, { waitUntil: 'networkidle0' });
