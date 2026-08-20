@@ -31,6 +31,8 @@ import { NotificationsController } from './read/notifications.controller';
 import { DeviceTokenService } from './device/device-token.service';
 import { DeviceController } from './device/device.controller';
 import { OrderNotificationTranslator } from './ingest/order-notification.translator';
+import { FiscalNotificationTranslator } from './ingest/fiscal-notification.translator';
+import { FiscalCustomerEmailService } from './ingest/fiscal-customer-email.service';
 
 // WhatsApp transport (port-only consumer — no Baileys/queue knowledge here)
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
@@ -72,6 +74,7 @@ import { MarketplaceAuthModule } from '../marketplace/auth/marketplace-auth.modu
     DeliveryStatusService, DeliveryRetryWorker,
     // Gateway / read / device / ingest
     NotificationsGateway, NotificationReadService, DeviceTokenService, OrderNotificationTranslator,
+    FiscalNotificationTranslator, FiscalCustomerEmailService,
     EmailService,
     // Bot (broker side)
     WhatsAppCommandRouter, WhatsAppCommandDispatcher, WhatsAppCommandSession, WhatsAppCommandListener,

@@ -1,25 +1,22 @@
-import { Controller, Get, Param, Query, ParseIntPipe, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
-import { PickingService } from './services/picking.service';
 import { FreightService } from './freight/freight.service';
 import { CreateQuoteDto } from './freight/dto/create-quote.dto';
 
+/**
+ * Picking (lista de separação) vive em order/fulfillment/ (OrderFulfillmentService),
+ * consumido via GET /orders/:id/separation — única fonte de verdade, lê o pedido já
+ * normalizado internamente. O antigo GET /logistics/picking/:orderId (PickingService)
+ * foi removido: reimplementava a mesma lista buscando dados ao vivo no marketplace
+ * externo, sem uso no frontend. Ver
+ * docs/superpowers/specs/2026-08-19-fiscal-issuance-async-postemission-design.md.
+ */
 @ApiTags('Logistics')
 @Controller('logistics')
 export class LogisticsController {
     constructor(
-        private readonly pickingService: PickingService,
         private readonly freightService: FreightService,
     ) { }
-
-    @Get('picking/:orderId')
-    @ApiOperation({ summary: 'Get picking list (separation) for an order' })
-    async getPickingList(
-        @Param('orderId') orderId: string,
-        @Query('marketplaceId') marketplaceId: string
-    ) {
-        return await this.pickingService.getPickingList(orderId, marketplaceId);
-    }
 
     @Post('quote')
     @ApiOperation({ summary: 'Get freight quotes from all available providers' })

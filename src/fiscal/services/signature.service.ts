@@ -40,6 +40,27 @@ export class SignatureService {
         return { cert, key };
     }
 
+    /**
+     * Extrai CNPJ/razão social/validade do certificado e-CNPJ ICP-Brasil.
+     * O Subject.CN de um e-CNPJ segue o formato "RAZÃO SOCIAL:CNPJ" — padrão
+     * ICP-Brasil, não específico deste projeto. Não extrai IE/endereço/regime
+     * tributário (o certificado não carrega esses dados) — ver CccLookupService
+     * e SefazCadConsultaCadastroAdapter para completar via consulta SEFAZ.
+     */
+    public extractCertificateData(pfxBase64: string, password?: string): { cnpj: string; companyName: string; validUntil: Date } {
+        const { cert } = this.getCertAndKey(pfxBase64, password);
+        const forgeCert = forge.pki.certificateFromPem(cert);
+        const cn = forgeCert.subject.getField('CN')?.value || '';
+        const lastColon = cn.lastIndexOf(':');
+        const companyName = (lastColon >= 0 ? cn.substring(0, lastColon) : cn).trim();
+        const cnpjRaw = lastColon >= 0 ? cn.substring(lastColon + 1) : '';
+        return {
+            cnpj: cnpjRaw.replace(/\D/g, ''),
+            companyName,
+            validUntil: forgeCert.validity.notAfter,
+        };
+    }
+
     /** Sign a cancellation/event XML — Signature inserted inside <evento> after <infEvento> */
     async signEventXml(xml: string, pfxBase64: string, password?: string): Promise<string> {
         this.logger.log('Signing event XML (infEvento)...');

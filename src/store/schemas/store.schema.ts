@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import { HydratedDocument, Types } from 'mongoose';
 
 export type StoreDocument = HydratedDocument<StoreModel>;
 
@@ -14,6 +14,38 @@ export class MarketplaceAccountEntry {
 }
 
 const MarketplaceAccountEntrySchema = SchemaFactory.createForClass(MarketplaceAccountEntry);
+
+/**
+ * Configuração fiscal por canal de venda (marketplaceTag+accountId) desta
+ * loja: qual série NFe usar, o contador atômico dessa série e o sellerId
+ * reportado no XML (infIntermed.idCadIntTran). Série deve ser única dentro
+ * da mesma LegalEntity — validado em StoreService.setFiscalChannel, não é
+ * indexável em array pelo MongoDB.
+ */
+@Schema({ _id: false })
+export class FiscalChannel {
+  @Prop({ required: true })
+  marketplaceTag: string;
+
+  @Prop({ required: true })
+  accountId: string;
+
+  @Prop({ required: true })
+  series: number;
+
+  /** Último número reservado. Próximo número = counter (após $inc atômico). */
+  @Prop({ default: 0 })
+  counter: number;
+
+  @Prop()
+  reservedAt?: Date;
+
+  /** idCadIntTran — ID do vendedor cadastrado no marketplace, para infIntermed. */
+  @Prop()
+  marketplaceSellerId?: string;
+}
+
+const FiscalChannelSchema = SchemaFactory.createForClass(FiscalChannel);
 
 /**
  * Loja — agregado raiz da publicação. Dona de N contas de publicação POR
@@ -32,6 +64,13 @@ export class StoreModel {
 
   @Prop({ type: [MarketplaceAccountEntrySchema], default: [] })
   marketplaceAccounts: MarketplaceAccountEntry[];
+
+  /** Entidade legal (CNPJ) que emite as NFes das vendas desta loja. */
+  @Prop({ type: Types.ObjectId, ref: 'LegalEntityModel', default: null })
+  legalEntityId: Types.ObjectId | null;
+
+  @Prop({ type: [FiscalChannelSchema], default: [] })
+  fiscalChannels: FiscalChannel[];
 }
 
 export const StoreSchema = SchemaFactory.createForClass(StoreModel);

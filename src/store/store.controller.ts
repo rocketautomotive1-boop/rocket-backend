@@ -9,6 +9,15 @@ interface CreateStoreBody {
   name: string;
 }
 
+interface SetFiscalChannelBody {
+  series: number;
+  marketplaceSellerId?: string;
+}
+
+interface SetLegalEntityBody {
+  legalEntityId: string;
+}
+
 /**
  * CRUD de lojas — painel de administração (admin/). Admin-only: decide o
  * roteamento de publicação por loja. Uma loja pode ter N contas do mesmo
@@ -95,6 +104,28 @@ export class StoreController {
     @Param('accountId') accountId: string,
   ) {
     await this.storeService.removeMarketplaceAccount(storeId, marketplaceTag, accountId);
+    return { updated: true };
+  }
+
+  @Put(':storeId/legal-entity')
+  async setLegalEntity(@Param('storeId') storeId: string, @Body() body: SetLegalEntityBody) {
+    if (!body?.legalEntityId?.trim()) throw new BadRequestException('legalEntityId é obrigatório.');
+    await this.storeService.setLegalEntity(storeId, body.legalEntityId.trim());
+    return { updated: true };
+  }
+
+  @Put(':storeId/fiscal-channels/:marketplaceTag/:accountId')
+  async setFiscalChannel(
+    @Param('storeId') storeId: string,
+    @Param('marketplaceTag') marketplaceTag: string,
+    @Param('accountId') accountId: string,
+    @Body() body: SetFiscalChannelBody,
+  ) {
+    if (!body?.series) throw new BadRequestException('series é obrigatório.');
+    await this.storeService.setFiscalChannel(storeId, marketplaceTag, accountId, {
+      series: Number(body.series),
+      marketplaceSellerId: body.marketplaceSellerId?.trim() || undefined,
+    });
     return { updated: true };
   }
 }

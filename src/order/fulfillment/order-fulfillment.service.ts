@@ -11,7 +11,7 @@ import { MARKETPLACE_ORDER_GATEWAY, MarketplaceOrderGateway } from '../ports/mar
 import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
 import { StockService } from '../../stock/stock.service';
 import { StockMovementType } from '../../stock/domain/movement-type';
-import { ORDER_EVENTS, OrderSyncedEvent } from '../events/order.events';
+import { ORDER_EVENTS, OrderSyncedEvent, OrderReadyToShipEvent } from '../events/order.events';
 
 /**
  * Fulfillment / logistics concerns of an order: separation list, picking validation,
@@ -195,6 +195,15 @@ export class OrderFulfillmentService {
             details: { pickedItems, stockUpdated, published, skipped },
         });
         await this.orderRepository.save(order);
+
+        this.eventEmitter.emit(ORDER_EVENTS.READY_TO_SHIP, new OrderReadyToShipEvent(
+            String(order._id),
+            order.externalId,
+            String(order.marketplaceId),
+            order.marketplaceTag,
+            order.accountId,
+            stockUpdated,
+        ));
 
         return Result.ok({ stockUpdated, published, skipped });
     }

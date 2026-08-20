@@ -19,7 +19,9 @@ describe('StoreService', () => {
   beforeEach(async () => {
     modelMock = {
       find: jest.fn(),
+      findOne: jest.fn(),
       findById: jest.fn(),
+      findOneAndUpdate: jest.fn(),
       create: jest.fn(),
     };
 
@@ -177,5 +179,83 @@ describe('StoreService', () => {
     modelMock.find.mockReturnValue({ lean: () => ({ exec: async () => [] }) });
     const store = await service.findByName('Loja Inexistente');
     expect(store).toBeNull();
+  });
+
+  describe('resolveStoreForAccount', () => {
+    it('resolve a loja dona da conta (marketplaceTag, accountId)', async () => {
+      modelMock.find.mockReturnValue({
+        lean: () => ({
+          exec: async () => [storeDoc([{ marketplaceTag: 'mercadolivre', accountId: 'ACC_A' }])],
+        }),
+      });
+
+      const store = await service.resolveStoreForAccount('mercadolivre', 'ACC_A');
+      expect(store?.id).toBe(STORE_ID);
+    });
+
+    it('retorna null quando nenhuma loja mapeia essa conta', async () => {
+      modelMock.find.mockReturnValue({ lean: () => ({ exec: async () => [storeDoc([])] }) });
+      const store = await service.resolveStoreForAccount('mercadolivre', 'ACC_X');
+      expect(store).toBeNull();
+    });
+  });
+
+  describe('reserveFiscalNumber', () => {
+    it('reserva atomicamente via $inc e retorna série+número', async () => {
+      modelMock.findOneAndUpdate.mockReturnValue({
+        lean: () => ({
+          exec: async () => ({
+            fiscalChannels: [{ marketplaceTag: 'mercadolivre', accountId: 'ACC_A', series: 1, counter: 7 }],
+          }),
+        }),
+      });
+
+      const result = await service.reserveFiscalNumber(STORE_ID, 'mercadolivre', 'ACC_A');
+      expect(result).toEqual({ series: 1, number: 7 });
+      expect(modelMock.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: STORE_ID, fiscalChannels: { $elemMatch: { marketplaceTag: 'mercadolivre', accountId: 'ACC_A' } } },
+        { $inc: { 'fiscalChannels.$.counter': 1 }, $set: expect.objectContaining({ 'fiscalChannels.$.reservedAt': expect.any(Date) }) },
+        { new: true },
+      );
+    });
+
+    it('lança NotFoundException quando o canal fiscal não existe', async () => {
+      modelMock.findOneAndUpdate.mockReturnValue({ lean: () => ({ exec: async () => null }) });
+      await expect(service.reserveFiscalNumber(STORE_ID, 'mercadolivre', 'ACC_A')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('setFiscalChannel', () => {
+    it('cria um novo canal fiscal quando não há conflito de série', async () => {
+      const saved = {
+        ...storeDoc(),
+        legalEntityId: 'legal1',
+        fiscalChannels: [],
+        markModified: jest.fn(),
+        save: jest.fn(),
+      };
+      modelMock.findById.mockReturnValue({ exec: async () => saved });
+      modelMock.findOne.mockReturnValue({ lean: () => ({ exec: async () => null }) });
+
+      await service.setFiscalChannel(STORE_ID, 'mercadolivre', 'ACC_A', { series: 1, marketplaceSellerId: 'seller1' });
+
+      expect(saved.fiscalChannels).toEqual([
+        { marketplaceTag: 'mercadolivre', accountId: 'ACC_A', series: 1, counter: 0, marketplaceSellerId: 'seller1' },
+      ]);
+      expect(saved.save).toHaveBeenCalled();
+    });
+
+    it('rejeita série já usada por outra loja da mesma LegalEntity', async () => {
+      const saved = { ...storeDoc(), legalEntityId: 'legal1', fiscalChannels: [], markModified: jest.fn(), save: jest.fn() };
+      modelMock.findById.mockReturnValue({ exec: async () => saved });
+      modelMock.findOne.mockReturnValue({ lean: () => ({ exec: async () => ({ name: 'Outra Loja' }) }) });
+
+      await expect(
+        service.setFiscalChannel(STORE_ID, 'mercadolivre', 'ACC_A', { series: 1 }),
+      ).rejects.toThrow(/já está em uso/);
+      expect(saved.save).not.toHaveBeenCalled();
+    });
   });
 });

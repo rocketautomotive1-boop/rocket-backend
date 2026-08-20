@@ -7,6 +7,10 @@ import { MarketplaceCredentialsModule } from './marketplace/credentials/marketpl
 import { MarketplaceConfigCacheModule } from './marketplace/services/marketplace-config-cache.module';
 import { StoreModule } from './store/store.module';
 import { StoreListingModule } from './store-listing/store-listing.module';
+import { LegalEntityModule } from './legal-entity/legal-entity.module';
+import { DocumentLookupModule } from './document-lookup/document-lookup.module';
+import { FiscalCustomerModule } from './fiscal-customer/fiscal-customer.module';
+import { FiscalDistributionModule } from './fiscal-distribution/fiscal-distribution.module';
 
 import { QueueModule } from './queue/queue.module';
 import { RabbitMqModule } from './common/rabbitmq/rabbitmq.module';
@@ -66,6 +70,10 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     MarketplaceConfigCacheModule,
     MarketplaceCredentialsModule,
     StoreModule,
+    LegalEntityModule,
+    DocumentLookupModule,
+    FiscalCustomerModule,
+    FiscalDistributionModule,
     StoreListingModule,
     ConfigModule.forRoot({
       isGlobal: true,

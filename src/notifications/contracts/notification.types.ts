@@ -1,6 +1,6 @@
 export type NotificationCategory =
   | 'order' | 'question' | 'stock' | 'system' | 'marketplace' | 'moderation'
-  | 'price-tracker';
+  | 'price-tracker' | 'fiscal';
 
 export type NotificationSeverity = 'info' | 'success' | 'warning' | 'error';
 

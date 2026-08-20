@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MarketplaceModule } from '../marketplace/marketplace.module';
-import { FiscalModule } from '../fiscal/fiscal.module';
+import { LegalEntityModule } from '../legal-entity/legal-entity.module';
 import { ProductModule } from '../product/product.module';
 import { CostSimulationController } from './cost-simulation.controller';
 import { CostSimulationService } from './cost-simulation.service';
@@ -10,7 +10,7 @@ import { ProductDataAdapter } from './adapters/product-data.adapter';
 import { MARKETPLACE_FEES_PORT, FISCAL_RATE_PORT, PRODUCT_DATA_PORT } from './ports';
 
 @Module({
-  imports: [MarketplaceModule, FiscalModule, ProductModule],
+  imports: [MarketplaceModule, LegalEntityModule, ProductModule],
   controllers: [CostSimulationController],
   providers: [
     CostSimulationService,

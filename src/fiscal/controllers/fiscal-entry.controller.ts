@@ -23,6 +23,22 @@ export class FiscalEntryController {
 
     // ... other methods
 
+    @Post('import')
+    async importXml(@Body() body: { xml: string }) {
+        if (!body?.xml) throw new BadRequestException('Campo xml é obrigatório.');
+
+        const accessKey = this.extractAccessKey(body.xml);
+        const existing = accessKey ? await this.fiscalEntryModel.findOne({ accessKey }).lean().exec() : null;
+
+        const entry = await this.nfeImportService.processXml(body.xml);
+        return { ...(entry as any).toObject?.() ?? entry, duplicate: !!existing };
+    }
+
+    private extractAccessKey(xml: string): string | null {
+        const match = xml.match(/Id="NFe(\d{44})"/);
+        return match ? match[1] : null;
+    }
+
     @Get()
     async findAll() {
         return await this.fiscalEntryModel.find().sort({ createdAt: -1 }).exec();

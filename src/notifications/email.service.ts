@@ -19,13 +19,19 @@ export class EmailService {
         });
     }
 
-    async sendEmail(to: string, subject: string, html: string) {
+    async sendEmail(
+        to: string,
+        subject: string,
+        html: string,
+        attachments?: Array<{ filename: string; content: Buffer | string; contentType?: string }>,
+    ) {
         try {
             const info = await this.transporter.sendMail({
                 from: this.configService.get<string>('SMTP_FROM', '"Rocket Parts" <noreply@rocketparts.com.br>'),
                 to,
                 subject,
                 html,
+                attachments,
             });
             this.logger.log(`Email sent: ${info.messageId}`);
             return true;

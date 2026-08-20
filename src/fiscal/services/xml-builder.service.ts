@@ -3,7 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { XMLBuilder } from 'fast-xml-parser';
 import { v4 as uuidv4 } from 'uuid';
 import { FiscalDocumentModel } from '../schemas/fiscal.schema';
-import { FiscalIssuerModel } from '../schemas/fiscal.schema';
+import { LegalEntityModel } from '../../legal-entity/schemas/legal-entity.schema';
 
 @Injectable()
 export class XmlBuilderService {
@@ -18,7 +18,7 @@ export class XmlBuilderService {
     });
   }
 
-  async buildNFeXml(nfe: FiscalDocumentModel, orderData: any, issuer: FiscalIssuerModel): Promise<string> {
+  async buildNFeXml(nfe: FiscalDocumentModel, orderData: any, issuer: LegalEntityModel, marketplaceSellerId?: string, tpEmis: string = '1'): Promise<string> {
     this.logger.log(`Building NFe XML for order ${nfe.orderId}`);
 
     // Basic Validation
@@ -46,10 +46,7 @@ export class XmlBuilderService {
     );
 
     // Marketplace intermediary (infIntermed)
-    const mpIntermed = this.getMarketplaceIntermed(
-      orderData.marketplaceName,
-      (issuer as any).marketplaceSellerIds,
-    );
+    const mpIntermed = this.getMarketplaceIntermed(orderData.marketplaceName, marketplaceSellerId);
 
     // Generate accurate cNF (Random 8 digits for now, but part of key)
     const cNF = Math.floor(Math.random() * 99999999).toString().padStart(8, '0');
@@ -73,7 +70,7 @@ export class XmlBuilderService {
             idDest,
             cMunFG: issuer.address.ibgeCode,
             tpImp: '1', // Portrait
-            tpEmis: '1', // Normal
+            tpEmis: tpEmis, // 1=Normal, 4=EPEC (Contingência)
             cDV: '0', // Will update after key calc
             tpAmb: tpAmb,
             finNFe: '1', // Normal
@@ -344,24 +341,23 @@ export class XmlBuilderService {
   }
 
   /** Dados do intermediador (marketplace) para infIntermed.
-   *  idCadIntTran = ID do vendedor cadastrado no marketplace (por issuer.marketplaceSellerIds).
+   *  idCadIntTran = ID do vendedor cadastrado no marketplace (resolvido por
+   *  Store.fiscalChannels[].marketplaceSellerId, passado explicitamente pelo chamador).
+   *  cnpj = CNPJ conhecido do próprio marketplace intermediador.
    */
   private getMarketplaceIntermed(
     name?: string,
-    sellerIds?: Record<string, string>,
+    marketplaceSellerId?: string,
   ): { cnpj: string; idCadIntTran: string } | null {
     if (!name) return null;
+    const id = marketplaceSellerId?.trim();
+    if (!id || id.length < 2) return null; // omit infIntermed if seller ID not configured
     const n = name.toLowerCase();
-    const resolve = (cnpj: string, key: string) => {
-      const id = sellerIds?.[key]?.trim();
-      if (!id || id.length < 2) return null; // omit infIntermed if seller ID not configured
-      return { cnpj, idCadIntTran: id };
-    };
-    if (n.includes('mercado') || n.includes('meli')) return resolve('03007331000141', 'mercado_livre') ?? resolve('03007331000141', 'mercadolivre');
-    if (n.includes('amazon'))                         return resolve('15436940000103', 'amazon');
-    if (n.includes('shopee'))                         return resolve('43468032000113', 'shopee');
-    if (n.includes('magalu') || n.includes('magazine')) return resolve('47960950001921', 'magalu');
-    if (n.includes('americanas') || n.includes('b2w')) return resolve('00776574000156', 'americanas');
+    if (n.includes('mercado') || n.includes('meli'))    return { cnpj: '03007331000141', idCadIntTran: id };
+    if (n.includes('amazon'))                            return { cnpj: '15436940000103', idCadIntTran: id };
+    if (n.includes('shopee'))                             return { cnpj: '43468032000113', idCadIntTran: id };
+    if (n.includes('magalu') || n.includes('magazine'))   return { cnpj: '47960950001921', idCadIntTran: id };
+    if (n.includes('americanas') || n.includes('b2w'))    return { cnpj: '00776574000156', idCadIntTran: id };
     return null;
   }
 

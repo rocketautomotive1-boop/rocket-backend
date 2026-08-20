@@ -31,6 +31,13 @@ export const ORDER_EVENTS = {
      * Payload autocontido — notifications só monta o NotificationRequested (canal sino/app).
      */
     SHIPPING_UPDATED: 'order.shipping.updated',
+    /**
+     * Separação física do pedido concluída (picking) — estoque já baixado, pedido em
+     * 'ready_to_ship'. Emitido por OrderFulfillmentService.completePicking(). Gatilho
+     * padrão para efeitos que só fazem sentido após a mercadoria estar fisicamente
+     * separada (ex.: emissão fiscal) — não na ingestão/aceite do pedido.
+     */
+    READY_TO_SHIP: 'order.ready_to_ship',
 };
 
 /** Marcos de envio que geram notificação. Outras transições são persistidas mas silenciosas. */
@@ -133,5 +140,16 @@ export class OrderPricingCalculatedEvent {
         public readonly marketplaceName: string,
         public readonly pricing: any, // OrderPricingDetailDto
         public readonly triggeredBy: 'webhook' | 'sync' | 'retry' | 'manual' = 'sync',
+    ) { }
+}
+
+export class OrderReadyToShipEvent {
+    constructor(
+        public readonly orderId: string,
+        public readonly externalId: string,
+        public readonly marketplaceId: string,
+        public readonly marketplaceTag: string | undefined,
+        public readonly accountId: string | undefined,
+        public readonly stockUpdated: string[],
     ) { }
 }

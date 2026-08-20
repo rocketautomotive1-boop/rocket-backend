@@ -47,6 +47,18 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
                             type: 'direct',
                             options: { durable: true },
                         },
+                        {
+                            name: 'rocket.fiscal',
+                            type: 'topic',
+                            options: { durable: true },
+                        },
+                        {
+                            // Dead-letter de emissão fiscal: mensagens que esgotaram tentativas de
+                            // transporte (timeout/5xx SEFAZ) chegam aqui para retry via TTL.
+                            name: 'rocket.fiscal.dlx',
+                            type: 'topic',
+                            options: { durable: true },
+                        },
                     ],
                     uri: uri,
                     connectionInitOptions: { wait: false },

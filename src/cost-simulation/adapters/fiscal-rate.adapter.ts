@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { FiscalService } from '../../fiscal/services/fiscal.service';
+import { LegalEntityService } from '../../legal-entity/services/legal-entity.service';
 import { FiscalRate, FiscalRatePort } from '../ports';
 
 @Injectable()
 export class FiscalRateAdapter implements FiscalRatePort {
-  constructor(private readonly fiscalService: FiscalService) {}
+  constructor(private readonly legalEntityService: LegalEntityService) {}
 
   /** Função pura: override > issuer.effectiveTaxRate > 0. */
   static resolve(issuer: { effectiveTaxRate?: number } | null, override?: number): number {
@@ -13,7 +13,7 @@ export class FiscalRateAdapter implements FiscalRatePort {
   }
 
   async getRate(override?: number): Promise<FiscalRate> {
-    const issuer = await this.fiscalService.getIssuer();
+    const issuer = await this.legalEntityService.findActive();
     return {
       rate: FiscalRateAdapter.resolve(issuer as any, override),
       taxRegime: (issuer as any)?.taxRegime ?? null,

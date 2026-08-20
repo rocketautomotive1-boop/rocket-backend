@@ -257,6 +257,15 @@ export class OrderModel {
     @Prop()
     marketplaceTag?: string; // denormalized adapter tag for reconcile/gateway
 
+    /**
+     * Origem da venda dentro do marketplace 'rocket' (vendas diretas, fora de
+     * marketplace externo): 'balcao' | 'b2c' | 'whatsapp' | outros futuros.
+     * Puramente informativo (analytics/notificação) — NÃO influencia a
+     * resolução fiscal, que segue por (marketplaceTag, accountId) → Store.
+     */
+    @Prop()
+    originChannel?: string;
+
     @Prop({ type: Object })
     reconcile?: {
         lastCheckedAt?: Date;

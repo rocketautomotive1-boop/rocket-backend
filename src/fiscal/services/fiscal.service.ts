@@ -1,7 +1,8 @@
-import { Injectable, Logger, NotFoundException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { FiscalDocumentModel, FiscalDocumentDocument, FiscalIssuerModel, FiscalIssuerDocument } from '../schemas/fiscal.schema';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { FiscalDocumentModel, FiscalDocumentDocument, FiscalInutilizationModel, FiscalInutilizationDocument } from '../schemas/fiscal.schema';
 import { XmlBuilderService } from './xml-builder.service';
 import { SignatureService } from './signature.service';
 import { SefazService } from './sefaz.service';
@@ -10,6 +11,15 @@ import { MarketplaceService } from '../../marketplace/services/marketplace.servi
 import { MarketplaceOrderService } from '../../marketplace/services/marketplace-order.service';
 import { MarketplaceRegistryService } from '../../marketplace/services/marketplace-registry.service';
 import { OrderModel, OrderDocument } from '../../order/schemas/order.schema';
+import { STORE_PORT, StorePort } from '../../store/ports/store.port';
+import { LegalEntityService } from '../../legal-entity/services/legal-entity.service';
+import { FiscalCustomerService } from '../../fiscal-customer/services/fiscal-customer.service';
+import {
+    FISCAL_EVENTS,
+    FiscalNfeAuthorizedEvent,
+    FiscalNfeRejectedEvent,
+    FiscalNfeCancelledEvent,
+} from '../events/fiscal.events';
 
 @Injectable()
 export class FiscalService {
@@ -18,8 +28,8 @@ export class FiscalService {
     constructor(
         @InjectModel(FiscalDocumentModel.name)
         private fiscalDocumentModel: Model<FiscalDocumentDocument>,
-        @InjectModel(FiscalIssuerModel.name)
-        private fiscalIssuerModel: Model<FiscalIssuerDocument>,
+        @InjectModel(FiscalInutilizationModel.name)
+        private fiscalInutilizationModel: Model<FiscalInutilizationDocument>,
         @InjectModel(OrderModel.name)
         private orderModel: Model<OrderDocument>,
 
@@ -32,7 +42,31 @@ export class FiscalService {
         private readonly productService: ProductService,
         private readonly marketplaceOrderService: MarketplaceOrderService,
         private readonly marketplaceRegistry: MarketplaceRegistryService,
+        @Inject(STORE_PORT)
+        private readonly storePort: StorePort,
+        private readonly legalEntityService: LegalEntityService,
+        private readonly eventEmitter: EventEmitter2,
+        private readonly fiscalCustomerService: FiscalCustomerService,
     ) { }
+
+    /** Resolve Store → LegalEntity + FiscalChannel para a conta que recebeu o pedido. */
+    private async resolveFiscalContext(marketplaceTag: string | undefined, accountId: string | undefined) {
+        if (!marketplaceTag || !accountId) {
+            throw new BadRequestException('Pedido sem marketplaceTag/accountId — não é possível resolver a loja emissora.');
+        }
+        const store = await this.storePort.resolveStoreForAccount(marketplaceTag, accountId);
+        if (!store) {
+            throw new NotFoundException(`Nenhuma loja vinculada à conta ${marketplaceTag}/${accountId}.`);
+        }
+        const legalEntity = await this.legalEntityService.findById(store.legalEntityId);
+        const channel = await this.storePort.resolveFiscalChannel(store.id, marketplaceTag, accountId);
+        if (!channel) {
+            throw new NotFoundException(
+                `Loja ${store.name} não tem canal fiscal configurado para ${marketplaceTag}/${accountId}.`,
+            );
+        }
+        return { store, legalEntity, channel };
+    }
 
     async prepareNFeData(orderId: string, marketplaceId?: string): Promise<any> {
         this.logger.log(`Preparing NFe data for order ${orderId}`);
@@ -74,6 +108,8 @@ export class FiscalService {
         const orderData: any = {
             orderId,
             marketplaceId: resolvedMarketplaceId,
+            marketplaceTag: dbOrder.marketplaceTag,
+            accountId: dbOrder.accountId,
             marketplaceName,
             items: (dbOrder.items || []).map((i: any) => ({
                 id: i.externalId,
@@ -149,6 +185,29 @@ export class FiscalService {
             }
         }
 
+        // ── Step 3b: Resolve FiscalCustomer — dados de um cadastro já confirmado
+        // por um humano têm precedência sobre o que veio do marketplace. Não
+        // sobrescreve nada aqui, só enriquece — o modal de emissão confirma. ──
+        if (orderData.buyer?.document) {
+            try {
+                const fiscalCustomer = await this.fiscalCustomerService.findByDocument(orderData.buyer.document);
+                if (fiscalCustomer) {
+                    const primaryAddress = fiscalCustomer.addresses?.[0];
+                    orderData.buyer = {
+                        ...orderData.buyer,
+                        name: fiscalCustomer.name || orderData.buyer.name,
+                        email: fiscalCustomer.email || orderData.buyer.email,
+                        phone: fiscalCustomer.phone || orderData.buyer.phone,
+                        ie: fiscalCustomer.ie,
+                        ieIndicator: fiscalCustomer.ieIndicator,
+                        address: primaryAddress || orderData.buyer.address,
+                    };
+                }
+            } catch (e) {
+                this.logger.warn(`Could not resolve FiscalCustomer for document ${orderData.buyer.document}: ${e.message}`);
+            }
+        }
+
         // ── Step 4: Validate minimum required data ────────────────────────────
         if (!orderData.items || orderData.items.length === 0) {
             throw new NotFoundException(`Pedido ${orderId} não possui itens para emissão da NFe.`);
@@ -220,21 +279,12 @@ export class FiscalService {
             throw new Error('O pedido não possui itens para emissão da NFe.');
         }
 
-        // 1. Get Issuer (Company Config)
-        let issuer = await this.fiscalIssuerModel.findOne({ isActive: true }).exec();
-
-        if (!issuer) {
-            throw new NotFoundException('Nenhum emitente fiscal configurado.');
-        }
-
-        // 1b. Determine Series
-        let series = issuer.nfeSeries || 1;
-        if (orderData.marketplaceId) {
-            const marketplace = await this.marketplaceService.findOne(orderData.marketplaceId);
-            if (marketplace && marketplace.settings?.nfeSeries) {
-                series = Number(marketplace.settings.nfeSeries);
-            }
-        }
+        // 1. Resolve Store → LegalEntity + FiscalChannel (série, contador, sellerId) para a conta que recebeu o pedido.
+        const { store, legalEntity, channel } = await this.resolveFiscalContext(
+            orderData.marketplaceTag,
+            orderData.accountId,
+        );
+        let issuer = legalEntity;
 
         // 2. Check if a reusable NFe already exists for this order.
         //    Resolve both MongoDB ObjectIds and external marketplace IDs so that
@@ -263,40 +313,36 @@ export class FiscalService {
         }
 
         if (!nfe) {
-            // Atomic increment per series — use lean() so seriesCounters is a plain object
-            // (Mongoose Map objects don't support bracket-notation access, causing the fallback || 1)
-            const seriesKey = String(series);
-            const updatedIssuerRaw = await this.fiscalIssuerModel.findOneAndUpdate(
-                { _id: issuer._id },
-                { $inc: { [`seriesCounters.${seriesKey}`]: 1 } },
-                { new: true }
-            ).lean().exec() as any;
-
-            const newNfeNumber: number = updatedIssuerRaw?.seriesCounters?.[seriesKey] ?? 1;
-            this.logger.log(`NFe counter for series ${seriesKey}: ${newNfeNumber} (raw counters: ${JSON.stringify(updatedIssuerRaw?.seriesCounters)})`);
-
-            // Reload issuer as Mongoose document for toObject() later
-            issuer = await this.fiscalIssuerModel.findById(issuer._id).exec();
+            // Reserva atômica: Store.fiscalChannels.$.counter, escopado por loja+canal.
+            const { series: reservedSeries, number: newNfeNumber } = await this.storePort.reserveFiscalNumber(
+                store.id,
+                orderData.marketplaceTag,
+                orderData.accountId,
+            );
+            this.logger.log(`NFe counter reserved: série ${reservedSeries} número ${newNfeNumber} (loja ${store.name})`);
 
             nfe = new this.fiscalDocumentModel({
                 orderId: internalOrderId,
                 order: internalOrderId,
+                storeId: new Types.ObjectId(store.id),
                 issuer: issuer.toObject(),
                 status: 'DRAFT',
                 environment: orderData?.environment === 'HOMOLOGATION' ? 'HOMOLOGATION' : 'PRODUCTION',
                 number: newNfeNumber,
-                series: series,
+                series: reservedSeries,
                 createdAt: new Date()
             });
         }
 
-        // Update Series just in case
-        nfe.series = series;
+        // Update Series/Store just in case (retry path may reuse an older doc)
+        nfe.series = channel.series;
+        nfe.storeId = new Types.ObjectId(store.id);
         await nfe.save();
 
         try {
-            // 3. Build XML (Draft)
-            const xml = await this.xmlBuilderService.buildNFeXml(nfe, orderData, issuer);
+            // 3. Build XML (Draft) — tpEmis=4 se a LegalEntity já estiver em contingência
+            const tpEmis = issuer.contingencyMode ? '4' : '1';
+            const xml = await this.xmlBuilderService.buildNFeXml(nfe, orderData, issuer, channel.marketplaceSellerId, tpEmis);
 
             // 4. Sign XML
             let signedXml = xml;
@@ -305,12 +351,35 @@ export class FiscalService {
             } else {
                 this.logger.warn('Skipping XML signature: No PFX certificate found.');
             }
+            // nfe.accessKey já foi setado dentro de buildNFeXml (passado por referência)
 
-            // 5. Transmit to SEFAZ
-            const result = await this.sefazService.authorize(signedXml, nfe.environment, issuer);
+            // 5. Transmit — em contingência já ativa, vai direto pro EPEC; senão tenta
+            // authorize() normal e só entra em contingência após falhas de transporte
+            // consecutivas (nunca por uma rejeição de negócio, que authorize() não lança).
+            let result: any;
+            if (issuer.contingencyMode) {
+                result = await this.transmitViaEpec(nfe, issuer);
+            } else {
+                try {
+                    result = await this.sefazService.authorize(signedXml, nfe.environment, issuer);
+                    await this.recordTransportSuccess(issuer);
+                } catch (transportErr) {
+                    const enteredContingency = await this.recordTransportFailure(issuer);
+                    if (enteredContingency) {
+                        this.logger.warn(`SEFAZ indisponível — LegalEntity ${issuer._id} entrou em contingência. Transmitindo via EPEC.`);
+                        result = await this.transmitViaEpec(nfe, issuer);
+                    } else {
+                        throw transportErr;
+                    }
+                }
+            }
 
             // Update NFe
-            nfe.status = result.status === 'authorized' ? 'AUTHORIZED' : (result.status === 'processing' ? 'PROCESSING' : (result.status === 'denied' ? 'REJECTED' : 'ERROR'));
+            if (result.status === 'authorized_contingency') {
+                nfe.status = 'AUTHORIZED_CONTINGENCY';
+            } else {
+                nfe.status = result.status === 'authorized' ? 'AUTHORIZED' : (result.status === 'processing' ? 'PROCESSING' : (result.status === 'denied' ? 'REJECTED' : 'ERROR'));
+            }
             nfe.protocol = result.protocol;
 
             // When authorized, compose nfeProc (signed NFe + SEFAZ protocol receipt)
@@ -332,6 +401,7 @@ export class FiscalService {
 
             await nfe.save();
             await this.linkNFeToOrder(nfe, orderId);
+            this.emitPostEmissionEvent(nfe, orderData);
 
             return {
                 message: nfe.status === 'AUTHORIZED' ? 'NFe autorizada com sucesso' : (nfe.rejectionReason || 'Emissão concluída'),
@@ -351,6 +421,43 @@ export class FiscalService {
         }
     }
 
+    /** Transmite via EPEC e retorna no mesmo shape de sefazService.authorize
+     *  ({status, protocol, message, ...}) para o chamador tratar uniformemente. */
+    private async transmitViaEpec(nfe: any, issuer: any): Promise<any> {
+        const result = await this.sefazService.transmitEpec(nfe, issuer);
+        if (result.status !== 'authorized_contingency') {
+            throw new Error(`SVC rejeitou o EPEC: ${result.cStat} - ${result.message}`);
+        }
+        return result;
+    }
+
+    /** Incrementa o contador de falhas de transporte consecutivas; ativa
+     *  contingencyMode ao ultrapassar o limiar. Retorna true quando a
+     *  contingência acabou de ser ativada nesta chamada. */
+    private async recordTransportFailure(issuer: any): Promise<boolean> {
+        const threshold = Number(process.env.FISCAL_TRANSPORT_FAILURE_THRESHOLD) || 3;
+        const failures = (issuer.contingencyConsecutiveFailures || 0) + 1;
+        const enteringContingency = failures >= threshold && !issuer.contingencyMode;
+
+        const updated = await this.legalEntityService.updateContingencyState(issuer._id, {
+            contingencyConsecutiveFailures: failures,
+            contingencySuccessCount: 0,
+            ...(enteringContingency ? { contingencyMode: true } : {}),
+        });
+        issuer.contingencyMode = updated.contingencyMode;
+        issuer.contingencyConsecutiveFailures = updated.contingencyConsecutiveFailures;
+        return enteringContingency;
+    }
+
+    /** Zera o contador de falhas em toda transmissão normal bem-sucedida. */
+    private async recordTransportSuccess(issuer: any): Promise<void> {
+        if (!issuer.contingencyConsecutiveFailures) return;
+        const updated = await this.legalEntityService.updateContingencyState(issuer._id, {
+            contingencyConsecutiveFailures: 0,
+        });
+        issuer.contingencyConsecutiveFailures = updated.contingencyConsecutiveFailures;
+    }
+
     /**
      * Emite uma NFe sem vínculo com Order/marketplace — usado para notas de teste
      * (homologação) e emissões avulsas fora do fluxo normal de pedidos.
@@ -360,6 +467,9 @@ export class FiscalService {
         buyer: any;
         items: any[];
         totals: any;
+        storeId: string;
+        marketplaceTag: string;
+        accountId: string;
     }) {
         this.logger.log('Iniciando emissão de NFe avulsa (sem Order vinculado)');
 
@@ -369,24 +479,28 @@ export class FiscalService {
         if (!orderData.items || orderData.items.length === 0) {
             throw new Error('A nota não possui itens para emissão.');
         }
-
-        let issuer = await this.fiscalIssuerModel.findOne({ isActive: true }).exec();
-        if (!issuer) {
-            throw new NotFoundException('Nenhum emitente fiscal configurado.');
+        if (!orderData.storeId || !orderData.marketplaceTag || !orderData.accountId) {
+            throw new BadRequestException('storeId/marketplaceTag/accountId são obrigatórios para emissão avulsa.');
         }
 
-        const series = issuer.nfeSeries || 1;
-        const seriesKey = String(series);
-        const updatedIssuerRaw = await this.fiscalIssuerModel.findOneAndUpdate(
-            { _id: issuer._id },
-            { $inc: { [`seriesCounters.${seriesKey}`]: 1 } },
-            { new: true }
-        ).lean().exec() as any;
-        const newNfeNumber: number = updatedIssuerRaw?.seriesCounters?.[seriesKey] ?? 1;
+        const store = await this.storePort.findById(orderData.storeId);
+        if (!store) throw new NotFoundException(`Loja ${orderData.storeId} não encontrada.`);
+        const issuer = await this.legalEntityService.findById(store.legalEntityId);
+        const channel = await this.storePort.resolveFiscalChannel(store.id, orderData.marketplaceTag, orderData.accountId);
+        if (!channel) {
+            throw new NotFoundException(
+                `Loja ${store.name} não tem canal fiscal configurado para ${orderData.marketplaceTag}/${orderData.accountId}.`,
+            );
+        }
 
-        issuer = await this.fiscalIssuerModel.findById(issuer._id).exec();
+        const { series, number: newNfeNumber } = await this.storePort.reserveFiscalNumber(
+            store.id,
+            orderData.marketplaceTag,
+            orderData.accountId,
+        );
 
         const nfe = new this.fiscalDocumentModel({
+            storeId: new Types.ObjectId(store.id),
             issuer: issuer.toObject(),
             status: 'DRAFT',
             environment: orderData.environment === 'HOMOLOGATION' ? 'HOMOLOGATION' : 'PRODUCTION',
@@ -397,7 +511,7 @@ export class FiscalService {
         await nfe.save();
 
         try {
-            const xml = await this.xmlBuilderService.buildNFeXml(nfe, orderData, issuer);
+            const xml = await this.xmlBuilderService.buildNFeXml(nfe, orderData, issuer, channel.marketplaceSellerId);
 
             let signedXml = xml;
             if (issuer.certificatePfx) {
@@ -423,6 +537,7 @@ export class FiscalService {
             }
 
             await nfe.save();
+            this.emitPostEmissionEvent(nfe, orderData);
 
             return {
                 nfeId: nfe._id,
@@ -438,6 +553,68 @@ export class FiscalService {
             await nfe.save();
             throw error;
         }
+    }
+
+    /** Emite FISCAL_EVENTS.NFE_AUTHORIZED/NFE_REJECTED após persistir o resultado da SEFAZ.
+     *  Best-effort: consumidores (DANFE, notificação, e-mail) são independentes — uma
+     *  falha aqui nunca deve derrubar a emissão, que já está concluída e persistida. */
+    private emitPostEmissionEvent(nfe: any, orderData: any): void {
+        try {
+            if (nfe.status === 'AUTHORIZED') {
+                this.upsertFiscalCustomerFromEmission(orderData);
+                this.eventEmitter.emit(FISCAL_EVENTS.NFE_AUTHORIZED, new FiscalNfeAuthorizedEvent(
+                    String(nfe._id),
+                    nfe.order ? String(nfe.order) : (nfe.orderId ? String(nfe.orderId) : null),
+                    nfe.storeId ? String(nfe.storeId) : null,
+                    nfe.accessKey,
+                    nfe.series,
+                    nfe.number,
+                    nfe.xml,
+                    orderData?.buyer?.email,
+                    orderData?.buyer?.name,
+                ));
+            } else if (nfe.status === 'REJECTED') {
+                this.eventEmitter.emit(FISCAL_EVENTS.NFE_REJECTED, new FiscalNfeRejectedEvent(
+                    String(nfe._id),
+                    nfe.order ? String(nfe.order) : (nfe.orderId ? String(nfe.orderId) : null),
+                    nfe.rejectionReason || 'Rejeitada pela SEFAZ',
+                ));
+            }
+        } catch (err) {
+            this.logger.warn(`Falha ao emitir evento pós-emissão para NFe ${nfe._id}: ${err.message}`);
+        }
+    }
+
+    /** Persiste/atualiza o cadastro fiscal reutilizável — só ao emitir com sucesso,
+     *  já que aqui os dados foram confirmados por um humano (operador ou o
+     *  próprio fluxo automático). Fire-and-forget: não bloqueia nem falha a emissão. */
+    private upsertFiscalCustomerFromEmission(orderData: any): void {
+        const buyer = orderData?.buyer;
+        if (!buyer?.document || !buyer?.name) return;
+
+        const digits = String(buyer.document).replace(/\D/g, '');
+        const documentType = digits.length === 14 ? 'CNPJ' : 'CPF';
+
+        this.fiscalCustomerService.upsert({
+            document: digits,
+            documentType,
+            name: buyer.name,
+            ie: buyer.ie,
+            ieIndicator: buyer.ieIndicator,
+            email: buyer.email,
+            phone: buyer.phone,
+            address: buyer.address ? {
+                street: buyer.address.street || '',
+                number: buyer.address.number || '',
+                complement: buyer.address.complement,
+                neighborhood: buyer.address.neighborhood || '',
+                city: buyer.address.city || '',
+                state: buyer.address.state || '',
+                zipCode: buyer.address.zipCode || buyer.address.zip_code || '',
+            } : undefined,
+        }).catch((err) => {
+            this.logger.warn(`Falha ao atualizar FiscalCustomer para documento ${digits}: ${err.message}`);
+        });
     }
 
     private async linkNFeToOrder(nfe: any, orderId: string): Promise<void> {
@@ -522,14 +699,29 @@ export class FiscalService {
             throw new Error(`NFe não pode ser cancelada (status atual: ${existing.status}).`);
         }
 
-        const issuer = await this.fiscalIssuerModel.findOne({ isActive: true }).exec();
-        if (!issuer) {
+        let issuer: any;
+        try {
+            if (!nfe.storeId) throw new NotFoundException('NFe sem loja emissora vinculada.');
+            issuer = await this.legalEntityService.findById(
+                (await this.storePort.findById(String(nfe.storeId)))?.legalEntityId,
+            );
+        } catch (err) {
             // Revert lock if issuer is missing
             await this.fiscalDocumentModel.findByIdAndUpdate(nfe._id, { $set: { status: 'AUTHORIZED' } }).exec();
-            throw new Error('Emitente fiscal não configurado.');
+            throw err;
         }
 
-        const result = await this.sefazService.cancelNFe(nfe, issuer, justification.trim());
+        let result: any;
+        try {
+            result = await this.sefazService.cancelNFe(nfe, issuer, justification.trim());
+        } catch (err) {
+            // Erro de TRANSPORTE (timeout, rede) — não é uma rejeição da SEFAZ. Reverte o
+            // lock para que o cancelamento possa ser tentado de novo, em vez de deixar a
+            // NFe presa em CANCELLING até intervenção manual no banco.
+            await this.fiscalDocumentModel.findByIdAndUpdate(nfe._id, { $set: { status: 'AUTHORIZED' } }).exec();
+            this.logger.error(`Falha de transporte ao cancelar NFe ${nfe._id}: ${err.message}`);
+            throw err;
+        }
 
         this.logger.log(`Cancelamento SEFAZ retornou: status=${result.status} cStat=${result.cStat} msg=${result.message}`);
 
@@ -539,6 +731,16 @@ export class FiscalService {
             nfe.protocol = result.protocol || nfe.protocol;
             await nfe.save();
             await this.linkNFeToOrder(nfe, orderId);
+            try {
+                this.eventEmitter.emit(FISCAL_EVENTS.NFE_CANCELLED, new FiscalNfeCancelledEvent(
+                    String(nfe._id),
+                    nfe.order ? String(nfe.order) : (nfe.orderId ? String(nfe.orderId) : null),
+                    nfe.accessKey,
+                    justification.trim(),
+                ));
+            } catch (err) {
+                this.logger.warn(`Falha ao emitir evento de cancelamento para NFe ${nfe._id}: ${err.message}`);
+            }
         } else {
             // SEFAZ rejected — revert lock so the NFe can be retried or inspected
             await this.fiscalDocumentModel.findByIdAndUpdate(nfe._id, { $set: { status: 'AUTHORIZED' } }).exec();
@@ -553,25 +755,106 @@ export class FiscalService {
         };
     }
 
-    async saveIssuer(data: Partial<FiscalIssuerModel>) {
-        if (data.taxRegime !== undefined) {
-            const raw = String(data.taxRegime).toUpperCase().replace(/[^A-Z0-9]/g, '');
-            const SIMPLES_VARIANTS = ['SIMPLESNACIONAL', 'SIMPLES', 'SN', '1', 'SIMPLESNACIOANL'];
-            if (SIMPLES_VARIANTS.includes(raw)) {
-                data.taxRegime = 'SIMPLES_NACIONAL';
-            }
+    /**
+     * Carta de Correção Eletrônica — corrige campos descritivos de uma NFe já
+     * autorizada (nunca valores, quantidade, data ou dados cadastrais de
+     * emitente/destinatário — restrição legal, não há campo estruturado que
+     * permita alterar dado protegido, só texto livre). Síncrona no request
+     * (mesma decisão do cancelamento: ação explícita, baixo volume).
+     */
+    async correctNFe(orderId: string, correctionText: string): Promise<any> {
+        this.logger.log(`Emitindo CC-e para pedido ${orderId}...`);
+
+        if (!correctionText || correctionText.trim().length < 15) {
+            throw new BadRequestException('Texto de correção deve ter no mínimo 15 caracteres.');
         }
-        const issuer = await this.fiscalIssuerModel.findOneAndUpdate(
-            { isActive: true },
-            data,
-            { new: true, upsert: true, setDefaultsOnInsert: true }
-        ).exec();
-        this.logger.log(`Issuer saved. taxRegime=${issuer?.taxRegime}`);
-        return issuer;
+
+        const IS_MONGO_ID = /^[0-9a-fA-F]{24}$/;
+        const internalOrderId = IS_MONGO_ID.test(orderId) ? new Types.ObjectId(orderId) : await this.resolveInternalOrderId(orderId);
+        if (!internalOrderId) throw new NotFoundException(`Pedido ${orderId} não encontrado.`);
+
+        const nfe: any = await this.fiscalDocumentModel
+            .findOne({ $or: [{ orderId: internalOrderId }, { order: internalOrderId }], status: 'AUTHORIZED' })
+            .sort({ createdAt: -1 })
+            .exec();
+        if (!nfe) throw new NotFoundException(`NFe autorizada para o pedido ${orderId} não encontrada.`);
+        if (!nfe.storeId) throw new NotFoundException('NFe sem loja emissora vinculada.');
+
+        const store = await this.storePort.findById(String(nfe.storeId));
+        const issuer = await this.legalEntityService.findById(store?.legalEntityId);
+
+        const sequence = (nfe.cceEvents?.length || 0) + 1;
+        const result = await this.sefazService.correctNFe(nfe, issuer, correctionText.trim(), sequence);
+
+        if (result.status !== 'registered') {
+            throw new Error(`SEFAZ rejeitou a CC-e: ${result.cStat} - ${result.message}`);
+        }
+
+        nfe.cceEvents = [
+            ...(nfe.cceEvents || []),
+            { sequence, text: correctionText.trim(), protocol: result.protocol, createdAt: new Date() },
+        ];
+        await nfe.save();
+
+        return {
+            sequence,
+            protocol: result.protocol,
+            message: result.message,
+        };
     }
 
-    async getIssuer() {
-        return await this.fiscalIssuerModel.findOne({ isActive: true }).exec();
+    /**
+     * Inutiliza uma faixa de numeração NUNCA emitida (distinto de cancelar uma
+     * nota já autorizada). Ação administrativa rara e deliberada.
+     */
+    async inutilizeRange(params: {
+        storeId: string;
+        series: number;
+        from: number;
+        to: number;
+        justification: string;
+        environment?: string;
+    }): Promise<any> {
+        const { storeId, series, from, to, justification, environment } = params;
+        if (!justification || justification.trim().length < 15) {
+            throw new BadRequestException('Justificativa deve ter no mínimo 15 caracteres.');
+        }
+        if (from > to) {
+            throw new BadRequestException('Número inicial não pode ser maior que o número final.');
+        }
+
+        const store = await this.storePort.findById(storeId);
+        if (!store) throw new NotFoundException(`Loja ${storeId} não encontrada.`);
+        const issuer = await this.legalEntityService.findById(store.legalEntityId);
+
+        const uf = issuer.address?.state || 'PE';
+        const result = await this.sefazService.inutilizeRange({
+            issuer,
+            uf,
+            series,
+            from,
+            to,
+            justification: justification.trim(),
+            environment: environment || 'PRODUCTION',
+        });
+
+        await this.fiscalInutilizationModel.create({
+            legalEntityId: issuer._id,
+            storeId: store.id,
+            series,
+            from,
+            to,
+            justification: justification.trim(),
+            protocol: result.protocol,
+            status: result.status === 'authorized' ? 'AUTHORIZED' : 'REJECTED',
+            rejectionReason: result.status === 'authorized' ? undefined : result.message,
+        });
+
+        if (result.status !== 'authorized') {
+            throw new Error(`SEFAZ rejeitou a inutilização: ${result.cStat} - ${result.message}`);
+        }
+
+        return { status: result.status, protocol: result.protocol, message: result.message };
     }
 
     /** Returns the single most-relevant NFe for an order:
