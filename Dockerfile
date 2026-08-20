@@ -38,7 +38,11 @@ RUN npm ci --omit=dev --legacy-peer-deps && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
 
-RUN groupadd --system app && useradd --system --gid app app \
+# --create-home: sem home directory, $HOME (/home/app) aponta pra um caminho inexistente
+# e o Chromium falha ao criar seu user-data-dir/crashpad-database ("Failed to create
+# headless user data directory container" / "chrome_crashpad_handler: --database is
+# required") mesmo com --user-data-dir explícito no launch.
+RUN groupadd --system app && useradd --system --create-home --gid app app \
     && chown -R app:app /app
 USER app
 

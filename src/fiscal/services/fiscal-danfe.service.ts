@@ -110,9 +110,12 @@ export class FiscalDanfeService {
         const html = this.buildDanfeHtml(event, nfe, qrCodeDataUri, barcodeDataUri);
         // Chromium do apt (Dockerfile) via PUPPETEER_EXECUTABLE_PATH — imagem node:22-slim
         // não tem as libs de sistema que o download interno do puppeteer precisaria.
+        // --user-data-dir e --disable-dev-shm-usage explícitos: mesmo com $HOME correto
+        // (Dockerfile cria o home do usuário 'app'), o crashpad handler do Chromium é
+        // sensível a HOME/user-data-dir ausentes em containers — falha silenciosa sem eles.
         const browser = await puppeteer.launch({
             headless: true,
-            args: ['--no-sandbox'],
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--user-data-dir=/tmp/chromium-danfe'],
             ...(process.env.PUPPETEER_EXECUTABLE_PATH ? { executablePath: process.env.PUPPETEER_EXECUTABLE_PATH } : {}),
         });
         try {
