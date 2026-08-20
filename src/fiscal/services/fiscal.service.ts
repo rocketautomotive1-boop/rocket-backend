@@ -871,6 +871,24 @@ export class FiscalService {
         return docs.sort((a, b) => priority.indexOf(a.status) - priority.indexOf(b.status))[0];
     }
 
+    /** XML oficial (assinado, ou o de trabalho se a assinatura ainda não rodou) da NFe mais
+     *  relevante do pedido, para download — mesma prioridade de getNFeByOrderId. */
+    async getNFeXml(orderId: string): Promise<{ xml: string; accessKey: string } | null> {
+        const oid = await this.resolveInternalOrderId(orderId);
+        if (!oid) return null;
+        const docs = await this.fiscalDocumentModel
+            .find({ $or: [{ orderId: oid }, { order: oid }] })
+            .select('xml xmlSigned accessKey status')
+            .lean()
+            .exec();
+        if (!docs.length) return null;
+        const priority = ['AUTHORIZED', 'PROCESSING', 'CANCELLING', 'ERROR', 'REJECTED', 'DRAFT', 'CANCELLED', 'CANCELED'];
+        const nfe: any = docs.sort((a, b) => priority.indexOf(a.status) - priority.indexOf(b.status))[0];
+        const xml = nfe.xmlSigned || nfe.xml;
+        if (!xml) return null;
+        return { xml, accessKey: nfe.accessKey };
+    }
+
     /** Returns all NFe documents for an order, newest first. */
     async listNFesByOrderId(orderId: string) {
         const oid = await this.resolveInternalOrderId(orderId);

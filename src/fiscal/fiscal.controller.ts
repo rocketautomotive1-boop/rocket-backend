@@ -1,4 +1,5 @@
-import { Controller, Post, Get, Body, Param, HttpCode, HttpStatus, InternalServerErrorException, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Res, HttpCode, HttpStatus, InternalServerErrorException, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { FiscalService } from './services/fiscal.service';
 import { FiscalIssuanceRequestService } from './services/fiscal-issuance-request.service';
@@ -43,6 +44,18 @@ export class FiscalController {
     @ApiOperation({ summary: 'Consultar NFe principal de um pedido (AUTHORIZED > ERROR > DRAFT > CANCELLED)' })
     async getNFe(@Param('orderId') orderId: string) {
         return await this.fiscalService.getNFeByOrderId(orderId);
+    }
+
+    @Get('nfe/:orderId/xml')
+    @ApiOperation({ summary: 'Baixar o XML oficial (assinado) da NFe mais relevante do pedido' })
+    async downloadXml(@Param('orderId') orderId: string, @Res() res: Response) {
+        const result = await this.fiscalService.getNFeXml(orderId);
+        if (!result) throw new NotFoundException(`XML da NFe para o pedido ${orderId} não encontrado.`);
+        res.set({
+            'Content-Type': 'application/xml',
+            'Content-Disposition': `attachment; filename="NFe${result.accessKey}.xml"`,
+        });
+        res.send(result.xml);
     }
 
     @Get('nfe/:orderId/all')
