@@ -47,7 +47,10 @@ export class FiscalDanfeService {
             const qrCodeDataUri = await this.qrCodeService.buildQrCodeDataUri({
                 accessKey: event.accessKey,
                 uf: parsed.emit?.enderEmit?.UF || 'PE',
-                environment: parsed.ide?.tpAmb === '1' ? 'PRODUCTION' : 'HOMOLOGATION',
+                // fast-xml-parser converte <tpAmb>1</tpAmb> pro número 1, não a string '1' —
+                // === '1' sempre dava false e o QR code apontava pra URL de consulta de
+                // HOMOLOGAÇÃO mesmo em produção real.
+                environment: String(parsed.ide?.tpAmb ?? '') === '1' ? 'PRODUCTION' : 'HOMOLOGATION',
                 csc: legalEntity?.csc,
                 cscId: legalEntity?.cscId,
             });
@@ -142,7 +145,11 @@ export class FiscalDanfeService {
         const dest = nfe.dest || {};
         const total = nfe.total || {};
         const items = nfe.det || [];
-        const tpAmb = nfe.ide?.tpAmb;
+        // fast-xml-parser converte <tpAmb>1</tpAmb> pro NÚMERO 1 (parsing automático de
+        // tipos), não a string '1' — comparar com !== '1' sempre dava true e o DANFE
+        // mostrava "SEM VALOR FISCAL — HOMOLOGAÇÃO" mesmo em produção real. String() aqui
+        // normaliza antes de comparar.
+        const tpAmb = String(nfe.ide?.tpAmb ?? '');
 
         const itemsRows = items.map((item: any, idx: number) => {
             const p = item?.prod || {};

@@ -109,4 +109,30 @@ describe('FiscalDanfeService', () => {
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener.mock.calls[0][0]).toMatchObject({ nfeId: 'nfe-1' });
   });
+
+  it('produção real (tpAmb=1) não mostra o aviso de homologação nem usa a URL de QR code de homologação', async () => {
+    // fast-xml-parser converte <tpAmb>1</tpAmb> pro NÚMERO 1, não a string '1' —
+    // === '1' / !== '1' comparando direto sempre davam o resultado errado.
+    const prodXml = SAMPLE_XML.replace('<tpAmb>2</tpAmb>', '<tpAmb>1</tpAmb>');
+    const prodEvent = new FiscalNfeAuthorizedEvent(
+      'nfe-2', 'order-2', 'store-2', 'CHAVE456', 1, 43, prodXml, 'cliente@example.com', 'Cliente Teste',
+    );
+
+    let capturedHtml = '';
+    const puppeteer = require('puppeteer');
+    puppeteer.launch.mockResolvedValueOnce({
+      newPage: jest.fn().mockResolvedValue({
+        setContent: jest.fn().mockImplementation((html) => { capturedHtml = html; return Promise.resolve(); }),
+        pdf: jest.fn().mockResolvedValue(Buffer.from('fake-pdf')),
+      }),
+      close: jest.fn().mockResolvedValue(undefined),
+    });
+
+    await service.onAuthorized(prodEvent);
+
+    expect(qrCodeService.buildQrCodeDataUri).toHaveBeenCalledWith(
+      expect.objectContaining({ environment: 'PRODUCTION' }),
+    );
+    expect(capturedHtml).not.toContain('SEM VALOR FISCAL');
+  });
 });
