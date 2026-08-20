@@ -169,11 +169,14 @@ export class StoreService implements StorePort {
     const existing: FiscalChannel[] = store.fiscalChannels ?? [];
     const idx = existing.findIndex((c) => c.marketplaceTag === marketplaceTag && c.accountId === accountId);
     if (idx >= 0) {
-      existing[idx] = { ...existing[idx], series: input.series, marketplaceSellerId: input.marketplaceSellerId ?? existing[idx].marketplaceSellerId };
+      // Muta o subdocumento Mongoose in-place — reatribuir via spread (`{...existing[idx]}`)
+      // não copia os campos de um subdocumento corretamente e derruba marketplaceTag/accountId,
+      // quebrando a validação required do schema.
+      existing[idx].series = input.series;
+      if (input.marketplaceSellerId !== undefined) existing[idx].marketplaceSellerId = input.marketplaceSellerId;
     } else {
       existing.push({ marketplaceTag, accountId, series: input.series, counter: 0, marketplaceSellerId: input.marketplaceSellerId });
     }
-    store.fiscalChannels = existing;
     store.markModified('fiscalChannels');
     await store.save();
     this.invalidate();

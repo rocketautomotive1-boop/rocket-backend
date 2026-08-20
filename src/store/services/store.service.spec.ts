@@ -257,5 +257,31 @@ describe('StoreService', () => {
       ).rejects.toThrow(/já está em uso/);
       expect(saved.save).not.toHaveBeenCalled();
     });
+
+    it('atualiza a série de um canal existente sem derrubar marketplaceTag/accountId (mutação in-place, não spread)', async () => {
+      // Simula um Mongoose subdocument: spread ({...channel}) devolve {} (comportamento real
+      // de subdocumentos Mongoose), então só sobrevive se o código mutar os campos direto.
+      class FakeSubdocument {
+        constructor(public marketplaceTag: string, public accountId: string, public series: number, public counter: number) {}
+      }
+      const channel = new FakeSubdocument('rocket', 'ACC_ROCKET', 1, 1);
+      const saved = {
+        ...storeDoc(),
+        legalEntityId: 'legal1',
+        fiscalChannels: [channel],
+        markModified: jest.fn(),
+        save: jest.fn(),
+      };
+      modelMock.findById.mockReturnValue({ exec: async () => saved });
+      modelMock.findOne.mockReturnValue({ lean: () => ({ exec: async () => null }) });
+
+      await service.setFiscalChannel(STORE_ID, 'rocket', 'ACC_ROCKET', { series: 2 });
+
+      expect(saved.fiscalChannels[0].marketplaceTag).toBe('rocket');
+      expect(saved.fiscalChannels[0].accountId).toBe('ACC_ROCKET');
+      expect(saved.fiscalChannels[0].series).toBe(2);
+      expect(saved.fiscalChannels[0].counter).toBe(1); // preserva o contador existente
+      expect(saved.save).toHaveBeenCalled();
+    });
   });
 });
