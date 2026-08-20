@@ -72,6 +72,16 @@ export class OrderController {
             );
         }
 
+        // accountId é obrigatório para a resolução fiscal (Store.marketplaceAccounts →
+        // FiscalChannel) — sem ele o Order fica sem loja emissora resolvível.
+        const rocketAccount = (marketplace.accounts ?? []).find(a => a.isDefault) ?? marketplace.accounts?.[0];
+        if (!rocketAccount) {
+            throw new BadRequestException(
+                'Marketplace "Rocket" não tem nenhuma conta cadastrada — configure uma em Configurações > Marketplaces.',
+            );
+        }
+        const accountId = String((rocketAccount as any)._id);
+
         const productIds = body.items.map(i => i.productId);
         const products = await this.productRepository.findSummariesByIds(productIds);
         const titleById = new Map(products.map(p => [String(p._id), p.name]));
@@ -90,7 +100,7 @@ export class OrderController {
             },
         });
 
-        await this.ingest.ingest(externalId, marketplace.id, 'manual');
+        await this.ingest.ingest(externalId, marketplace.id, 'manual', accountId);
 
         const order = await this.orderRepository.findByExternalId(externalId);
         if (!order) {
