@@ -100,7 +100,13 @@ export class XmlBuilderService {
             CRT: isSimples ? '1' : '3',
           },
           dest: {
-            ...(orderData.buyer.cnpj ? { CNPJ: orderData.buyer.cnpj.replace(/\D/g, '') } : { CPF: (orderData.buyer.cpf || orderData.buyer.document || '00000000000').replace(/\D/g, '') }),
+            ...(() => {
+              const digits = (orderData.buyer.cnpj || orderData.buyer.cpf || orderData.buyer.document || '00000000000').replace(/\D/g, '');
+              // CNPJ tem 14 dígitos, CPF tem 11 — o schema XSD da NFe exige o elemento
+              // certo pro tamanho do documento (SEFAZ rejeita com "Falha no esquema XML"
+              // se um CNPJ de 14 dígitos for enviado como <CPF>).
+              return digits.length === 14 ? { CNPJ: digits } : { CPF: digits };
+            })(),
             // SEFAZ exige esse texto literal no xNome do destinatário quando tpAmb=2 (homologação);
             // sem ele, o lote é rejeitado com cStat 598 mesmo com todos os outros dados corretos.
             xNome: isProduction
