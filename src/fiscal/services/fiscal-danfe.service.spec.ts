@@ -135,4 +135,29 @@ describe('FiscalDanfeService', () => {
     );
     expect(capturedHtml).not.toContain('SEM VALOR FISCAL');
   });
+
+  it('preserva zero à esquerda em CNPJ/IE do destinatário (fast-xml-parser não deve converter pra número)', async () => {
+    const xmlWithLeadingZero = SAMPLE_XML.replace(
+      '<dest><CPF>06726952430</CPF>',
+      '<dest><CNPJ>03697945000100</CNPJ><IE>0580097323</IE>',
+    );
+    const eventWithZero = new FiscalNfeAuthorizedEvent(
+      'nfe-3', 'order-3', 'store-3', 'CHAVE789', 1, 44, xmlWithLeadingZero, 'cliente@example.com', 'Cliente Teste',
+    );
+
+    let capturedHtml = '';
+    const puppeteer = require('puppeteer');
+    puppeteer.launch.mockResolvedValueOnce({
+      newPage: jest.fn().mockResolvedValue({
+        setContent: jest.fn().mockImplementation((html) => { capturedHtml = html; return Promise.resolve(); }),
+        pdf: jest.fn().mockResolvedValue(Buffer.from('fake-pdf')),
+      }),
+      close: jest.fn().mockResolvedValue(undefined),
+    });
+
+    await service.onAuthorized(eventWithZero);
+
+    expect(capturedHtml).toContain('03.697.945/0001-00');
+    expect(capturedHtml).toContain('0580097323');
+  });
 });

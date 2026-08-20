@@ -25,7 +25,12 @@ import { DanfeQrCodeService } from './danfe-qrcode.service';
 @Injectable()
 export class FiscalDanfeService {
     private readonly logger = new Logger(FiscalDanfeService.name);
-    private readonly xmlParser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+    // parseTagValue: false — sem isso, fast-xml-parser converte automaticamente qualquer
+    // tag numérica pro tipo number, derrubando zeros à esquerda (CNPJ '03697945000100' vira
+    // 3697945000100, IE '0580097323' vira 580097323) e quebrando comparações estritas com
+    // string (tpAmb '1' virava 1, comparado errado contra '1'). Preferível manter tudo
+    // string e converter explicitamente (Number(...)) só onde o template faz contas.
+    private readonly xmlParser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', parseTagValue: false });
 
     constructor(
         @InjectModel(FiscalDocumentModel.name)
