@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Body, Param, Query, NotFoundException, BadRequestException, HttpCode, Inject } from '@nestjs/common';
-import { Types } from 'mongoose';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import { ProductRepository } from '../product/product.repository';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
 import { OrderRepository } from './order.repository';
@@ -11,6 +12,17 @@ import { OrderIngestService } from './ingest/order-ingest.service';
 import { OrderMetricsService } from './observability/order-metrics.service';
 import { MarketplaceOrderService } from '../marketplace/services/marketplace-order.service';
 import { SaleNotificationReconcilerService } from './services/sale-notification-reconciler.service';
+import { MarketplaceConfigCacheService } from '../marketplace/services/marketplace-config-cache.service';
+import {
+    BalcaoOrderDraftModel,
+    BalcaoOrderDraftDocument,
+} from './schemas/balcao-order-draft.schema';
+
+interface CreateBalcaoOrderItemDto {
+    productId: string;
+    quantity: number;
+    unitPrice: number;
+}
 
 @Controller('orders')
 export class OrderController {
@@ -26,7 +38,66 @@ export class OrderController {
         private readonly marketplaceOrderService: MarketplaceOrderService,
         private readonly saleNotificationReconciler: SaleNotificationReconcilerService,
         @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+        private readonly marketplaceConfigCache: MarketplaceConfigCacheService,
+        @InjectModel(BalcaoOrderDraftModel.name)
+        private readonly balcaoDraftModel: Model<BalcaoOrderDraftDocument>,
     ) { }
+
+    /**
+     * Cria um pedido de venda balcão (loja física). Entra pelo mesmo pipeline de
+     * ingest usado por marketplaces externos — via RocketOrderAdapter, que lê o
+     * rascunho gravado aqui. Ver docs/superpowers/specs/2026-08-20-balcao-order-design.md.
+     */
+    @Post('balcao')
+    @HttpCode(201)
+    async createBalcaoOrder(@Body() body: { items: CreateBalcaoOrderItemDto[] }) {
+        if (!body?.items?.length) {
+            throw new BadRequestException('Informe ao menos um item.');
+        }
+        for (const item of body.items) {
+            if (!item.productId || !Types.ObjectId.isValid(item.productId)) {
+                throw new BadRequestException(`productId inválido: ${item.productId}`);
+            }
+            if (!item.quantity || item.quantity <= 0) {
+                throw new BadRequestException(`Quantidade inválida para o produto ${item.productId}`);
+            }
+        }
+
+        // Nome, não tag: é a chave usada por MarketplaceAdapterRegistry.getOrderAdapter(mkt.name)
+        // — mesmo padrão de RocketProductAdapter, que já publica sob este marketplace.
+        const marketplace = await this.marketplaceConfigCache.getByName('Rocket');
+        if (!marketplace) {
+            throw new BadRequestException(
+                'Marketplace interno "Rocket" não encontrado (esperado name="Rocket" em marketplaces).',
+            );
+        }
+
+        const productIds = body.items.map(i => i.productId);
+        const products = await this.productRepository.findSummariesByIds(productIds);
+        const titleById = new Map(products.map(p => [String(p._id), p.name]));
+
+        const externalId = `BALCAO-${Date.now()}`;
+        await this.balcaoDraftModel.create({
+            externalId,
+            status: 'pending',
+            data: {
+                items: body.items.map(i => ({
+                    productId: i.productId,
+                    title: titleById.get(i.productId) || '',
+                    quantity: i.quantity,
+                    unitPrice: i.unitPrice,
+                })),
+            },
+        });
+
+        await this.ingest.ingest(externalId, marketplace.id, 'manual');
+
+        const order = await this.orderRepository.findByExternalId(externalId);
+        if (!order) {
+            throw new BadRequestException('Falha ao criar pedido balcão — verifique os produtos informados.');
+        }
+        return { orderId: order._id.toString(), externalId };
+    }
 
     /**
      * Reenvia a notificação WhatsApp de uma venda. Aceita externalId ou ObjectId.

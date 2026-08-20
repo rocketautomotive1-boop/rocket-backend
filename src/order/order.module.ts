@@ -8,6 +8,7 @@ import {
 } from './reconcile/reconcile-checkpoint.schema';
 import { MarketplaceModel, MarketplaceSchema } from '../marketplace/schemas/marketplace.schema';
 import { QueueRecordModel, QueueRecordSchema } from '../queue/schemas/queue-record.schema';
+import { BalcaoOrderDraftModel, BalcaoOrderDraftSchema } from './schemas/balcao-order-draft.schema';
 
 import { MarketplaceModule } from '../marketplace/marketplace.module';
 import { ProductModule } from '../product/product.module';
@@ -74,6 +75,7 @@ import { WhatsAppModule } from '../whatsapp/whatsapp.module';
             { name: ReconcileCheckpointModel.name, schema: ReconcileCheckpointSchema },
             { name: MarketplaceModel.name, schema: MarketplaceSchema },
             { name: QueueRecordModel.name, schema: QueueRecordSchema },
+            { name: BalcaoOrderDraftModel.name, schema: BalcaoOrderDraftSchema },
         ]),
         MarketplaceModule,
         ProductModule,

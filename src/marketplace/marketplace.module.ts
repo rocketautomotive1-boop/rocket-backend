@@ -80,6 +80,11 @@ import { MarketplaceRegistryModule } from './marketplace-registry.module';
 import { MarketplaceAuthModule } from './auth/marketplace-auth.module';
 import { SearchModule } from '../search/search.module';
 import { RocketProductAdapter } from './adapters/rocket/rocket-product.adapter';
+import { RocketOrderAdapter } from './adapters/rocket/rocket-order.adapter';
+import {
+  BalcaoOrderDraftModel,
+  BalcaoOrderDraftSchema,
+} from '../order/schemas/balcao-order-draft.schema';
 import { MarketplaceOrchestratorModule } from '../marketplace-orchestrator/marketplace-orchestrator.module';
 
 import { TikTokShopAdapter } from './adapters/tiktok-shop/tiktok-shop.adapter';
@@ -131,6 +136,7 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
         name: 'PublicationAttempt',
         schema: require('./schemas/publication-attempt.schema').PublicationAttemptSchema
       },
+      { name: BalcaoOrderDraftModel.name, schema: BalcaoOrderDraftSchema },
     ]),
     MarketplaceRegistryModule,
     MarketplaceAuthModule,
@@ -188,6 +194,7 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
     AuthRetryService,
     MlHttpClient,
     RocketProductAdapter,
+    RocketOrderAdapter,
     TikTokShopAdapter,
     TikTokShopAuthAdapter,
     TikTokShopProductAdapter,

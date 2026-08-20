@@ -125,6 +125,9 @@ export class OrderMapperService {
             // ML-specific: pack_id is needed for fiscal document upload
             packId: externalOrder.pack_id ? String(externalOrder.pack_id) : undefined,
             marketplaceTag: externalOrder.marketplaceName || undefined,
+            // Informativo (analytics/notificação) — venda balcão é a única origem hoje que
+            // não vem de webhook/reconcile de marketplace externo.
+            originChannel: externalOrder.marketplaceName === 'Rocket' ? 'balcao' : undefined,
             customer: {
                 name: buyer.name || `${buyer.first_name || ''} ${buyer.last_name || ''}`.trim() || buyer.nickname || '',
                 document: buyer.document || buyer.billing_info?.doc_number || '',
