@@ -61,3 +61,38 @@ describe('XmlBuilderService — destinatário CPF/CNPJ', () => {
         expect(xml).not.toContain('<CNPJ>06726952430</CNPJ>');
     });
 });
+
+describe('XmlBuilderService — indIEDest / IE do destinatário', () => {
+    let service: XmlBuilderService;
+
+    beforeEach(() => {
+        service = new XmlBuilderService();
+    });
+
+    it('indIEDest=1 + <IE> quando o destinatário PJ tem IE informada (contribuinte)', async () => {
+        const orderData = baseOrderData({
+            document: '03697945000100',
+            ie: '0580097323',
+            name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+        });
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
+
+        expect(xml).toContain('<IE>0580097323</IE>');
+        expect(xml).toContain('<indIEDest>1</indIEDest>');
+    });
+
+    it('indIEDest=9 sem <IE> quando o destinatário não informa IE (não contribuinte)', async () => {
+        const orderData = baseOrderData({
+            document: '03697945000100',
+            name: 'Empresa Sem IE Informada',
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+        });
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
+
+        expect(xml).toContain('<indIEDest>9</indIEDest>');
+        expect(xml.indexOf('<dest>') < xml.indexOf('<IE>') && xml.indexOf('<IE>') < xml.indexOf('</dest>')).toBe(false);
+    });
+});

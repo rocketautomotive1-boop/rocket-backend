@@ -125,7 +125,13 @@ export class XmlBuilderService {
               xPais: 'BRASIL',
               ...(orderData.buyer.phone ? { fone: orderData.buyer.phone.replace(/\D/g, '') } : {})
             },
-            indIEDest: '9',
+            // indIEDest: 1=Contribuinte ICMS (exige <IE>), 2=Contribuinte isento, 9=Não
+            // Contribuinte. Destinatário PJ com IE informada é contribuinte — declarar como
+            // "9" nesse caso causa rejeição SEFAZ 232 "IE do destinatário não informada"
+            // (a SEFAZ cruza o CNPJ com o cadastro estadual e espera a IE quando ela existe).
+            ...(orderData.buyer.ie
+              ? { IE: orderData.buyer.ie.replace(/\D/g, ''), indIEDest: '1' }
+              : { indIEDest: '9' }),
           },
           det: orderData.items.map((item: any, index: number) => {
             const vProd = Number(item.quantity) * Number(item.unit_price);
