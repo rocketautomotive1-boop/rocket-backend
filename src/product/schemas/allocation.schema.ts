@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 import { BoxModel, BoxSchema } from './box.schema';
 
 export type AllocationDocument = AllocationModel & Document;
@@ -23,7 +23,7 @@ export class AllocationModel {
     // pelo schema. storeId nunca é denormalizado aqui: quando o warehouse é
     // store-aware, a loja é sempre obtida por join em StoreListingWarehouseModel,
     // mesmo padrão de StoreListingDamagedAllocationModel.
-    @Prop({ type: Types.ObjectId, required: true, index: true })
+    @Prop({ type: MongooseSchema.Types.ObjectId, required: true, index: true })
     warehouseId: Types.ObjectId;
 
     @Prop({ required: true, index: true })

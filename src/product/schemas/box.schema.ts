@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Types, Schema as MongooseSchema } from 'mongoose';
 
 export type BoxDocument = BoxModel & Document;
 
@@ -28,7 +28,7 @@ export class BoxModel {
     @Prop({ type: String })
     color?: string; // Hex color for ui purposes if any
 
-    @Prop({ type: [Types.ObjectId], default: [] })
+    @Prop({ type: [MongooseSchema.Types.ObjectId], default: [] })
     products: Types.ObjectId[];
 }
 
