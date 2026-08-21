@@ -18,7 +18,12 @@ export type AllocationDocument = AllocationModel & Document;
     }
 })
 export class AllocationModel {
-    @Prop({ type: Types.ObjectId, ref: 'WarehouseModel', required: true, index: true })
+    // Referencia WarehouseModel (legado, sem loja) OU StoreListingWarehouseModel
+    // (novo, com storeId) — o tipo de warehouse é resolvido por quem chama, não
+    // pelo schema. storeId nunca é denormalizado aqui: quando o warehouse é
+    // store-aware, a loja é sempre obtida por join em StoreListingWarehouseModel,
+    // mesmo padrão de StoreListingDamagedAllocationModel.
+    @Prop({ type: Types.ObjectId, required: true, index: true })
     warehouseId: Types.ObjectId;
 
     @Prop({ required: true, index: true })

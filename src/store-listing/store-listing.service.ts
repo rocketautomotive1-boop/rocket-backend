@@ -33,6 +33,7 @@ import {
   StoreListingDamagedAllocationModel,
   StoreListingDamagedAllocationDocument,
 } from './schemas/store-listing-damaged-allocation.schema';
+import { AllocationModel, AllocationDocument } from '../product/schemas/allocation.schema';
 import { StoreListingPort } from './ports/store-listing.port';
 import { StockMovementType } from '../stock/domain/movement-type';
 import { StockCondition } from '../stock/schemas/stock-lot.schema';
@@ -57,6 +58,8 @@ export class StoreListingService implements StoreListingPort {
     private readonly storeListingDamagedUnitModel: Model<StoreListingDamagedUnitDocument>,
     @InjectModel(StoreListingDamagedAllocationModel.name)
     private readonly storeListingDamagedAllocationModel: Model<StoreListingDamagedAllocationDocument>,
+    @InjectModel(AllocationModel.name)
+    private readonly allocationModel: Model<AllocationDocument>,
   ) {}
 
   async create(productId: string, storeId: string): Promise<StoreListingModel & { id: string }> {
@@ -438,6 +441,40 @@ export class StoreListingService implements StoreListingPort {
 
   async listWarehouses(storeId: string): Promise<Array<StoreListingWarehouseModel & { id: string }>> {
     const docs = await this.storeListingWarehouseModel.find({ storeId }).exec();
+    return docs.map((doc: any) => ({ ...(doc.toObject?.() ?? doc), id: String(doc._id) }));
+  }
+
+  async createAllocation(
+    storeId: string,
+    params: { warehouseId: string; locationPath: string; metadata?: Record<string, any>; available?: boolean },
+  ): Promise<AllocationModel & { id: string }> {
+    const warehouse = await this.storeListingWarehouseModel.findById(params.warehouseId).exec();
+    if (!warehouse) throw new BadRequestException(`Depósito ${params.warehouseId} não encontrado.`);
+    if (String((warehouse as any).storeId) !== String(storeId)) {
+      throw new BadRequestException('O depósito informado pertence a outra loja.');
+    }
+    try {
+      const doc = await this.allocationModel.create({
+        warehouseId: params.warehouseId,
+        locationPath: params.locationPath,
+        metadata: params.metadata ?? {},
+        available: params.available ?? true,
+        active: true,
+      });
+      return { ...doc.toObject(), id: String(doc._id) };
+    } catch (err: any) {
+      if (err?.code === 11000) {
+        throw new BadRequestException('Já existe uma alocação com este caminho neste depósito.');
+      }
+      throw err;
+    }
+  }
+
+  async listAllocations(storeId: string): Promise<Array<AllocationModel & { id: string }>> {
+    const warehouses = await this.storeListingWarehouseModel.find({ storeId }).select('_id').lean().exec();
+    const warehouseIds = warehouses.map((w) => w._id);
+    if (warehouseIds.length === 0) return [];
+    const docs = await this.allocationModel.find({ warehouseId: { $in: warehouseIds } }).exec();
     return docs.map((doc: any) => ({ ...(doc.toObject?.() ?? doc), id: String(doc._id) }));
   }
 

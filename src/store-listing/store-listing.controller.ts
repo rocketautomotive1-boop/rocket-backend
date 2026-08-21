@@ -18,6 +18,7 @@ import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { MarkUnitsAsDamagedDto } from './dto/mark-units-as-damaged.dto';
 import { UpdateDamagedUnitDto } from './dto/update-damaged-unit.dto';
 import { AllocateDamagedUnitDto } from './dto/allocate-damaged-unit.dto';
+import { CreateAllocationDto } from './dto/create-allocation.dto';
 
 /**
  * Depósitos e unidades avariadas do StoreListingModule. storeId nunca vem do
@@ -52,6 +53,20 @@ export class StoreListingController {
   async listWarehouses(@Req() req: any) {
     const storeId = this.requireStoreId(req);
     return this.storeListing.listWarehouses(storeId);
+  }
+
+  @Post('allocations')
+  @ApiOperation({ summary: 'Cria uma alocação (localização física) num depósito da loja do usuário autenticado' })
+  async createAllocation(@Req() req: any, @Body() body: CreateAllocationDto) {
+    const storeId = this.requireStoreId(req);
+    return this.storeListing.createAllocation(storeId, body);
+  }
+
+  @Get('allocations')
+  @ApiOperation({ summary: 'Lista as alocações dos depósitos da loja do usuário autenticado' })
+  async listAllocations(@Req() req: any) {
+    const storeId = this.requireStoreId(req);
+    return this.storeListing.listAllocations(storeId);
   }
 
   @Post('products/:productId/damaged-units')

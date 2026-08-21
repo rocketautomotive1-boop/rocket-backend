@@ -7,6 +7,7 @@ import {
   StoreListingDamagedUnitModel,
 } from '../schemas/store-listing-damaged-unit.schema';
 import { StoreListingDamagedAllocationModel } from '../schemas/store-listing-damaged-allocation.schema';
+import { AllocationModel } from '../../product/schemas/allocation.schema';
 import { StockMovementType } from '../../stock/domain/movement-type';
 import { StockCondition } from '../../stock/schemas/stock-lot.schema';
 
@@ -98,6 +99,18 @@ export interface StoreListingPort {
   ): Promise<StoreListingWarehouseModel & { id: string }>;
   listWarehouses(storeId: string): Promise<Array<StoreListingWarehouseModel & { id: string }>>;
   findWarehouseById(warehouseId: string): Promise<(StoreListingWarehouseModel & { id: string }) | null>;
+
+  /**
+   * Allocations (localização física dentro de um depósito) da loja do usuário
+   * autenticado. warehouseId precisa pertencer à mesma loja — validado aqui,
+   * mesmo padrão de allocateDamagedUnit. storeId nunca é denormalizado em
+   * AllocationModel; é sempre obtido por join em StoreListingWarehouseModel.
+   */
+  createAllocation(
+    storeId: string,
+    params: { warehouseId: string; locationPath: string; metadata?: Record<string, any>; available?: boolean },
+  ): Promise<AllocationModel & { id: string }>;
+  listAllocations(storeId: string): Promise<Array<AllocationModel & { id: string }>>;
 
   markUnitsAsDamaged(params: {
     productId: string;
