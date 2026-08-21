@@ -22,7 +22,6 @@ import { ProductDiscoveryModel, ProductDiscoverySchema } from './schemas/product
 import { AllocationModel, AllocationSchema } from './schemas/allocation.schema';
 import { WarehouseModel, WarehouseSchema } from './schemas/warehouse.schema';
 import { BoxModel, BoxSchema } from './schemas/box.schema';
-import { BoxItemModel, BoxItemSchema } from './schemas/box-item.schema';
 import { UserModel, UserSchema } from '../auth/schemas/user.schema';
 
 import { ProductService } from './product.service';
@@ -87,8 +86,6 @@ import { BoxController } from './controllers/box.controller';
 import { ProductConditionService } from './services/product-condition.service';
 import { WarehouseService } from './services/warehouse.service';
 import { BoxService } from './services/box.service';
-import { BoxItemService } from './services/box-item.service';
-import { BoxItemController } from './controllers/box-item.controller';
 import { ProductPublicationLogService } from './services/product-publication-log.service';
 import { ProductPublicationLogController } from './controllers/product-publication-log.controller';
 import { OrderEventsListener } from './listeners/order-events.listener';
@@ -160,7 +157,6 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
       { name: AllocationModel.name, schema: AllocationSchema },
       { name: WarehouseModel.name, schema: WarehouseSchema },
       // { name: BoxModel.name, schema: BoxSchema }, // Agora é sub-documento de Allocation
-      { name: BoxItemModel.name, schema: BoxItemSchema },
       { name: 'MarketplaceModel', schema: require('../marketplace/schemas/marketplace.schema').MarketplaceSchema },
       { name: UserModel.name, schema: UserSchema },
     ]),
@@ -201,7 +197,6 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
     ProductMovementController,
     WarehouseController,
     BoxController,
-    BoxItemController,
     ProductPublicationLogController,
     MigrationController,
     CrossReferenceController,
@@ -238,7 +233,6 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
     ProductConditionService,
     WarehouseService,
     BoxService,
-    BoxItemService,
     ProductPublicationLogService,
     OrderEventsListener, // Event listener for order sync
     MigrationService,
@@ -281,7 +275,6 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
     ProductConditionService,
     WarehouseService,
     BoxService,
-    BoxItemService,
     ProductPublicationLogService,
     MigrationService,
     CrossReferenceService,

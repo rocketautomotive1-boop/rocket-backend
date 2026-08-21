@@ -24,7 +24,6 @@ import { CategorySnapshotService } from './services/category-snapshot.service';
 import { CreateFromDiscoveryDto } from './dto/create-from-discovery.dto';
 // import { PublishService } from '../publish/publish.service';
 // import { calculatePublishPriority } from '../queue/publish-priority';
-import { BoxItemService } from './services/box-item.service';
 import { BoxService } from './services/box.service';
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { RembgEnqueueService } from '../gateways/rembg-enqueue.service';
@@ -50,7 +49,6 @@ export class ProductController {
     private readonly productCategoryService: ProductCategoryService,
     private readonly titleCategoryHintService: TitleCategoryHintService,
     private readonly productTitleService: ProductTitleService,
-    private readonly boxItemService: BoxItemService,
     private readonly boxService: BoxService,
     private readonly discoveryService: ProductDiscoveryService,
     private readonly sourceRefreshService: SourceRefreshService,
@@ -1556,85 +1554,6 @@ export class ProductController {
     // [REF] Return specific title DTO
     return this.productTitleService.findById(titleId);
   }
-
-  /*
-    // Endpoints para associação com BoxItems
-    @Post(':id/box-item')
-    @ApiOperation({
-      summary: 'Associar produto a um box através de BoxItem',
-      description: 'Adiciona um produto a uma caixa com condição e quantidade'
-    })
-    @ApiResponse({ status: 201, description: 'Produto associado ao box com sucesso' })
-    @ApiParam({ name: 'id', description: 'ID do produto' })
-    async associateWithBoxItem(
-      @Param('id', ParseIntPipe) productId: number,
-      @Body() associateData: AssociateProductBoxItemDto
-    ): Promise<BoxItem> {
-      const boxItem = await this.productService.associateWithBoxItem(
-        productId,
-        associateData.boxId,
-        associateData.conditionId,
-        associateData.quantity
-      );
-  
-      // Auto-publish (Inventory changed)
-      this.triggerAutoPublish(productId, 'associateBoxItem');
-  
-      return boxItem;
-    }
-  
-    @Delete('box-item/:boxItemId')
-    @ApiOperation({
-      summary: 'Remover produto de um box',
-      description: 'Remove um produto de uma caixa (deleta BoxItem)'
-    })
-    @ApiResponse({ status: 200, description: 'Produto removido do box com sucesso' })
-    @ApiParam({ name: 'boxItemId', description: 'ID do BoxItem' })
-    async disassociateFromBoxItem(
-      @Param('boxItemId') boxItemId: string
-    ): Promise<void> {
-      // Need to find projectId before delete to trigger auto-publish
-      // Assuming simple disassociate doesn't return product ID easily, skip or fetch first?
-      // Let's optimize: skip for now or fetch. 
-      // Fetching boxItem to get product ID
-      try {
-        const boxItem = await this.productService.findBoxItemById(boxItemId);
-        if (boxItem && boxItem.product) {
-          await this.productService.disassociateFromBoxItem(boxItemId);
-          this.triggerAutoPublish(boxItem.product.id, 'disassociateBoxItem');
-          return;
-        }
-      } catch (e) { }
-  
-      return this.productService.disassociateFromBoxItem(boxItemId);
-    }
-  
-    @Get('box/:boxId/products')
-    @ApiOperation({
-      summary: 'Buscar produtos por box',
-      description: 'Retorna todos os produtos associados a um box específico através de BoxItems'
-    })
-    @ApiResponse({ status: 200, description: 'Produtos do box encontrados' })
-    @ApiParam({ name: 'boxId', description: 'ID do box' })
-    async findProductsByBox(
-      @Param('boxId', ParseIntPipe) boxId: number
-    ): Promise<Product[]> {
-      return this.productService.findProductsByBox(boxId);
-    }
-  
-    @Get(':id/box-items')
-    @ApiOperation({
-      summary: 'Buscar BoxItems de um produto',
-      description: 'Retorna todos os BoxItems associados a um produto específico'
-    })
-    @ApiResponse({ status: 200, description: 'BoxItems do produto encontrados' })
-    @ApiParam({ name: 'id', description: 'ID do produto' })
-    async findBoxItemsByProduct(
-      @Param('id', ParseIntPipe) productId: number
-    ): Promise<BoxItem[]> {
-      return this.productService.findBoxItemsByProduct(productId);
-    }
-  */
 
   @Get(':id/movements')
   @ApiOperation({

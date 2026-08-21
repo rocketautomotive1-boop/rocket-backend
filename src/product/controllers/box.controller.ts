@@ -1,17 +1,13 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Query } from '@nestjs/common';
 import { BoxService } from '../services/box.service';
-import { BoxItemService } from '../services/box-item.service';
 import { CreateBoxDto } from '../dto/create-box.dto';
 import { UpdateBoxDto } from '../dto/update-box.dto';
-import { CreateBoxItemDto } from '../dto/create-box-item.dto';
-import { AddBoxItemDto } from '../dto/add-box-item.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 @Controller('boxes')
 export class BoxController {
   constructor(
     private readonly boxService: BoxService,
-    private readonly boxItemService: BoxItemService,
   ) { }
 
   @Post()
@@ -44,30 +40,6 @@ export class BoxController {
     return this.boxService.getBoxItems(id);
   }
 
-  @Post(':id/items')
-  addItemToBox(@Param('id') id: string, @Body() addBoxItemDto: AddBoxItemDto) {
-    const createBoxItemDto: CreateBoxItemDto = {
-      boxId: id,
-      productId: addBoxItemDto.productId,
-      conditionId: addBoxItemDto.conditionId,
-      quantity: addBoxItemDto.quantity
-    };
-
-    return this.boxItemService.create(createBoxItemDto);
-  }
-
-  @Post(':id/items/multiple')
-  addMultipleItemsToBox(@Param('id') id: string, @Body() items: AddBoxItemDto[]) {
-    const createBoxItemsDto: CreateBoxItemDto[] = items.map(item => ({
-      boxId: id,
-      productId: item.productId,
-      conditionId: item.conditionId,
-      quantity: item.quantity
-    }));
-
-    return this.boxItemService.addMultipleItems(id, createBoxItemsDto);
-  }
-
   @Get(':id/movements')
   getBoxMovements(@Param('id') id: string) {
     return this.boxService.getBoxMovements(id);
@@ -76,11 +48,6 @@ export class BoxController {
   @Get(':id/allocation')
   getBoxAllocation(@Param('id') id: string) {
     return this.boxService.getBoxAllocation(id);
-  }
-
-  @Get(':id/summary')
-  getBoxSummary(@Param('id') id: string) {
-    return this.boxItemService.getBoxItemsSummary(id);
   }
 
   @Get('code/:code')
@@ -93,16 +60,6 @@ export class BoxController {
     return this.boxService.getBoxItemsByCode(code, warehouseId);
   }
 
-  @Post('code/:code/items')
-  addItemToBoxByCode(@Param('code') code: string, @Body() addBoxItemDto: AddBoxItemDto, @Query('warehouseId') warehouseId?: string) {
-    return this.boxItemService.addItemToBoxByCode(code, addBoxItemDto, warehouseId);
-  }
-
-  @Post('code/:code/items/multiple')
-  addMultipleItemsToBoxByCode(@Param('code') code: string, @Body() items: AddBoxItemDto[], @Query('warehouseId') warehouseId?: string) {
-    return this.boxItemService.addMultipleItemsToBoxByCode(code, items, warehouseId);
-  }
-
   @Get('code/:code/movements')
   getBoxMovementsByCode(@Param('code') code: string, @Query('warehouseId') warehouseId?: string) {
     return this.boxService.getBoxMovementsByCode(code, warehouseId);
@@ -111,11 +68,6 @@ export class BoxController {
   @Get('code/:code/allocation')
   getBoxAllocationByCode(@Param('code') code: string, @Query('warehouseId') warehouseId?: string) {
     return this.boxService.getBoxAllocationByCode(code, warehouseId);
-  }
-
-  @Get('code/:code/summary')
-  getBoxSummaryByCode(@Param('code') code: string, @Query('warehouseId') warehouseId?: string) {
-    return this.boxItemService.getBoxItemsSummaryByCode(code, warehouseId);
   }
 
   @Post('generate')
