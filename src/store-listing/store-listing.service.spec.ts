@@ -38,6 +38,7 @@ describe('StoreListingService', () => {
         { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: {} },
         { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: {} },
         { provide: getModelToken('AllocationModel'), useValue: {} },
+        { provide: getModelToken('ProductModel'), useValue: {} },
       ],
     }).compile();
 
@@ -258,6 +259,7 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: {} },
           { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: {} },
           { provide: getModelToken('AllocationModel'), useValue: {} },
+        { provide: getModelToken('ProductModel'), useValue: {} },
         ],
       }).compile();
 
@@ -609,6 +611,7 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: {} },
           { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: {} },
           { provide: getModelToken('AllocationModel'), useValue: {} },
+        { provide: getModelToken('ProductModel'), useValue: {} },
         ],
       }).compile();
 
@@ -807,6 +810,7 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: damagedUnitModelMock },
           { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: {} },
           { provide: getModelToken('AllocationModel'), useValue: {} },
+        { provide: getModelToken('ProductModel'), useValue: {} },
         ],
       }).compile();
 
@@ -897,6 +901,7 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: damagedUnitModelMock2 },
           { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: damagedAllocationModelMock },
           { provide: getModelToken('AllocationModel'), useValue: {} },
+        { provide: getModelToken('ProductModel'), useValue: {} },
         ],
       }).compile();
 

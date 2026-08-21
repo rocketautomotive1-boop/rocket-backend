@@ -9,6 +9,7 @@ import { StoreListingWarehouseModel, StoreListingWarehouseSchema } from './schem
 import { StoreListingDamagedUnitModel, StoreListingDamagedUnitSchema } from './schemas/store-listing-damaged-unit.schema';
 import { StoreListingDamagedAllocationModel, StoreListingDamagedAllocationSchema } from './schemas/store-listing-damaged-allocation.schema';
 import { AllocationModel, AllocationSchema } from '../product/schemas/allocation.schema';
+import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
 import { StoreListingService } from './store-listing.service';
 import { StoreListingController } from './store-listing.controller';
 import { STORE_LISTING_PORT } from './ports/store-listing.port';
@@ -42,6 +43,7 @@ import { AuthModule } from '../auth/auth.module';
       { name: StoreListingDamagedUnitModel.name, schema: StoreListingDamagedUnitSchema },
       { name: StoreListingDamagedAllocationModel.name, schema: StoreListingDamagedAllocationSchema },
       { name: AllocationModel.name, schema: AllocationSchema },
+      { name: ProductModel.name, schema: ProductSchema },
     ]),
     AuthModule,
   ],

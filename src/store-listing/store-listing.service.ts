@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { StoreListingModel, StoreListingDocument } from './schemas/store-listing.schema';
@@ -34,6 +34,8 @@ import {
   StoreListingDamagedAllocationDocument,
 } from './schemas/store-listing-damaged-allocation.schema';
 import { AllocationModel, AllocationDocument } from '../product/schemas/allocation.schema';
+import { BoxModel } from '../product/schemas/box.schema';
+import { ProductModel, ProductDocument } from '../product/schemas/product.schema';
 import { StoreListingPort } from './ports/store-listing.port';
 import { StockMovementType } from '../stock/domain/movement-type';
 import { StockCondition } from '../stock/schemas/stock-lot.schema';
@@ -60,6 +62,8 @@ export class StoreListingService implements StoreListingPort {
     private readonly storeListingDamagedAllocationModel: Model<StoreListingDamagedAllocationDocument>,
     @InjectModel(AllocationModel.name)
     private readonly allocationModel: Model<AllocationDocument>,
+    @InjectModel(ProductModel.name)
+    private readonly productModel: Model<ProductDocument>,
   ) {}
 
   async create(productId: string, storeId: string): Promise<StoreListingModel & { id: string }> {
@@ -476,6 +480,269 @@ export class StoreListingService implements StoreListingPort {
     if (warehouseIds.length === 0) return [];
     const docs = await this.allocationModel.find({ warehouseId: { $in: warehouseIds } }).exec();
     return docs.map((doc: any) => ({ ...(doc.toObject?.() ?? doc), id: String(doc._id) }));
+  }
+
+  private readonly PRODUCT_SELECT = 'partNumber price costPrice listPrice brands images sku slug';
+
+  /** Resolve a allocation e confirma que o warehouse dela pertence à loja. NotFoundException se não. */
+  private async resolveAllocationInStore(storeId: string, allocationId: string): Promise<AllocationDocument> {
+    if (!Types.ObjectId.isValid(allocationId)) throw new NotFoundException('Alocação não encontrada');
+    const allocation = await this.allocationModel.findById(allocationId).exec();
+    if (!allocation) throw new NotFoundException('Alocação não encontrada');
+    const warehouse = await this.storeListingWarehouseModel.findById(allocation.warehouseId).exec();
+    if (!warehouse || String((warehouse as any).storeId) !== String(storeId)) {
+      throw new NotFoundException('Alocação não encontrada');
+    }
+    return allocation;
+  }
+
+  /** Resolve a allocation dona de um box e confirma a loja, dado o id do box. */
+  private async resolveAllocationByBoxId(storeId: string, boxId: string): Promise<AllocationDocument> {
+    if (!Types.ObjectId.isValid(boxId)) throw new NotFoundException('Box não encontrado');
+    const allocation = await this.allocationModel.findOne({ 'boxes._id': new Types.ObjectId(boxId) }).exec();
+    if (!allocation) throw new NotFoundException('Box não encontrado');
+    const warehouse = await this.storeListingWarehouseModel.findById(allocation.warehouseId).exec();
+    if (!warehouse || String((warehouse as any).storeId) !== String(storeId)) {
+      throw new NotFoundException('Box não encontrado');
+    }
+    return allocation;
+  }
+
+  private generateBoxCode(): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let out = '';
+    for (let i = 0; i < 22; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
+    return out;
+  }
+
+  private toBoxWithContext(box: any, allocation: AllocationDocument) {
+    const boxObj = box.toObject ? box.toObject() : JSON.parse(JSON.stringify(box));
+    return { ...boxObj, id: String(box._id), allocationId: String(allocation._id), warehouseId: String(allocation.warehouseId) };
+  }
+
+  async createBox(
+    storeId: string,
+    allocationId: string,
+    params: { code?: string; description?: string },
+  ): Promise<BoxModel & { id: string; allocationId: string }> {
+    const allocation = await this.resolveAllocationInStore(storeId, allocationId);
+    const code = params.code || this.generateBoxCode();
+    const box: any = { code, description: params.description, itemsCount: 0, products: [] };
+    try {
+      allocation.boxes.push(box as BoxModel);
+      await allocation.save();
+    } catch (err: any) {
+      if (err?.code === 11000) throw new BadRequestException('Já existe um box com este código.');
+      throw err;
+    }
+    const created = allocation.boxes[allocation.boxes.length - 1];
+    return this.toBoxWithContext(created, allocation);
+  }
+
+  async listBoxes(
+    storeId: string,
+  ): Promise<Array<BoxModel & { id: string; allocationId: string; warehouseId: string }>> {
+    const warehouses = await this.storeListingWarehouseModel.find({ storeId }).select('_id').lean().exec();
+    const warehouseIds = warehouses.map((w) => w._id);
+    if (warehouseIds.length === 0) return [];
+    const allocations = await this.allocationModel.find({ warehouseId: { $in: warehouseIds } }).exec();
+    const out: any[] = [];
+    for (const allocation of allocations) {
+      for (const box of allocation.boxes) out.push(this.toBoxWithContext(box, allocation));
+    }
+    return out;
+  }
+
+  async getBox(
+    storeId: string,
+    boxId: string,
+  ): Promise<BoxModel & { id: string; allocationId: string; warehouseId: string }> {
+    const allocation = await this.resolveAllocationByBoxId(storeId, boxId);
+    const box = allocation.boxes.find((b) => String((b as any)._id) === String(boxId));
+    return this.toBoxWithContext(box, allocation);
+  }
+
+  async getBoxByCode(
+    storeId: string,
+    code: string,
+  ): Promise<BoxModel & { id: string; allocationId: string; warehouseId: string }> {
+    const warehouses = await this.storeListingWarehouseModel.find({ storeId }).select('_id').lean().exec();
+    const warehouseIds = warehouses.map((w) => w._id);
+    if (warehouseIds.length === 0) throw new NotFoundException('Box não encontrado');
+    const allocation = await this.allocationModel
+      .findOne({ warehouseId: { $in: warehouseIds }, 'boxes.code': code })
+      .exec();
+    if (!allocation) throw new NotFoundException('Box não encontrado');
+    const box = allocation.boxes.find((b) => b.code === code);
+    return this.toBoxWithContext(box, allocation);
+  }
+
+  async updateBox(
+    storeId: string,
+    boxId: string,
+    patch: { code?: string; description?: string },
+  ): Promise<BoxModel & { id: string }> {
+    const allocation = await this.resolveAllocationByBoxId(storeId, boxId);
+    const box: any = allocation.boxes.find((b) => String((b as any)._id) === String(boxId));
+    if (patch.code) box.code = patch.code;
+    if (patch.description !== undefined) box.description = patch.description;
+    try {
+      await allocation.save();
+    } catch (err: any) {
+      if (err?.code === 11000) throw new BadRequestException('Já existe um box com este código.');
+      throw err;
+    }
+    return this.toBoxWithContext(box, allocation);
+  }
+
+  async removeBox(storeId: string, boxId: string): Promise<void> {
+    const allocation = await this.resolveAllocationByBoxId(storeId, boxId);
+    allocation.boxes = allocation.boxes.filter((b) => String((b as any)._id) !== String(boxId)) as any;
+    await allocation.save();
+  }
+
+  private async withProducts(box: any, allocation: AllocationDocument) {
+    const boxWithContext = this.toBoxWithContext(box, allocation);
+    const productIds = (box.products || []).map((p: any) => String(p));
+    const products = productIds.length
+      ? await this.productModel.find({ _id: { $in: productIds } }).select(this.PRODUCT_SELECT).lean().exec()
+      : [];
+    return { box: boxWithContext, products };
+  }
+
+  async getBoxProducts(storeId: string, boxId: string): Promise<{ box: BoxModel & { id: string }; products: any[] }> {
+    const allocation = await this.resolveAllocationByBoxId(storeId, boxId);
+    const box = allocation.boxes.find((b) => String((b as any)._id) === String(boxId));
+    return this.withProducts(box, allocation);
+  }
+
+  async getBoxProductsByCode(
+    storeId: string,
+    code: string,
+  ): Promise<{ box: BoxModel & { id: string }; products: any[] }> {
+    const box = await this.getBoxByCode(storeId, code);
+    const allocation = await this.resolveAllocationByBoxId(storeId, (box as any).id);
+    return this.withProducts(box, allocation);
+  }
+
+  async addProductToBox(storeId: string, boxId: string, productId: string): Promise<BoxModel & { id: string }> {
+    const allocation = await this.resolveAllocationByBoxId(storeId, boxId);
+    const warehouses = await this.storeListingWarehouseModel.find({ storeId }).select('_id').lean().exec();
+    const warehouseIds = warehouses.map((w) => w._id);
+    const productObjId = new Types.ObjectId(productId);
+
+    // Um produto só pode estar em um box por vez — remove de qualquer outro box da loja antes.
+    await this.allocationModel
+      .updateMany(
+        { warehouseId: { $in: warehouseIds }, 'boxes.products': productObjId },
+        { $pull: { 'boxes.$[].products': productObjId } },
+      )
+      .exec();
+
+    // Re-busca a allocation-alvo: o updateMany acima pode ter alterado seu próprio documento (boxes.$[]).
+    const target = (await this.allocationModel.findById(allocation._id).exec())!;
+    const box: any = target.boxes.find((b) => String((b as any)._id) === boxId);
+    if (!box.products.some((p: any) => String(p) === String(productObjId))) {
+      box.products.push(productObjId);
+    }
+    target.markModified('boxes');
+    await target.save();
+    return this.toBoxWithContext(box, target);
+  }
+
+  async removeProductFromBox(storeId: string, boxId: string, productId: string): Promise<BoxModel & { id: string }> {
+    const allocation = await this.resolveAllocationByBoxId(storeId, boxId);
+    const box: any = allocation.boxes.find((b) => String((b as any)._id) === String(boxId));
+    box.products = (box.products || []).filter((p: any) => String(p) !== String(productId));
+    allocation.markModified('boxes');
+    await allocation.save();
+    return this.toBoxWithContext(box, allocation);
+  }
+
+  async linkBoxToAllocation(
+    storeId: string,
+    boxId: string,
+    targetAllocationId: string,
+  ): Promise<BoxModel & { id: string; allocationId: string }> {
+    const sourceAllocation = await this.resolveAllocationByBoxId(storeId, boxId);
+    const targetAllocation = await this.resolveAllocationInStore(storeId, targetAllocationId);
+
+    if (String(sourceAllocation._id) === String(targetAllocation._id)) {
+      const box = sourceAllocation.boxes.find((b) => String((b as any)._id) === String(boxId));
+      return this.toBoxWithContext(box, sourceAllocation);
+    }
+
+    const idx = sourceAllocation.boxes.findIndex((b) => String((b as any)._id) === String(boxId));
+    const box: any = sourceAllocation.boxes[idx];
+    sourceAllocation.boxes.splice(idx, 1);
+    await sourceAllocation.save();
+
+    targetAllocation.boxes.push(box);
+    await targetAllocation.save();
+    const moved = targetAllocation.boxes[targetAllocation.boxes.length - 1];
+    return this.toBoxWithContext(moved, targetAllocation);
+  }
+
+  async scanBox(
+    storeId: string,
+    qr: string,
+    allocationId: string,
+  ): Promise<{ box: BoxModel & { id: string; allocationId: string }; isNew: boolean }> {
+    const trimmed = (qr ?? '').trim();
+    if (!trimmed) throw new BadRequestException('QR Code vazio');
+
+    let code: string;
+    if (Types.ObjectId.isValid(trimmed) && /^[a-fA-F0-9]{24}$/.test(trimmed)) {
+      const allocation = await this.resolveAllocationByBoxId(storeId, trimmed).catch(() => null);
+      if (allocation) {
+        const linked = await this.linkBoxToAllocation(storeId, trimmed, allocationId);
+        return { box: linked, isNew: false };
+      }
+      code = trimmed;
+    } else {
+      const match = trimmed.match(/CODE=([A-Za-z0-9]+)/i);
+      code = match ? match[1] : trimmed;
+    }
+
+    const existing = await this.getBoxByCode(storeId, code).catch(() => null);
+    if (existing) {
+      const linked = await this.linkBoxToAllocation(storeId, (existing as any).id, allocationId);
+      return { box: linked, isNew: false };
+    }
+
+    const created = await this.createBox(storeId, allocationId, { code });
+    return { box: created, isNew: true };
+  }
+
+  async getBoxesByProduct(storeId: string, productId: string): Promise<any[]> {
+    const warehouses = await this.storeListingWarehouseModel.find({ storeId }).select('_id').lean().exec();
+    const warehouseIds = warehouses.map((w) => w._id);
+    if (warehouseIds.length === 0) return [];
+    const productObjId = new Types.ObjectId(productId);
+    const allocations = await this.allocationModel
+      .find({ warehouseId: { $in: warehouseIds }, 'boxes.products': productObjId })
+      .exec();
+    const out: any[] = [];
+    for (const allocation of allocations) {
+      for (const box of allocation.boxes as any[]) {
+        if ((box.products || []).some((p: any) => String(p) === String(productObjId))) {
+          const boxObj = box.toObject ? box.toObject() : JSON.parse(JSON.stringify(box));
+          out.push({
+            box: {
+              ...boxObj,
+              allocation: {
+                id: String(allocation._id),
+                warehouseId: String(allocation.warehouseId),
+                locationPath: allocation.locationPath,
+                metadata: allocation.metadata,
+              },
+            },
+            productId: String(productId),
+          });
+        }
+      }
+    }
+    return out;
   }
 
   async findWarehouseById(

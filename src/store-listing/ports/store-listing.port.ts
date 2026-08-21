@@ -8,6 +8,7 @@ import {
 } from '../schemas/store-listing-damaged-unit.schema';
 import { StoreListingDamagedAllocationModel } from '../schemas/store-listing-damaged-allocation.schema';
 import { AllocationModel } from '../../product/schemas/allocation.schema';
+import { BoxModel } from '../../product/schemas/box.schema';
 import { StockMovementType } from '../../stock/domain/movement-type';
 import { StockCondition } from '../../stock/schemas/stock-lot.schema';
 
@@ -111,6 +112,51 @@ export interface StoreListingPort {
     params: { warehouseId: string; locationPath: string; metadata?: Record<string, any>; available?: boolean },
   ): Promise<AllocationModel & { id: string }>;
   listAllocations(storeId: string): Promise<Array<AllocationModel & { id: string }>>;
+
+  /**
+   * Boxes (subdocumento de AllocationModel.boxes[]) da loja do usuário
+   * autenticado. Mesmo padrão de allocations: storeId nunca denormalizado,
+   * sempre resolvido via allocation.warehouseId -> StoreListingWarehouseModel.
+   * NotFoundException (não Forbidden) quando o box/allocation existe mas é de
+   * outra loja — não confirmamos a existência do recurso a quem não tem acesso.
+   */
+  createBox(
+    storeId: string,
+    allocationId: string,
+    params: { code?: string; description?: string },
+  ): Promise<BoxModel & { id: string; allocationId: string }>;
+  listBoxes(storeId: string): Promise<Array<BoxModel & { id: string; allocationId: string; warehouseId: string }>>;
+  getBox(storeId: string, boxId: string): Promise<BoxModel & { id: string; allocationId: string; warehouseId: string }>;
+  getBoxByCode(storeId: string, code: string): Promise<BoxModel & { id: string; allocationId: string; warehouseId: string }>;
+  updateBox(
+    storeId: string,
+    boxId: string,
+    patch: { code?: string; description?: string },
+  ): Promise<BoxModel & { id: string }>;
+  removeBox(storeId: string, boxId: string): Promise<void>;
+  getBoxProducts(
+    storeId: string,
+    boxId: string,
+  ): Promise<{ box: BoxModel & { id: string }; products: any[] }>;
+  getBoxProductsByCode(
+    storeId: string,
+    code: string,
+  ): Promise<{ box: BoxModel & { id: string }; products: any[] }>;
+  addProductToBox(storeId: string, boxId: string, productId: string): Promise<BoxModel & { id: string }>;
+  removeProductFromBox(storeId: string, boxId: string, productId: string): Promise<BoxModel & { id: string }>;
+  linkBoxToAllocation(
+    storeId: string,
+    boxId: string,
+    targetAllocationId: string,
+  ): Promise<BoxModel & { id: string; allocationId: string }>;
+  /** Escaneia QR de box: liga a um box existente na allocation ou cria um novo com o código lido. */
+  scanBox(
+    storeId: string,
+    qr: string,
+    allocationId: string,
+  ): Promise<{ box: BoxModel & { id: string; allocationId: string }; isNew: boolean }>;
+  /** Shape compatível com o antigo BoxService.getBoxItemsByProductId: [{ box: {...boxObj, allocation}, productId }]. */
+  getBoxesByProduct(storeId: string, productId: string): Promise<any[]>;
 
   markUnitsAsDamaged(params: {
     productId: string;

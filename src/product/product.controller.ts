@@ -24,7 +24,6 @@ import { CategorySnapshotService } from './services/category-snapshot.service';
 import { CreateFromDiscoveryDto } from './dto/create-from-discovery.dto';
 // import { PublishService } from '../publish/publish.service';
 // import { calculatePublishPriority } from '../queue/publish-priority';
-import { BoxService } from './services/box.service';
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { RembgEnqueueService } from '../gateways/rembg-enqueue.service';
 import { rembgOptionsSchema } from '../gateways/rembg-options.schema';
@@ -49,7 +48,6 @@ export class ProductController {
     private readonly productCategoryService: ProductCategoryService,
     private readonly titleCategoryHintService: TitleCategoryHintService,
     private readonly productTitleService: ProductTitleService,
-    private readonly boxService: BoxService,
     private readonly discoveryService: ProductDiscoveryService,
     private readonly sourceRefreshService: SourceRefreshService,
     private readonly categorySnapshotService: CategorySnapshotService,
@@ -1602,11 +1600,6 @@ export class ProductController {
 
 
 
-  @Get(':id/box-items')
-  @ApiOperation({ summary: 'Obter itens de caixa (localização) do produto' })
-  async getBoxItems(@Param('id') id: string) {
-    return this.boxService.getBoxItemsByProductId(id);
-  }
   @Get(':id/completion')
   @ApiOperation({ summary: 'Obter status de preenchimento do produto para as abas' })
   @ApiResponse({ status: 200, description: 'Status retornado com sucesso' })

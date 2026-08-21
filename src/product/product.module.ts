@@ -21,7 +21,6 @@ import { ProductDraftModel, ProductDraftSchema } from './schemas/product-draft.s
 import { ProductDiscoveryModel, ProductDiscoverySchema } from './schemas/product-discovery.schema';
 import { AllocationModel, AllocationSchema } from './schemas/allocation.schema';
 import { WarehouseModel, WarehouseSchema } from './schemas/warehouse.schema';
-import { BoxModel, BoxSchema } from './schemas/box.schema';
 import { UserModel, UserSchema } from '../auth/schemas/user.schema';
 
 import { ProductService } from './product.service';
@@ -80,12 +79,10 @@ import { StoreProductController } from './store-product.controller';
 import { ProductConditionController } from './controllers/product-condition.controller';
 import { ProductMovementController } from './controllers/product-movement.controller';
 import { WarehouseController } from './controllers/warehouse.controller';
-import { BoxController } from './controllers/box.controller';
 
 // Novos services
 import { ProductConditionService } from './services/product-condition.service';
 import { WarehouseService } from './services/warehouse.service';
-import { BoxService } from './services/box.service';
 import { ProductPublicationLogService } from './services/product-publication-log.service';
 import { ProductPublicationLogController } from './controllers/product-publication-log.controller';
 import { OrderEventsListener } from './listeners/order-events.listener';
@@ -156,7 +153,6 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
       { name: ProductDiscoveryModel.name, schema: ProductDiscoverySchema },
       { name: AllocationModel.name, schema: AllocationSchema },
       { name: WarehouseModel.name, schema: WarehouseSchema },
-      // { name: BoxModel.name, schema: BoxSchema }, // Agora é sub-documento de Allocation
       { name: 'MarketplaceModel', schema: require('../marketplace/schemas/marketplace.schema').MarketplaceSchema },
       { name: UserModel.name, schema: UserSchema },
     ]),
@@ -196,7 +192,6 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
     ProductConditionController,
     ProductMovementController,
     WarehouseController,
-    BoxController,
     ProductPublicationLogController,
     MigrationController,
     CrossReferenceController,
@@ -232,7 +227,6 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
     RelevanceScoreJob,
     ProductConditionService,
     WarehouseService,
-    BoxService,
     ProductPublicationLogService,
     OrderEventsListener, // Event listener for order sync
     MigrationService,
@@ -274,7 +268,6 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
     ProductCompatibilityPositionService,
     ProductConditionService,
     WarehouseService,
-    BoxService,
     ProductPublicationLogService,
     MigrationService,
     CrossReferenceService,
