@@ -566,6 +566,11 @@ export class StoreListingService implements StoreListingPort {
     storeId: string,
     code: string,
   ): Promise<BoxModel & { id: string; allocationId: string; warehouseId: string }> {
+    // QR readers may return the box's _id (e.g. from an older code or a raw ID scan) instead of
+    // the generated `code` — same tolerance as scanBox, since a real code is never a valid ObjectId.
+    if (Types.ObjectId.isValid(code) && /^[a-fA-F0-9]{24}$/.test(code)) {
+      return this.getBox(storeId, code);
+    }
     const warehouses = await this.storeListingWarehouseModel.find({ storeId }).select('_id').lean().exec();
     const warehouseIds = warehouses.map((w) => w._id);
     if (warehouseIds.length === 0) throw new NotFoundException('Box não encontrado');
