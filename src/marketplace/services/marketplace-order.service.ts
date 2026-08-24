@@ -12,6 +12,7 @@ import { ProductService } from '../../product/product.service';
 import { ProductRepository } from '../../product/product.repository';
 import { IgnoredOrderModel, IgnoredOrderDocument } from '../schemas/ignored-order.schema';
 import { ListingService } from '../../listing/listing.service'; // [NEW]
+import { STORE_PORT, StorePort } from '../../store/ports/store.port';
 
 @Injectable()
 export class MarketplaceOrderService {
@@ -29,6 +30,7 @@ export class MarketplaceOrderService {
         @InjectModel(IgnoredOrderModel.name)
         private readonly ignoredOrderModel: Model<IgnoredOrderDocument>,
         private readonly listingService: ListingService, // [NEW]
+        @Inject(STORE_PORT) private readonly storePort: StorePort,
     ) { }
 
     async attachFiscalDocument(
@@ -53,6 +55,7 @@ export class MarketplaceOrderService {
     }
 
     async getAllOrders(
+        storeId: string,
         params?: { status?: string; limit?: number; offset?: number; includeSyncStatus?: boolean; syncStatus?: string; q?: string }
     ): Promise<StandardOrder[]> {
         const marketplaces = await this.registryService.findAll();
@@ -60,20 +63,29 @@ export class MarketplaceOrderService {
             .filter(m => m.enabled && this.adapterRegistry.hasOrderAdapter(m.name));
         this.logger.log(`Enabled Marketplaces for order fetch: [${enabledMarketplaces.map(m => m.name).join(', ')}]`);
 
+        // Cada marketplace só é consultado com a(s) conta(s) de publicação desta loja —
+        // sem accountId o adapter caía na conta ATIVA global (única, compartilhada entre
+        // lojas), vazando pedidos de outra loja. Ver [[orders-store-scoped-fix]].
         const results = await Promise.allSettled(
             enabledMarketplaces.map(async (marketplace) => {
                 try {
-                    this.logger.log(`Fetching orders from ${marketplace.name} (ID: ${marketplace._id})...`);
+                    const accountIds = await this.storePort.resolveAccountIds(storeId, (marketplace as any).tag);
+                    if (accountIds.length === 0) return [];
+
                     const adapter = this.adapterRegistry.getOrderAdapter(marketplace.name);
                     const mId = marketplace._id;
 
-                    let orders = await adapter.getOrders({
-                        status: params?.status,
-                        limit: params?.limit,
-                        offset: params?.offset,
-                    });
+                    const perAccountOrders = await Promise.all(
+                        accountIds.map((accountId) => adapter.getOrders({
+                            status: params?.status,
+                            limit: params?.limit,
+                            offset: params?.offset,
+                            accountId,
+                        })),
+                    );
+                    let orders = perAccountOrders.flat();
 
-                    this.logger.log(`Fetched ${orders.length} orders from ${marketplace.name}.`);
+                    this.logger.log(`Fetched ${orders.length} orders from ${marketplace.name} (loja ${storeId}).`);
 
                     if (!orders.length) return [];
 
@@ -148,17 +160,25 @@ export class MarketplaceOrderService {
 
     async getOrders(
         marketplaceId: string,
+        storeId: string,
         params?: { status?: string; limit?: number; offset?: number; includeSyncStatus?: boolean; syncStatus?: string }
     ): Promise<StandardOrder[]> {
         const marketplace = await this.registryService.findOne(marketplaceId);
         if (!marketplace) throw new BadRequestException('Marketplace not found');
 
+        const accountIds = await this.storePort.resolveAccountIds(storeId, (marketplace as any).tag);
+        if (accountIds.length === 0) return [];
+
         const adapter = this.adapterRegistry.getOrderAdapter(marketplace.name);
-        let orders = await adapter.getOrders({
-            status: params?.status,
-            limit: params?.limit,
-            offset: params?.offset
-        }) as StandardOrder[];
+        const perAccountOrders = await Promise.all(
+            accountIds.map((accountId) => adapter.getOrders({
+                status: params?.status,
+                limit: params?.limit,
+                offset: params?.offset,
+                accountId,
+            })),
+        );
+        let orders = perAccountOrders.flat() as StandardOrder[];
 
         if (!orders.length) return [];
 

@@ -1,9 +1,11 @@
-import { Controller, Get, Post, Body, Param, Query, NotFoundException, BadRequestException, HttpCode, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Req, NotFoundException, BadRequestException, ForbiddenException, HttpCode, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ProductRepository } from '../product/product.repository';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
+import { STORE_PORT, StorePort } from '../store/ports/store.port';
 import { OrderRepository } from './order.repository';
+import { OrderDocument } from './schemas/order.schema';
 import { OrderQueryService } from './query/order-query.service';
 import { OrderLifecycleService } from './lifecycle/order-lifecycle.service';
 import { OrderFulfillmentService } from './fulfillment/order-fulfillment.service';
@@ -13,6 +15,7 @@ import { OrderMetricsService } from './observability/order-metrics.service';
 import { MarketplaceOrderService } from '../marketplace/services/marketplace-order.service';
 import { SaleNotificationReconcilerService } from './services/sale-notification-reconciler.service';
 import { MarketplaceConfigCacheService } from '../marketplace/services/marketplace-config-cache.service';
+import { OrderLabelService } from './services/order-label.service';
 import {
     BalcaoOrderDraftModel,
     BalcaoOrderDraftDocument,
@@ -39,9 +42,39 @@ export class OrderController {
         private readonly saleNotificationReconciler: SaleNotificationReconcilerService,
         @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
         private readonly marketplaceConfigCache: MarketplaceConfigCacheService,
+        private readonly orderLabel: OrderLabelService,
         @InjectModel(BalcaoOrderDraftModel.name)
         private readonly balcaoDraftModel: Model<BalcaoOrderDraftDocument>,
+        @Inject(STORE_PORT) private readonly storePort: StorePort,
     ) { }
+
+    /**
+     * storeId nunca vem do client — sempre de req.user.storeId (mesmo padrão de
+     * StockController/StoreListingController), para que uma loja não veja pedidos de outra.
+     */
+    private requireStoreId(req: any): string {
+        const storeId = req?.user?.storeId;
+        if (!storeId) {
+            throw new BadRequestException('Usuário sem loja configurada — não é possível consultar pedidos.');
+        }
+        return storeId;
+    }
+
+    /**
+     * Impede que uma loja acesse/opere pedido de outra loja pelo id — mesma
+     * fronteira de req.user.storeId → Store.marketplaceAccounts usada em findAll,
+     * agora aplicada por pedido individual. Pedido sem accountId (legado
+     * single-client) é tratado como pertencente à loja default e liberado.
+     */
+    private async assertOwnsOrder(req: any, order: OrderDocument): Promise<void> {
+        const storeId = this.requireStoreId(req);
+        if (!order.accountId) return;
+        const store = await this.storePort.findById(storeId);
+        const accountIds = new Set((store?.marketplaceAccounts ?? []).map((a) => a.accountId));
+        if (!accountIds.has(order.accountId)) {
+            throw new ForbiddenException('Pedido não pertence à sua loja.');
+        }
+    }
 
     /**
      * Cria um pedido de venda balcão (loja física). Entra pelo mesmo pipeline de
@@ -207,24 +240,33 @@ export class OrderController {
 
     @Get()
     async findAll(
+        @Req() req: any,
         @Query('page') page = 1,
         @Query('limit') limit = 50,
         @Query('offset') offset?: number,
         @Query('q') search?: string,
     ) {
+        const storeId = this.requireStoreId(req);
+        const store = await this.storePort.findById(storeId);
+        const accountIds = (store?.marketplaceAccounts ?? []).map((a) => a.accountId);
+
         const actualOffset = offset !== undefined ? offset : (page - 1) * limit;
-        return this.orderQuery.findAll(actualOffset, limit, search);
+        return this.orderQuery.findAll(actualOffset, limit, search, accountIds);
     }
 
     @Get(':id')
-    async findOne(@Param('id') id: string) {
+    async findOne(@Req() req: any, @Param('id') id: string) {
         const result = await this.orderQuery.getOrder(id);
         if (result.isFailure) throw new NotFoundException(result.error);
+        await this.assertOwnsOrder(req, result.getValue());
         return result.getValue();
     }
 
     @Post(':id/note')
-    async addNote(@Param('id') id: string, @Body() body: { message: string }) {
+    async addNote(@Req() req: any, @Param('id') id: string, @Body() body: { message: string }) {
+        const order = await this.orderQuery.getOrder(id);
+        if (order.isFailure) throw new NotFoundException(order.error);
+        await this.assertOwnsOrder(req, order.getValue());
         const result = await this.orderLifecycle.addNote(id, body.message);
         if (result.isFailure) throw new BadRequestException(result.error);
         return result.getValue();
@@ -236,66 +278,87 @@ export class OrderController {
      */
     @Post(':id/shipping-status')
     async updateShippingStatus(
+        @Req() req: any,
         @Param('id') id: string,
         @Body() body: { status: 'SHIPPED' | 'DELIVERED'; userId?: string },
     ) {
+        const order = await this.orderQuery.getOrder(id);
+        if (order.isFailure) throw new NotFoundException(order.error);
+        await this.assertOwnsOrder(req, order.getValue());
         const result = await this.orderLifecycle.updateShippingStatus(id, body.status, body.userId);
         if (result.isFailure) throw new BadRequestException(result.error);
         return result.getValue();
     }
 
     @Get(':id/separation')
-    async getSeparationList(@Param('id') id: string) {
+    async getSeparationList(@Req() req: any, @Param('id') id: string) {
         const result = await this.orderQuery.getOrder(id);
         if (result.isFailure) throw new NotFoundException(result.error);
+        await this.assertOwnsOrder(req, result.getValue());
         return this.orderFulfillment.getSeparationList(result.getValue());
     }
 
+    @Get(':id/label')
+    async getShippingLabel(@Req() req: any, @Param('id') id: string) {
+        const order = await this.orderQuery.getOrder(id);
+        if (order.isFailure) throw new NotFoundException(order.error);
+        await this.assertOwnsOrder(req, order.getValue());
+        return this.orderLabel.getLabel(id);
+    }
+
     @Post(':id/enrich-billing')
-    async enrichBilling(@Param('id') id: string) {
+    async enrichBilling(@Req() req: any, @Param('id') id: string) {
         const res = await this.orderQuery.getOrder(id);
         if (res.isFailure) throw new BadRequestException(res.error);
+        await this.assertOwnsOrder(req, res.getValue());
         const result = await this.orderFulfillment.enrichBillingData(res.getValue());
         if (result.isFailure) throw new BadRequestException(result.error);
         return result.getValue();
     }
 
     @Get('external/:id')
-    async findByExternalId(@Param('id') id: string) {
+    async findByExternalId(@Req() req: any, @Param('id') id: string) {
         const result = await this.orderQuery.getOrderByExternalId(id);
         if (result.isFailure) throw new NotFoundException(result.error);
+        await this.assertOwnsOrder(req, result.getValue());
         return result.getValue();
     }
 
     @Post(':id/picking/validate')
-    async validatePicking(@Param('id') id: string, @Body() body: { code: string }) {
+    async validatePicking(@Req() req: any, @Param('id') id: string, @Body() body: { code: string }) {
         const res = await this.orderQuery.getOrder(id);
         if (res.isFailure) throw new BadRequestException(res.error);
+        await this.assertOwnsOrder(req, res.getValue());
         const result = await this.orderFulfillment.validatePicking(res.getValue(), body.code);
         if (result.isFailure) throw new BadRequestException(result.error);
         return result.getValue();
     }
 
     @Post(':id/ignore')
-    async ignoreOrder(@Param('id') id: string, @Body() body: { userId?: string }) {
+    async ignoreOrder(@Req() req: any, @Param('id') id: string, @Body() body: { userId?: string }) {
+        const order = await this.orderQuery.getOrder(id);
+        if (order.isFailure) throw new NotFoundException(order.error);
+        await this.assertOwnsOrder(req, order.getValue());
         const result = await this.orderLifecycle.ignoreOrder(id, body.userId || 'admin');
         if (result.isFailure) throw new BadRequestException(result.error);
         return { success: true };
     }
 
     @Post(':id/complete-picking')
-    async completePicking(@Param('id') id: string, @Body() body: { pickedItems: Record<string, number> }) {
+    async completePicking(@Req() req: any, @Param('id') id: string, @Body() body: { pickedItems: Record<string, number> }) {
         const res = await this.orderQuery.getOrder(id);
         if (res.isFailure) throw new BadRequestException(res.error);
+        await this.assertOwnsOrder(req, res.getValue());
         const result = await this.orderFulfillment.completePicking(res.getValue(), body.pickedItems);
         if (result.isFailure) throw new BadRequestException(result.error);
         return result.getValue();
     }
 
     @Post(':id/retry-logistics')
-    async retryLogistics(@Param('id') id: string, @Body() body: { userId?: string }) {
+    async retryLogistics(@Req() req: any, @Param('id') id: string, @Body() body: { userId?: string }) {
         const res = await this.orderQuery.getOrder(id);
         if (res.isFailure) throw new BadRequestException(res.error);
+        await this.assertOwnsOrder(req, res.getValue());
         const result = await this.orderFulfillment.retryLogistics(res.getValue(), body.userId || 'admin');
         if (result.isFailure) throw new BadRequestException(result.error);
         return { success: true };

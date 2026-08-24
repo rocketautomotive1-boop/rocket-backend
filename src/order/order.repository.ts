@@ -72,8 +72,12 @@ export class OrderRepository {
         return { modifiedCount: 0 };
     }
 
-    async findAll(offset: number, limit: number, search?: string): Promise<OrderDocument[]> {
+    async findAll(offset: number, limit: number, search?: string, accountIds?: string[]): Promise<OrderDocument[]> {
         const filter: any = {};
+
+        if (accountIds) {
+            filter.accountId = { $in: accountIds };
+        }
 
         if (search) {
             const regex = new RegExp(search, 'i');

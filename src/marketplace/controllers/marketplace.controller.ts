@@ -46,6 +46,19 @@ export class MarketplaceController {
     private readonly orchestratorPublisherService: OrchestratorPublisherService,
   ) { }
 
+  /**
+   * storeId nunca vem do client — sempre de req.user.storeId (mesmo padrão de
+   * StockController/StoreListingController), para que pedidos só sejam
+   * buscados com a(s) conta(s) de publicação da loja do usuário logado.
+   */
+  private requireStoreId(req: any): string {
+    const storeId = req?.user?.storeId;
+    if (!storeId) {
+      throw new BadRequestException('Usuário sem loja configurada — não é possível consultar pedidos.');
+    }
+    return storeId;
+  }
+
   @Get()
   @ApiOperation({ summary: 'Listar todos os marketplaces' })
   @ApiResponse({ status: 200, description: 'Lista de marketplaces retornada com sucesso.' })
@@ -328,12 +341,14 @@ export class MarketplaceController {
 
   @Get('all/orders')
   async getAllOrders(
+    @Req() req: Request,
     @Query('includeSyncStatus') includeSyncStatus?: string,
     @Query('syncStatus') syncStatus?: string,
     @Query('status') status?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string
   ) {
+    const storeId = this.requireStoreId(req);
     const params = {
       status: status,
       syncStatus: syncStatus,
@@ -341,7 +356,7 @@ export class MarketplaceController {
       offset: offset ? Number(offset) : undefined,
       includeSyncStatus: includeSyncStatus === 'true'
     } as any;
-    return this.marketplaceOrderService.getAllOrders(params);
+    return this.marketplaceOrderService.getAllOrders(storeId, params);
   }
 
   @Get('all/listings')
@@ -412,6 +427,7 @@ export class MarketplaceController {
 
   @Get(':marketplaceId/orders')
   async getOrders(
+    @Req() req: Request,
     @Param('marketplaceId') marketplaceId: string,
     @Query('includeSyncStatus') includeSyncStatus?: string,
     @Query('syncStatus') syncStatus?: string,
@@ -419,6 +435,7 @@ export class MarketplaceController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string
   ) {
+    const storeId = this.requireStoreId(req);
     const params = {
       status: status,
       syncStatus: syncStatus,
@@ -426,7 +443,7 @@ export class MarketplaceController {
       offset: offset ? Number(offset) : undefined,
       includeSyncStatus: includeSyncStatus === 'true'
     } as any;
-    return this.marketplaceOrderService.getOrders(marketplaceId, params);
+    return this.marketplaceOrderService.getOrders(marketplaceId, storeId, params);
   }
 
   @Post(':marketplaceId/orders/:orderId/ignore')
