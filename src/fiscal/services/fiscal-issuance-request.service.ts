@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { FiscalDocumentModel, FiscalDocumentDocument } from '../schemas/fiscal.schema';
 import { OrderModel, OrderDocument } from '../../order/schemas/order.schema';
 import { OutboxRepository } from '../../outbox/outbox.repository';
+import { assertShippingReleased } from '../../order/utils/shipping-hold.util';
 
 export const FISCAL_ISSUANCE_EXCHANGE = 'rocket.fiscal';
 export const FISCAL_ISSUANCE_ROUTING_KEY = 'nfe.emit.requested';
@@ -33,6 +34,9 @@ export class FiscalIssuanceRequestService {
         const internalOrderId = await this.resolveInternalOrderId(orderId);
 
         if (internalOrderId) {
+            const order = await this.orderModel.findById(internalOrderId).select('shipping').lean().exec();
+            if (order) assertShippingReleased(order);
+
             const existing = await this.fiscalDocumentModel
                 .findOne({
                     $or: [{ orderId: internalOrderId }, { order: internalOrderId }],

@@ -8,6 +8,7 @@ import { MarketplaceConfigCacheService } from '../../marketplace/services/market
 import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
 import { buildHeaders, getShopeeBaseUrl } from '../../marketplace/adapters/shopee/shopee-utils';
 import { ShopeeSignerService } from '../../marketplace/adapters/shopee/shopee-signer.service';
+import { assertShippingReleased } from '../utils/shipping-hold.util';
 
 export interface LabelResult {
     format: 'zpl' | 'pdf' | 'url';
@@ -30,6 +31,7 @@ export class OrderLabelService {
     async getLabel(orderId: string): Promise<LabelResult> {
         const order = await this.orderModel.findById(orderId).lean().exec();
         if (!order) throw new NotFoundException(`Order ${orderId} not found`);
+        assertShippingReleased(order);
 
         const marketplace = await this.configCache.getById(String(order.marketplaceId));
         if (!marketplace) throw new NotFoundException(`Marketplace not found for order ${orderId}`);

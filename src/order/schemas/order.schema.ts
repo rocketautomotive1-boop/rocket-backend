@@ -63,6 +63,9 @@ class OrderShippingSnapshot {
     @Prop() estimatedDelivery?: Date;
     @Prop() deliveredAt?: Date;    // setado quando substatus → delivered
     @Prop() updatedAt?: Date;
+    // Envio Programado (ML: shipping_option.estimated_schedule_delivery_date.date) —
+    // enquanto no futuro, NF-e/etiqueta não podem ser emitidas para este pedido.
+    @Prop() scheduledShippingDate?: Date;
 
     @Prop({ type: [SchemaFactory.createForClass(OrderShippingSubstatusEntry)], default: [] })
     history: OrderShippingSubstatusEntry[];

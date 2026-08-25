@@ -92,6 +92,11 @@ export interface StandardOrder {
         tracking_number?: string;
         service_name?: string; // SEDEX, PAC, etc.
         status?: string;
+        substatus?: string;
+        trackingCode?: string;
+        estimatedDelivery?: string;
+        /** Envio Programado (ML) — data futura antes da qual NF-e/etiqueta não podem ser emitidas. */
+        scheduledShippingDate?: string;
     };
 
     payments?: StandardPayment[];

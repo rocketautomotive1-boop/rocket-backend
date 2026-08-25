@@ -103,12 +103,20 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
       let shipmentStatus: string | undefined;
       let shipmentSubstatus: string | undefined;
       let shipmentTracking: string | undefined;
+      let shipmentScheduledShippingDate: string | undefined;
       if (o.shipping?.receiver_address || o.shipping?.id) {
         try {
           const shipment = (await this.http.get<any>(`/shipments/${o.shipping.id}`, ctx)) || {};
           shipmentStatus = shipment.status || undefined;
           shipmentSubstatus = shipment.substatus || undefined;
           shipmentTracking = shipment.tracking_number || undefined;
+          // Envio Programado — ML preenche estimated_schedule_delivery_date quando o
+          // comprador agenda uma data de entrega. Só usamos se ainda estiver no futuro
+          // (data passada não trava mais nada).
+          const scheduleDate = shipment.shipping_option?.estimated_schedule_delivery_date?.date;
+          shipmentScheduledShippingDate = scheduleDate && new Date(scheduleDate) > new Date()
+            ? scheduleDate
+            : undefined;
           const ra = shipment.receiver_address || {};
           buyerAddress = {
             street: ra.street_name || '',
@@ -172,6 +180,7 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
           status: shipmentStatus || o.shipping?.status || '',
           substatus: shipmentSubstatus,
           trackingCode: shipmentTracking,
+          scheduledShippingDate: shipmentScheduledShippingDate,
         },
         items: (o.order_items || []).map((i: any) => ({
           id: i.item.id,

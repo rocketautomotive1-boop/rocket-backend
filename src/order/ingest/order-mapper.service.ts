@@ -115,6 +115,9 @@ export class OrderMapperService {
                 estimatedDelivery: externalOrder.shipping?.estimatedDelivery
                     ? new Date(externalOrder.shipping.estimatedDelivery)
                     : undefined,
+                scheduledShippingDate: externalOrder.shipping?.scheduledShippingDate
+                    ? new Date(externalOrder.shipping.scheduledShippingDate)
+                    : undefined,
             },
             syncedAt: new Date(),
             // Data real de criação do pedido no marketplace (date_created). Distinta do

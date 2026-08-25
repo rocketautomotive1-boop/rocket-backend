@@ -39,6 +39,16 @@ describe('OrderLabelService', () => {
         service = new OrderLabelService(orderModel, configCache, auth, signer);
     });
 
+    it('bloqueia impressão de etiqueta quando o pedido tem envio programado para o futuro', async () => {
+        const futureDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        orderModel.findById.mockReturnValue({
+            lean: () => ({ exec: () => Promise.resolve({ ...order, shipping: { scheduledShippingDate: futureDate } }) }),
+        });
+
+        await expect(service.getLabel('order-1')).rejects.toThrow(/envio programado/i);
+        expect(configCache.getById).not.toHaveBeenCalled();
+    });
+
     it('resolve o token pela conta dona do pedido, não pela default do marketplace', async () => {
         mockedAxios.get.mockImplementation((url: string) => {
             if (url.includes('/orders/')) return Promise.resolve({ data: { shipping: { id: 999 } } });

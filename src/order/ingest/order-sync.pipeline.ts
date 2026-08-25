@@ -130,6 +130,9 @@ export class OrderSyncPipeline {
         };
         if (orderData.shipping?.trackingCode) set['shipping.trackingCode'] = orderData.shipping.trackingCode;
         if (orderData.shipping?.estimatedDelivery) set['shipping.estimatedDelivery'] = orderData.shipping.estimatedDelivery;
+        // Sempre seta (mesmo undefined) — expira/some do payload do ML quando o prazo passa,
+        // e a trava de NF-e/etiqueta precisa refletir isso no próximo sync.
+        set['shipping.scheduledShippingDate'] = orderData.shipping?.scheduledShippingDate ?? null;
         if (sub === 'delivered') set['shipping.deliveredAt'] = now;
 
         await this.orderModel.findByIdAndUpdate(existing._id, {
