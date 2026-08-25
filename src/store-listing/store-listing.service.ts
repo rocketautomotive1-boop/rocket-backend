@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { StoreListingModel, StoreListingDocument } from './schemas/store-listing.schema';
@@ -40,6 +40,8 @@ import { StoreListingPort } from './ports/store-listing.port';
 import { StockMovementType } from '../stock/domain/movement-type';
 import { StockCondition } from '../stock/schemas/stock-lot.schema';
 import { computeBalanceDelta } from '../stock/domain/balance.calculator';
+import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
+import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 
 @Injectable()
 export class StoreListingService implements StoreListingPort {
@@ -64,6 +66,10 @@ export class StoreListingService implements StoreListingPort {
     private readonly allocationModel: Model<AllocationDocument>,
     @InjectModel(ProductModel.name)
     private readonly productModel: Model<ProductDocument>,
+    @Inject(STOCK_QUERY_PORT)
+    private readonly stockQuery: StockQueryPort,
+    @Inject(PRICING_PORT)
+    private readonly pricing: PricingPort,
   ) {}
 
   async create(productId: string, storeId: string): Promise<StoreListingModel & { id: string }> {
@@ -717,6 +723,169 @@ export class StoreListingService implements StoreListingPort {
 
     const created = await this.createBox(storeId, allocationId, { code });
     return { box: created, isNew: true };
+  }
+
+  async getAllocation(storeId: string, allocationId: string): Promise<AllocationModel & { id: string }> {
+    const allocation = await this.resolveAllocationInStore(storeId, allocationId);
+    return { ...allocation.toObject(), id: String(allocation._id) };
+  }
+
+  private readonly ALLOCATION_PRODUCT_SELECT = 'partNumber price costPrice listPrice brands images sku';
+
+  async getAllocationProducts(
+    storeId: string,
+    allocationId: string,
+  ): Promise<{
+    allocation: AllocationModel & { id: string };
+    boxes: any[];
+    totals: { totalBoxes: number; totalItems: number; totalValue: number };
+  }> {
+    const allocation = await this.resolveAllocationInStore(storeId, allocationId);
+    const rawBoxes: any[] = allocation.boxes || [];
+
+    const allProductIds = rawBoxes.flatMap((box) => (box.products || []).map((p: any) => String(p)));
+    const uniqueIds = [...new Set(allProductIds)];
+    const products = uniqueIds.length
+      ? await this.productModel.find({ _id: { $in: uniqueIds } }).select(this.ALLOCATION_PRODUCT_SELECT).lean().exec()
+      : [];
+    const productMap = new Map(products.map((p: any) => [String(p._id), p]));
+
+    let totalItems = 0;
+    let totalValue = 0;
+
+    const boxes = await Promise.all(
+      rawBoxes.map(async (box: any) => {
+        const matchedProducts = (box.products || [])
+          .map((pid: any) => productMap.get(String(pid)))
+          .filter(Boolean);
+
+        const boxProducts = await Promise.all(
+          matchedProducts.map(async (p: any) => {
+            const pid = String(p._id);
+            const quantity = Math.max((await this.stockQuery.getProductStock(pid)).onHand, 1);
+            const costPrice = (await this.stockQuery.getProductCost(pid)) || 0;
+            const price = await this.pricing.getBasePrice(pid);
+
+            totalItems += quantity;
+            totalValue += price * quantity;
+            return { ...p, id: pid, price, costPrice, quantity };
+          }),
+        );
+
+        return {
+          id: String(box._id),
+          _id: String(box._id),
+          code: box.code,
+          description: box.description,
+          itemsCount: box.itemsCount || 0,
+          products: boxProducts,
+          boxTotal: boxProducts.reduce((sum: number, p: any) => sum + p.price * p.quantity, 0),
+          boxItemCount: boxProducts.reduce((sum: number, p: any) => sum + p.quantity, 0),
+        };
+      }),
+    );
+
+    return {
+      allocation: {
+        ...allocation.toObject(),
+        id: String(allocation._id),
+      },
+      boxes,
+      totals: { totalBoxes: rawBoxes.length, totalItems, totalValue },
+    };
+  }
+
+  private parseAllocationQr(qr: string): { locationPath?: string; allocationId?: string; metadata?: Record<string, any> } {
+    const trimmed = (qr ?? '').trim();
+    if (!trimmed) throw new BadRequestException('QR Code vazio');
+
+    if (Types.ObjectId.isValid(trimmed) && /^[a-fA-F0-9]{24}$/.test(trimmed)) {
+      return { allocationId: trimmed };
+    }
+
+    if (trimmed.includes('/') && !trimmed.toUpperCase().startsWith('ALLOC')) {
+      return { locationPath: trimmed };
+    }
+
+    const parts = trimmed.split(';').map((p) => p.trim());
+    if (!parts[0] || !parts[0].toUpperCase().startsWith('ALLOC')) {
+      throw new BadRequestException(
+        'QR Code inválido para Allocation. Formatos aceitos: ObjectId, locationPath (ex: F1/R2/ROW3/S1/L1), ou ALLOC;PATH=...',
+      );
+    }
+
+    let locationPath = '';
+    const metadata: Record<string, any> = {};
+    for (let i = 1; i < parts.length; i++) {
+      const [key, value] = parts[i].split('=');
+      if (!key) continue;
+      const k = key.toUpperCase();
+      const v = (value ?? '').trim();
+      if (k === 'PATH') locationPath = v;
+      else metadata[k.toLowerCase()] = v;
+    }
+
+    if (!locationPath && Object.keys(metadata).length > 0) {
+      const p: string[] = [];
+      if (metadata.floor) p.push(`F${metadata.floor}`);
+      if (metadata.room) p.push(`R${metadata.room}`);
+      if (metadata.row) p.push(`ROW${metadata.row}`);
+      if (metadata.shelf) p.push(`S${metadata.shelf}`);
+      if (metadata.level) p.push(`L${metadata.level}`);
+      locationPath = p.join('/');
+    }
+
+    if (!locationPath) throw new BadRequestException('Não foi possível identificar o caminho de alocação pelo QR');
+    return { locationPath, metadata };
+  }
+
+  async scanAllocation(
+    storeId: string,
+    qr: string,
+    dryRun: boolean,
+  ): Promise<{ allocation: (AllocationModel & { id: string }) | null; isNew: boolean; parsed?: { locationPath?: string; metadata?: Record<string, any> } }> {
+    const parsed = this.parseAllocationQr(qr);
+
+    if (parsed.allocationId) {
+      const allocation = await this.resolveAllocationInStore(storeId, parsed.allocationId).catch(() => null);
+      if (!allocation) throw new NotFoundException('Alocação não encontrada para o ID informado');
+      return { allocation: { ...allocation.toObject(), id: String(allocation._id) }, isNew: false };
+    }
+
+    const { locationPath, metadata } = parsed;
+    const warehouses = await this.storeListingWarehouseModel.find({ storeId }).select('_id').lean().exec();
+    const warehouseIds = warehouses.map((w) => w._id);
+    const existing = warehouseIds.length
+      ? await this.allocationModel.findOne({ warehouseId: { $in: warehouseIds }, locationPath }).exec()
+      : null;
+
+    if (existing) {
+      return { allocation: { ...existing.toObject(), id: String(existing._id) }, isNew: false };
+    }
+
+    if (dryRun) {
+      return { allocation: null, isNew: true, parsed: { locationPath, metadata } };
+    }
+
+    if (warehouseIds.length === 0) {
+      throw new BadRequestException('Nenhum depósito configurado para esta loja — não é possível criar alocação via scan.');
+    }
+
+    try {
+      const created = await this.allocationModel.create({
+        warehouseId: warehouseIds[0],
+        locationPath,
+        metadata: metadata ?? {},
+        available: true,
+        active: true,
+      });
+      return { allocation: { ...created.toObject(), id: String(created._id) }, isNew: true };
+    } catch (err: any) {
+      if (err?.code === 11000) {
+        throw new BadRequestException('Já existe uma alocação com este caminho neste depósito.');
+      }
+      throw err;
+    }
   }
 
   async getBoxesByProduct(storeId: string, productId: string): Promise<any[]> {

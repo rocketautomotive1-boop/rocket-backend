@@ -1,3 +1,4 @@
+import { Global, Module } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { MongooseModule, getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Connection, Model } from 'mongoose';
@@ -7,6 +8,25 @@ import { StoreListingModel } from './schemas/store-listing.schema';
 import { MarketplaceListingModel } from './schemas/marketplace-listing.schema';
 import { STORE_LISTING_PORT, StoreListingPort } from './ports/store-listing.port';
 import { StockMovementType } from '../stock/domain/movement-type';
+import { STOCK_QUERY_PORT } from '../stock/ports/stock-query.port';
+import { PRICING_PORT } from '../pricing/ports/pricing.port';
+
+/**
+ * Substitui StockModule/PricingModule (@Global no AppModule real) neste teste isolado —
+ * StoreListingModule injeta STOCK_QUERY_PORT/PRICING_PORT no construtor (getAllocationProducts),
+ * mas nenhum teste aqui exercita allocations/boxes, então mocks vazios bastam. Precisa ser
+ * @Global porque um módulo importado só enxerga providers do módulo-pai via export, não os
+ * providers declarados direto em Test.createTestingModule({ providers: [...] }).
+ */
+@Global()
+@Module({
+  providers: [
+    { provide: STOCK_QUERY_PORT, useValue: {} },
+    { provide: PRICING_PORT, useValue: {} },
+  ],
+  exports: [STOCK_QUERY_PORT, PRICING_PORT],
+})
+class MockStockPricingModule {}
 
 describe('StoreListingModule (e2e)', () => {
   let mongo: MongoMemoryReplSet;
@@ -18,7 +38,7 @@ describe('StoreListingModule (e2e)', () => {
   beforeAll(async () => {
     mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
     moduleRef = await Test.createTestingModule({
-      imports: [MongooseModule.forRoot(mongo.getUri()), StoreListingModule],
+      imports: [MongooseModule.forRoot(mongo.getUri()), MockStockPricingModule, StoreListingModule],
     }).compile();
 
     storeListingModel = moduleRef.get(getModelToken(StoreListingModel.name));

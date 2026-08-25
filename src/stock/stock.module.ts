@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { StockMovementModel, StockMovementSchema } from './schemas/stock-movement.schema';
 import { StockLotModel, StockLotSchema } from './schemas/stock-lot.schema';
@@ -26,7 +26,14 @@ import { AuthModule } from '../auth/auth.module';
  * Fase 4 (leitura/escrita store-aware): importa AuthModule pra JwtAuthGuard (StockController
  * ganhou endpoints autenticados) — JwtAuthGuard depende de JwtService, que só existe no
  * contexto de um módulo que importe AuthModule.
+ *
+ * @Global (mesmo padrão de StoreModule/MarketplaceConfigCacheModule): StoreListingModule
+ * precisa de STOCK_QUERY_PORT/PRICING_PORT pra getAllocationProducts (join de estoque/preço),
+ * mas já é importado por StockModule (dual-write acima) — um import de volta criaria ciclo
+ * real. @Global evita isso sem forwardRef: StoreListingModule injeta o port sem importar o
+ * módulo.
  */
+@Global()
 @Module({
   imports: [
     MongooseModule.forFeature([

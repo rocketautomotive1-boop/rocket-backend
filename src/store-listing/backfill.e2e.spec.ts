@@ -1,4 +1,5 @@
 // backend/src/store-listing/backfill.e2e.spec.ts
+import { Global, Module } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { MongooseModule, getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
@@ -11,6 +12,23 @@ import { StoreService } from '../store/services/store.service';
 import { StoreListingStockLotModel } from './schemas/store-listing-stock-lot.schema';
 import { backfillStoreListings, ListingRow } from '../../scripts/backfill-store-listings';
 import { backfillStock, StockLotRow } from '../../scripts/backfill-store-listing-stock';
+import { STOCK_QUERY_PORT } from '../stock/ports/stock-query.port';
+import { PRICING_PORT } from '../pricing/ports/pricing.port';
+
+/**
+ * StoreListingModule injeta STOCK_QUERY_PORT/PRICING_PORT (getAllocationProducts) — em produção
+ * StockModule é @Global, mas este teste monta só um subconjunto de módulos, sem AppModule.
+ * Mesmo mock usado em store-listing.module.e2e.spec.ts/stock.service.spec.ts.
+ */
+@Global()
+@Module({
+  providers: [
+    { provide: STOCK_QUERY_PORT, useValue: {} },
+    { provide: PRICING_PORT, useValue: {} },
+  ],
+  exports: [STOCK_QUERY_PORT, PRICING_PORT],
+})
+class MockStockPricingModule {}
 
 describe('StoreListing Phase 2 backfill (e2e)', () => {
   let mongo: MongoMemoryReplSet;
@@ -26,6 +44,7 @@ describe('StoreListing Phase 2 backfill (e2e)', () => {
         MongooseModule.forRoot(mongo.getUri()),
         MarketplaceConfigCacheModule,
         StoreModule,
+        MockStockPricingModule,
         StoreListingModule,
       ],
     }).compile();

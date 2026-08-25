@@ -75,6 +75,28 @@ export class StoreListingController {
     return this.storeListing.listAllocations(storeId);
   }
 
+  @Post('allocations/scan')
+  @ApiOperation({ summary: 'Escaneia QR de allocation: busca por ID/locationPath ou cria (dryRun=true só pré-visualiza)' })
+  async scanAllocation(@Req() req: any, @Body() body: { qr: string }, @Query('dryRun') dryRun?: string) {
+    const storeId = this.requireStoreId(req);
+    const isDryRun = typeof dryRun === 'string' ? dryRun === 'true' : false;
+    return this.storeListing.scanAllocation(storeId, body.qr, isDryRun);
+  }
+
+  @Get('allocations/:id')
+  @ApiOperation({ summary: 'Busca uma alocação pelo ID' })
+  async getAllocation(@Param('id') id: string, @Req() req: any) {
+    const storeId = this.requireStoreId(req);
+    return this.storeListing.getAllocation(storeId, id);
+  }
+
+  @Get('allocations/:id/products')
+  @ApiOperation({ summary: 'Busca os produtos de todos os boxes de uma alocação, agrupados por box' })
+  async getAllocationProducts(@Param('id') id: string, @Req() req: any) {
+    const storeId = this.requireStoreId(req);
+    return this.storeListing.getAllocationProducts(storeId, id);
+  }
+
   @Post('allocations/:allocationId/boxes')
   @ApiOperation({ summary: 'Cria um box numa alocação da loja do usuário autenticado' })
   async createBox(

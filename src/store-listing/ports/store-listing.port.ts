@@ -112,6 +112,29 @@ export interface StoreListingPort {
     params: { warehouseId: string; locationPath: string; metadata?: Record<string, any>; available?: boolean },
   ): Promise<AllocationModel & { id: string }>;
   listAllocations(storeId: string): Promise<Array<AllocationModel & { id: string }>>;
+  getAllocation(storeId: string, allocationId: string): Promise<AllocationModel & { id: string }>;
+  /** Produtos de todos os boxes de uma allocation, agrupados por box, com join de estoque/preço. */
+  getAllocationProducts(
+    storeId: string,
+    allocationId: string,
+  ): Promise<{
+    allocation: AllocationModel & { id: string };
+    boxes: any[];
+    totals: { totalBoxes: number; totalItems: number; totalValue: number };
+  }>;
+  /**
+   * Escaneia QR de allocation: ObjectId cru resolve por id; caso contrário parseia locationPath
+   * (puro ou formato ALLOC;PATH=...). dryRun=true nunca cria, só pré-visualiza o parse.
+   */
+  scanAllocation(
+    storeId: string,
+    qr: string,
+    dryRun: boolean,
+  ): Promise<{
+    allocation: (AllocationModel & { id: string }) | null;
+    isNew: boolean;
+    parsed?: { locationPath?: string; metadata?: Record<string, any> };
+  }>;
 
   /**
    * Boxes (subdocumento de AllocationModel.boxes[]) da loja do usuário

@@ -1,3 +1,4 @@
+import { Global, Module } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { MongooseModule, getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Connection, Types, Model } from 'mongoose';
@@ -11,10 +12,29 @@ import { StockQueryService } from './stock-query.service';
 import { StockMovementType } from './domain/movement-type';
 import { StoreListingModule } from '../store-listing/store-listing.module';
 import { STORE_LISTING_PORT } from '../store-listing/ports/store-listing.port';
+import { STOCK_QUERY_PORT } from './ports/stock-query.port';
+import { PRICING_PORT } from '../pricing/ports/pricing.port';
 import { StoreListingStockMovementModel } from '../store-listing/schemas/store-listing-stock-movement.schema';
 import { StoreListingStockBalanceModel } from '../store-listing/schemas/store-listing-stock-balance.schema';
 import { StoreListingModel } from '../store-listing/schemas/store-listing.schema';
 import { MarketplaceListingModel } from '../store-listing/schemas/marketplace-listing.schema';
+
+/**
+ * StoreListingModule (importado abaixo) injeta STOCK_QUERY_PORT/PRICING_PORT no construtor
+ * (getAllocationProducts) — em produção StockModule é @Global (ver stock.module.ts), mas este
+ * teste monta só um subconjunto de módulos, sem AppModule, então os tokens não existem sem
+ * este mock. @Global aqui pela mesma razão do mock em store-listing.module.e2e.spec.ts: um
+ * módulo importado só enxerga providers do módulo-pai via export.
+ */
+@Global()
+@Module({
+  providers: [
+    { provide: STOCK_QUERY_PORT, useValue: {} },
+    { provide: PRICING_PORT, useValue: {} },
+  ],
+  exports: [STOCK_QUERY_PORT, PRICING_PORT],
+})
+class MockStockPricingModule {}
 
 describe('StockService (integration)', () => {
   let mongo: MongoMemoryReplSet;
@@ -39,6 +59,7 @@ describe('StockService (integration)', () => {
           { name: StockLotModel.name, schema: StockLotSchema },
           { name: StockBalanceModel.name, schema: StockBalanceSchema },
         ]),
+        MockStockPricingModule,
         StoreListingModule,
       ],
       providers: [StockService, StockQueryService, StockRepository],

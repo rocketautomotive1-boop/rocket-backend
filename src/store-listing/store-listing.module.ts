@@ -14,6 +14,7 @@ import { StoreListingService } from './store-listing.service';
 import { StoreListingController } from './store-listing.controller';
 import { STORE_LISTING_PORT } from './ports/store-listing.port';
 import { AuthModule } from '../auth/auth.module';
+import { PricingModule } from '../pricing/pricing.module';
 
 /**
  * Aggregate root de "produto vendido numa loja". Nunca importa ProductModule
@@ -30,6 +31,13 @@ import { AuthModule } from '../auth/auth.module';
  * (app.get(getModelToken(...))) — mas eles ainda não são consumidos por
  * nenhum service nem expostos via STORE_LISTING_PORT; isso é trabalho da
  * Fase 3.
+ *
+ * getAllocationProducts (allocations store-aware) precisa de STOCK_QUERY_PORT
+ * (join de estoque/preço, portado de ProductAllocationService). StockModule já
+ * importa StoreListingModule (dual-write, fase 3) — um import de volta criaria
+ * ciclo, então StockModule é @Global (mesmo padrão de StoreModule) e o port é
+ * injetado aqui sem import direto. PRICING_PORT vem de PricingModule, folha
+ * (sem import de domínio), sem risco de ciclo.
  */
 @Module({
   imports: [
@@ -46,6 +54,7 @@ import { AuthModule } from '../auth/auth.module';
       { name: ProductModel.name, schema: ProductSchema },
     ]),
     AuthModule,
+    PricingModule,
   ],
   controllers: [StoreListingController],
   providers: [StoreListingService, { provide: STORE_LISTING_PORT, useExisting: StoreListingService }],

@@ -19,8 +19,6 @@ import { CrossReferenceCodeModel, CrossReferenceCodeSchema } from './schemas/cro
 import { QueueRecordModel, QueueRecordSchema } from '../queue/schemas/queue-record.schema';
 import { ProductDraftModel, ProductDraftSchema } from './schemas/product-draft.schema';
 import { ProductDiscoveryModel, ProductDiscoverySchema } from './schemas/product-discovery.schema';
-import { AllocationModel, AllocationSchema } from './schemas/allocation.schema';
-import { WarehouseModel, WarehouseSchema } from './schemas/warehouse.schema';
 import { UserModel, UserSchema } from '../auth/schemas/user.schema';
 
 import { ProductService } from './product.service';
@@ -52,9 +50,6 @@ import { AiModule } from '../ai/ai.module';
 import { AttributesModule } from '../marketplace/attributes/attributes.module';
 import { ProductFilterService } from './services/product-filter.service';
 
-import { ProductAllocationController } from './controllers/product-allocation.controller';
-import { ProductAllocationService } from './services/product-allocation.service';
-
 import { ProductCompatibilityController } from './controllers/product-compatibility.controller';
 import { ProductCompatibilityService } from './services/product-compatibility.service';
 import { ProductCompatibilityPositionService } from './services/product-compatibility-position.service';
@@ -78,11 +73,9 @@ import { MarketplaceOrchestratorModule } from '../marketplace-orchestrator/marke
 import { StoreProductController } from './store-product.controller';
 import { ProductConditionController } from './controllers/product-condition.controller';
 import { ProductMovementController } from './controllers/product-movement.controller';
-import { WarehouseController } from './controllers/warehouse.controller';
 
 // Novos services
 import { ProductConditionService } from './services/product-condition.service';
-import { WarehouseService } from './services/warehouse.service';
 import { ProductPublicationLogService } from './services/product-publication-log.service';
 import { ProductPublicationLogController } from './controllers/product-publication-log.controller';
 import { OrderEventsListener } from './listeners/order-events.listener';
@@ -151,8 +144,6 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
       { name: QueueRecordModel.name, schema: QueueRecordSchema },
       { name: ProductDraftModel.name, schema: ProductDraftSchema },
       { name: ProductDiscoveryModel.name, schema: ProductDiscoverySchema },
-      { name: AllocationModel.name, schema: AllocationSchema },
-      { name: WarehouseModel.name, schema: WarehouseSchema },
       { name: 'MarketplaceModel', schema: require('../marketplace/schemas/marketplace.schema').MarketplaceSchema },
       { name: UserModel.name, schema: UserSchema },
     ]),
@@ -185,13 +176,11 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
     ProductUnitController,
     ProductWarrantyController,
 
-    ProductAllocationController,
     ProductTitleController,
     ProductCompatibilityController,
     ProductCompatibilityManagementController,
     ProductConditionController,
     ProductMovementController,
-    WarehouseController,
     ProductPublicationLogController,
     MigrationController,
     CrossReferenceController,
@@ -211,7 +200,6 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
     ProductNCMService,
     ProductUnitService,
     ProductWarrantyService,
-    ProductAllocationService,
     ProductImageService,
     ProductTitleService,
     ProductFilterService,
@@ -226,7 +214,6 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
     ProductRailsService,
     RelevanceScoreJob,
     ProductConditionService,
-    WarehouseService,
     ProductPublicationLogService,
     OrderEventsListener, // Event listener for order sync
     MigrationService,
@@ -259,7 +246,6 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
 
     ProductService,
     ProductRepository,
-    ProductAllocationService,
     ProductImageService,
     ProductTitleService,
     ProductShortTitleService,
@@ -267,7 +253,6 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
     ProductCompatibilityService,
     ProductCompatibilityPositionService,
     ProductConditionService,
-    WarehouseService,
     ProductPublicationLogService,
     MigrationService,
     CrossReferenceService,

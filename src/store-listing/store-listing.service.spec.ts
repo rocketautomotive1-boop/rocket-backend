@@ -1,10 +1,12 @@
 import { Test } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { StoreListingModel } from './schemas/store-listing.schema';
 import { StoreListingService } from './store-listing.service';
 import { StockMovementType } from '../stock/domain/movement-type';
+import { STOCK_QUERY_PORT } from '../stock/ports/stock-query.port';
+import { PRICING_PORT } from '../pricing/ports/pricing.port';
 
 describe('StoreListingService', () => {
   const PRODUCT_ID = '6955b688dfe7143a30376c01';
@@ -39,6 +41,8 @@ describe('StoreListingService', () => {
         { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: {} },
         { provide: getModelToken('AllocationModel'), useValue: {} },
         { provide: getModelToken('ProductModel'), useValue: {} },
+        { provide: STOCK_QUERY_PORT, useValue: {} },
+        { provide: PRICING_PORT, useValue: {} },
       ],
     }).compile();
 
@@ -260,6 +264,8 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: {} },
           { provide: getModelToken('AllocationModel'), useValue: {} },
         { provide: getModelToken('ProductModel'), useValue: {} },
+          { provide: STOCK_QUERY_PORT, useValue: {} },
+          { provide: PRICING_PORT, useValue: {} },
         ],
       }).compile();
 
@@ -612,6 +618,8 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: {} },
           { provide: getModelToken('AllocationModel'), useValue: {} },
         { provide: getModelToken('ProductModel'), useValue: {} },
+          { provide: STOCK_QUERY_PORT, useValue: {} },
+          { provide: PRICING_PORT, useValue: {} },
         ],
       }).compile();
 
@@ -786,6 +794,198 @@ describe('StoreListingService', () => {
     });
   });
 
+  describe('allocations store-aware', () => {
+    const WH_OID = new Types.ObjectId('6955b688dfe7143a30376c20');
+    const OTHER_WH_OID = new Types.ObjectId('6955b688dfe7143a30376c21');
+    const ALLOC_ID = '6955b688dfe7143a30376c30';
+    const ALLOC_OID = new Types.ObjectId(ALLOC_ID);
+
+    let allocationModelMock: any;
+    let productModelMock: any;
+    let stockQueryMock: any;
+    let pricingMock: any;
+
+    function makeAllocation(overrides: any = {}) {
+      const base = {
+        _id: ALLOC_OID,
+        warehouseId: WH_OID,
+        locationPath: 'F1/R1/ROW1/S1/L1',
+        metadata: {},
+        available: true,
+        active: true,
+        boxes: [],
+        toObject: () => ({
+          warehouseId: WH_OID,
+          locationPath: 'F1/R1/ROW1/S1/L1',
+          metadata: {},
+          available: true,
+          active: true,
+          boxes: [],
+        }),
+      };
+      return { ...base, ...overrides };
+    }
+
+    beforeEach(async () => {
+      allocationModelMock = { findById: jest.fn(), findOne: jest.fn(), create: jest.fn() };
+      productModelMock = { find: jest.fn() };
+      stockQueryMock = { getProductStock: jest.fn(), getProductCost: jest.fn() };
+      pricingMock = { getBasePrice: jest.fn() };
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          StoreListingService,
+          { provide: getModelToken(StoreListingModel.name), useValue: {} },
+          { provide: getModelToken('MarketplaceListingModel'), useValue: {} },
+          { provide: getModelToken('StoreListingStockLotModel'), useValue: {} },
+          { provide: getModelToken('StoreListingStockBalanceModel'), useValue: {} },
+          { provide: getModelToken('StoreListingStockMovementModel'), useValue: {} },
+          { provide: getModelToken('StoreListingWarehouseModel'), useValue: warehouseModelMock },
+          { provide: getModelToken('StoreListingDamagedUnitModel'), useValue: {} },
+          { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: {} },
+          { provide: getModelToken('AllocationModel'), useValue: allocationModelMock },
+          { provide: getModelToken('ProductModel'), useValue: productModelMock },
+          { provide: STOCK_QUERY_PORT, useValue: stockQueryMock },
+          { provide: PRICING_PORT, useValue: pricingMock },
+        ],
+      }).compile();
+
+      service = moduleRef.get(StoreListingService);
+    });
+
+    describe('getAllocation', () => {
+      it('retorna a allocation quando o warehouse pertence à loja', async () => {
+        allocationModelMock.findById.mockReturnValue({ exec: async () => makeAllocation() });
+        warehouseModelMock.findById.mockReturnValue({ exec: async () => ({ _id: WH_OID, storeId: STORE_ID }) });
+
+        const result = await service.getAllocation(STORE_ID, ALLOC_ID);
+
+        expect(result.id).toBe(ALLOC_ID);
+        expect(result.locationPath).toBe('F1/R1/ROW1/S1/L1');
+      });
+
+      it('rejeita (NotFound) quando o warehouse é de outra loja', async () => {
+        allocationModelMock.findById.mockReturnValue({ exec: async () => makeAllocation() });
+        warehouseModelMock.findById.mockReturnValue({ exec: async () => ({ _id: WH_OID, storeId: 'OTHER_STORE' }) });
+
+        await expect(service.getAllocation(STORE_ID, ALLOC_ID)).rejects.toThrow(NotFoundException);
+      });
+
+      it('rejeita (NotFound) quando o id não é um ObjectId válido', async () => {
+        await expect(service.getAllocation(STORE_ID, 'not-an-id')).rejects.toThrow(NotFoundException);
+        expect(allocationModelMock.findById).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('getAllocationProducts', () => {
+      it('agrupa produtos por box com join de estoque/preço', async () => {
+        const boxes = [
+          { _id: 'BOX1', code: 'B1', description: '', itemsCount: 0, products: [new Types.ObjectId('6955b688dfe7143a30376c40')] },
+        ];
+        allocationModelMock.findById.mockReturnValue({
+          exec: async () => makeAllocation({
+            boxes,
+            toObject: () => ({ warehouseId: WH_OID, locationPath: 'F1/R1/ROW1/S1/L1', metadata: {}, available: true, active: true, boxes }),
+          }),
+        });
+        warehouseModelMock.findById.mockReturnValue({ exec: async () => ({ _id: WH_OID, storeId: STORE_ID }) });
+        productModelMock.find.mockReturnValue({
+          select: () => ({ lean: () => ({ exec: async () => [{ _id: '6955b688dfe7143a30376c40', partNumber: 'P1' }] }) }),
+        });
+        stockQueryMock.getProductStock.mockResolvedValue({ onHand: 3 });
+        stockQueryMock.getProductCost.mockResolvedValue(10);
+        pricingMock.getBasePrice.mockResolvedValue(50);
+
+        const result = await service.getAllocationProducts(STORE_ID, ALLOC_ID);
+
+        expect(result.totals).toEqual({ totalBoxes: 1, totalItems: 3, totalValue: 150 });
+        expect(result.boxes[0].products[0]).toEqual(
+          expect.objectContaining({ id: '6955b688dfe7143a30376c40', price: 50, costPrice: 10, quantity: 3 }),
+        );
+      });
+
+      it('allocation sem boxes retorna totals zerados', async () => {
+        allocationModelMock.findById.mockReturnValue({ exec: async () => makeAllocation() });
+        warehouseModelMock.findById.mockReturnValue({ exec: async () => ({ _id: WH_OID, storeId: STORE_ID }) });
+
+        const result = await service.getAllocationProducts(STORE_ID, ALLOC_ID);
+
+        expect(result.totals).toEqual({ totalBoxes: 0, totalItems: 0, totalValue: 0 });
+        expect(result.boxes).toEqual([]);
+        expect(productModelMock.find).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('scanAllocation', () => {
+      it('resolve por ObjectId quando o QR é um id de allocation da loja', async () => {
+        allocationModelMock.findById.mockReturnValue({ exec: async () => makeAllocation() });
+        warehouseModelMock.findById.mockReturnValue({ exec: async () => ({ _id: WH_OID, storeId: STORE_ID }) });
+
+        const result = await service.scanAllocation(STORE_ID, ALLOC_ID, false);
+
+        expect(result.isNew).toBe(false);
+        expect(result.allocation?.id).toBe(ALLOC_ID);
+      });
+
+      it('rejeita (NotFound) quando o ObjectId não pertence a nenhuma allocation da loja', async () => {
+        allocationModelMock.findById.mockReturnValue({ exec: async () => null });
+
+        await expect(service.scanAllocation(STORE_ID, ALLOC_ID, false)).rejects.toThrow(NotFoundException);
+      });
+
+      it('resolve por locationPath existente na loja', async () => {
+        warehouseModelMock.find.mockReturnValue({
+          select: () => ({ lean: () => ({ exec: async () => [{ _id: WH_OID }] }) }),
+        });
+        allocationModelMock.findOne.mockReturnValue({ exec: async () => makeAllocation() });
+
+        const result = await service.scanAllocation(STORE_ID, 'F1/R1/ROW1/S1/L1', false);
+
+        expect(result.isNew).toBe(false);
+        expect(result.allocation?.locationPath).toBe('F1/R1/ROW1/S1/L1');
+      });
+
+      it('dryRun nunca cria — retorna isNew=true com o parse quando não existe', async () => {
+        warehouseModelMock.find.mockReturnValue({
+          select: () => ({ lean: () => ({ exec: async () => [{ _id: WH_OID }] }) }),
+        });
+        allocationModelMock.findOne.mockReturnValue({ exec: async () => null });
+
+        const result = await service.scanAllocation(STORE_ID, 'F2/R2/ROW2/S2/L2', true);
+
+        expect(result.isNew).toBe(true);
+        expect(result.allocation).toBeNull();
+        expect(result.parsed?.locationPath).toBe('F2/R2/ROW2/S2/L2');
+        expect(allocationModelMock.create).not.toHaveBeenCalled();
+      });
+
+      it('cria a allocation no primeiro warehouse da loja quando locationPath não existe e não é dryRun', async () => {
+        warehouseModelMock.find.mockReturnValue({
+          select: () => ({ lean: () => ({ exec: async () => [{ _id: WH_OID }, { _id: OTHER_WH_OID }] }) }),
+        });
+        allocationModelMock.findOne.mockReturnValue({ exec: async () => null });
+        allocationModelMock.create.mockResolvedValue(makeAllocation());
+
+        const result = await service.scanAllocation(STORE_ID, 'F1/R1/ROW1/S1/L1', false);
+
+        expect(result.isNew).toBe(true);
+        expect(allocationModelMock.create).toHaveBeenCalledWith(
+          expect.objectContaining({ warehouseId: WH_OID, locationPath: 'F1/R1/ROW1/S1/L1' }),
+        );
+      });
+
+      it('rejeita quando a loja não tem nenhum warehouse configurado e não é dryRun', async () => {
+        warehouseModelMock.find.mockReturnValue({
+          select: () => ({ lean: () => ({ exec: async () => [] }) }),
+        });
+        allocationModelMock.findOne = jest.fn();
+
+        await expect(service.scanAllocation(STORE_ID, 'F1/R1/ROW1/S1/L1', false)).rejects.toThrow(BadRequestException);
+        expect(allocationModelMock.create).not.toHaveBeenCalled();
+      });
+    });
+  });
+
   describe('markUnitsAsDamaged', () => {
     let lotModelMock: any;
     let balanceModelMock: any;
@@ -811,6 +1011,8 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: {} },
           { provide: getModelToken('AllocationModel'), useValue: {} },
         { provide: getModelToken('ProductModel'), useValue: {} },
+          { provide: STOCK_QUERY_PORT, useValue: {} },
+          { provide: PRICING_PORT, useValue: {} },
         ],
       }).compile();
 
@@ -902,6 +1104,8 @@ describe('StoreListingService', () => {
           { provide: getModelToken('StoreListingDamagedAllocationModel'), useValue: damagedAllocationModelMock },
           { provide: getModelToken('AllocationModel'), useValue: {} },
         { provide: getModelToken('ProductModel'), useValue: {} },
+          { provide: STOCK_QUERY_PORT, useValue: {} },
+          { provide: PRICING_PORT, useValue: {} },
         ],
       }).compile();
 
