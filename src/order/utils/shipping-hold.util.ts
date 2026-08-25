@@ -1,10 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 
 /**
- * Envio Programado (ML) — enquanto `shipping.scheduledShippingDate` estiver no
- * futuro, o vendedor não pode emitir NF-e nem imprimir etiqueta para o pedido
- * (o próprio ML bloqueia o envio antes dessa data). Lança 400 se ainda estiver
- * dentro do prazo; não faz nada se a data for nula/passada.
+ * Prazo de expedição (ML: shipping_option.buffering.date) — enquanto
+ * `shipping.scheduledShippingDate` estiver no futuro, o vendedor não pode
+ * emitir NF-e nem imprimir etiqueta para o pedido (o próprio ML não libera a
+ * etiqueta antes dessa data). Lança 400 se ainda estiver dentro do prazo;
+ * não faz nada se a data for nula/passada.
  */
 export function assertShippingReleased(order: { shipping?: { scheduledShippingDate?: Date | string | null } }): void {
     const scheduledShippingDate = order.shipping?.scheduledShippingDate;

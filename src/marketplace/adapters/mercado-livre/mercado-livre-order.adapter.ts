@@ -110,10 +110,11 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
           shipmentStatus = shipment.status || undefined;
           shipmentSubstatus = shipment.substatus || undefined;
           shipmentTracking = shipment.tracking_number || undefined;
-          // Envio Programado — ML preenche estimated_schedule_delivery_date quando o
-          // comprador agenda uma data de entrega. Só usamos se ainda estiver no futuro
-          // (data passada não trava mais nada).
-          const scheduleDate = shipment.shipping_option?.estimated_schedule_delivery_date?.date;
+          // Prazo de expedição (buffering) — data até a qual o ML não libera a etiqueta
+          // para postagem, mesmo com NFe emitida ("Para enviar em X" no painel). Presente
+          // em praticamente toda venda com substatus 'buffered', não só Envio Programado
+          // explícito pelo comprador. Só usamos se ainda estiver no futuro.
+          const scheduleDate = shipment.shipping_option?.buffering?.date;
           shipmentScheduledShippingDate = scheduleDate && new Date(scheduleDate) > new Date()
             ? scheduleDate
             : undefined;

@@ -460,9 +460,12 @@ export class OrderMarketplaceDetailsService {
                 } catch { /* no invoice yet — 404 or not supported */ }
             }
 
-            // Shipping hold date — programmed delivery (Envio Programado)
-            // ML sets estimated_schedule_delivery_date when buyer schedules a date
-            const scheduleDate = shipmentDetails.shipping_option?.estimated_schedule_delivery_date?.date;
+            // Shipping hold date — prazo de expedição (buffering). Confirmado ao vivo
+            // (pedido 2000018100876590, 2026-08-25): esse é o campo que corresponde ao
+            // "Para enviar em X" do painel ML, não estimated_schedule_delivery_date
+            // (esse último só aparece em Envio Programado explícito pelo comprador,
+            // e ficava sempre null nos pedidos testados).
+            const scheduleDate = shipmentDetails.shipping_option?.buffering?.date;
             const shippingHoldDate = scheduleDate && new Date(scheduleDate) > new Date()
                 ? scheduleDate as string
                 : null;
