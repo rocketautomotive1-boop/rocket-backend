@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
 import { MarketplaceTokenBrokerService } from '../marketplace/auth/services/marketplace-token-broker.service';
-import { MlClaimsClient } from './ml/ml-claims.client';
+import { MlClaimsClient, MlClaimSummary } from './ml/ml-claims.client';
 import {
   WEBHOOK_DOMAIN_COMMANDS,
   ReturnIngestRequestedCommand,
@@ -10,12 +10,14 @@ import {
 import { NOTIFICATION_EVENTS } from '../notifications/events/notification.events';
 import { NotificationRequested } from '../notifications/contracts/notification-requested.event';
 import { formatReturnMessage } from '../notifications/format/return-message.formatter';
+import { OrderRepository } from '../order/order.repository';
 
 /**
  * Devoluções/reclamações pós-venda (ML topic `claims`). Espelha o ModerationWebhookListener:
  * resolve a conta dona via broker (multi-client), busca o claim na API com o token da conta
  * (live, nunca cacheado) e emite UMA NotificationRequested com app (push/sino) + WhatsApp.
- * Detector, não executor — não toca pedido/estoque; só notifica.
+ * Também grava `returnState` no pedido (consequência operacional) — continua sendo um
+ * detector, nunca toca estoque/fiscal, mas deixa de ser "só notifica".
  */
 @Injectable()
 export class ReturnWebhookListener {
@@ -26,6 +28,7 @@ export class ReturnWebhookListener {
     private readonly broker: MarketplaceTokenBrokerService,
     private readonly claimsClient: MlClaimsClient,
     private readonly emitter: EventEmitter2,
+    private readonly orderRepository: OrderRepository,
   ) {}
 
   @OnEvent(WEBHOOK_DOMAIN_COMMANDS.RETURN_INGEST_REQUESTED, { async: true })
@@ -55,6 +58,10 @@ export class ReturnWebhookListener {
 
     const claim = await this.claimsClient.getClaimSummary(cmd.externalId, accessToken);
     if (!claim) return;
+
+    if (claim.orderId) {
+      await this.applyReturnState(claim);
+    }
 
     const waBody = formatReturnMessage({
       claimId: claim.id,
@@ -93,5 +100,29 @@ export class ReturnWebhookListener {
     };
     this.emitter.emit(NOTIFICATION_EVENTS.REQUESTED, req);
     this.logger.log(`[Return] claim ${claim.id} (${claim.type}/${claim.stage}) → notificado`);
+  }
+
+  private async applyReturnState(claim: MlClaimSummary): Promise<void> {
+    const order = await this.orderRepository.findByExternalId(claim.orderId as string);
+    if (!order) {
+      this.logger.warn(`[Return] claim ${claim.id}: pedido ${claim.orderId} não encontrado — returnState não gravado`);
+      return;
+    }
+
+    const existing = (order as any).returnState;
+    const isSameClaimOpen = existing?.claimId === claim.id && existing?.status === 'open';
+    const now = new Date();
+    const closed = claim.status === 'closed';
+
+    const returnState = {
+      status: closed ? 'resolved' as const : 'open' as const,
+      claimId: claim.id,
+      claimType: claim.type,
+      stage: claim.stage,
+      openedAt: isSameClaimOpen ? existing.openedAt : now,
+      resolvedAt: closed ? now : null,
+    };
+
+    await this.orderRepository.updateOne({ _id: (order as any)._id }, { $set: { returnState } });
   }
 }

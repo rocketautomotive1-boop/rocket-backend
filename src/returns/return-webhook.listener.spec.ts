@@ -9,7 +9,7 @@ const DEFAULT_CLAIM = {
   extraItemsCount: 0, totalAmount: 800, soldAt: '2026-06-22T16:00:00.000Z',
 };
 
-function makeSut(opts?: { claim?: any }) {
+function makeSut(opts?: { claim?: any; existingOrder?: any }) {
   const registry = { findByTag: jest.fn().mockResolvedValue(mlMkt) };
   const broker = {
     resolveAccountByExternalUserId: jest.fn().mockResolvedValue({ accountId: 'ACC_A' }),
@@ -21,10 +21,15 @@ function makeSut(opts?: { claim?: any }) {
     getClaimSummary: jest.fn().mockResolvedValue(claim),
   };
   const emitter = { emit: jest.fn() };
+  const existingOrder = opts && 'existingOrder' in opts ? opts.existingOrder : { _id: 'ORDER1', returnState: null };
+  const orderRepository = {
+    findByExternalId: jest.fn().mockResolvedValue(existingOrder),
+    updateOne: jest.fn().mockResolvedValue(undefined),
+  };
   const sut = new ReturnWebhookListener(
-    registry as any, broker as any, claimsClient as any, emitter as any,
+    registry as any, broker as any, claimsClient as any, emitter as any, orderRepository as any,
   );
-  return { sut, registry, broker, claimsClient, emitter };
+  return { sut, registry, broker, claimsClient, emitter, orderRepository };
 }
 
 const cmd = (over?: any) => ({
@@ -77,5 +82,52 @@ describe('ReturnWebhookListener.onReturn', () => {
     const { sut, emitter } = makeSut({ claim: null });
     await sut.onReturn(cmd());
     expect(emitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('grava returnState aberto no pedido resolvido por externalId', async () => {
+    const { sut, orderRepository } = makeSut();
+    await sut.onReturn(cmd());
+    expect(orderRepository.findByExternalId).toHaveBeenCalledWith('2000');
+    expect(orderRepository.updateOne).toHaveBeenCalledWith(
+      { _id: 'ORDER1' },
+      { $set: { returnState: expect.objectContaining({
+        status: 'open',
+        claimId: '136',
+        claimType: 'returns',
+        stage: 'claim',
+        resolvedAt: null,
+      }) } },
+    );
+  });
+
+  it('não sobrescreve openedAt se o claim já estava aberto (idempotência)', async () => {
+    const openedAt = new Date('2026-06-20T00:00:00.000Z');
+    const { sut, orderRepository } = makeSut({
+      existingOrder: { _id: 'ORDER1', returnState: { status: 'open', claimId: '136', claimType: 'returns', stage: 'claim', openedAt, resolvedAt: null } },
+    });
+    await sut.onReturn(cmd());
+    expect(orderRepository.updateOne).toHaveBeenCalledWith(
+      { _id: 'ORDER1' },
+      { $set: { returnState: expect.objectContaining({ openedAt }) } },
+    );
+  });
+
+  it('resolve o returnState quando o claim fecha', async () => {
+    const openedAt = new Date('2026-06-20T00:00:00.000Z');
+    const { sut, orderRepository } = makeSut({
+      claim: { ...DEFAULT_CLAIM, status: 'closed' },
+      existingOrder: { _id: 'ORDER1', returnState: { status: 'open', claimId: '136', claimType: 'returns', stage: 'claim', openedAt, resolvedAt: null } },
+    });
+    await sut.onReturn(cmd());
+    expect(orderRepository.updateOne).toHaveBeenCalledWith(
+      { _id: 'ORDER1' },
+      { $set: { returnState: expect.objectContaining({ status: 'resolved', openedAt, resolvedAt: expect.any(Date) }) } },
+    );
+  });
+
+  it('não grava returnState quando o pedido não é encontrado', async () => {
+    const { sut, orderRepository } = makeSut({ existingOrder: null });
+    await sut.onReturn(cmd());
+    expect(orderRepository.updateOne).not.toHaveBeenCalled();
   });
 });

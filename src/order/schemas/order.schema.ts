@@ -272,6 +272,21 @@ export class OrderModel {
         detectedBy?: 'webhook' | 'reconcile' | 'gap-detector';
     };
 
+    /**
+     * Devolução/reclamação pós-venda (ML topic `claims`), escrita por `ReturnWebhookListener`.
+     * Não altera `status` — é sinal derivado à parte, consumido pelo stage exibido no app.
+     * Lifecycle: `open` na primeira ocorrência do claim; `resolved` quando o claim fecha.
+     */
+    @Prop({ type: Object, default: null })
+    returnState?: {
+        status: 'open' | 'resolved';
+        claimId: string;
+        claimType: string | null;
+        stage: string | null;
+        openedAt: Date;
+        resolvedAt: Date | null;
+    } | null;
+
     fiscalDocuments?: any[];
 }
 
