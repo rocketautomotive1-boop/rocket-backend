@@ -54,6 +54,8 @@ export class StoreController {
     return stores.map((s) => ({
       storeId: s.id,
       name: s.name,
+      legalEntityId: s.legalEntityId ? String(s.legalEntityId) : null,
+      fiscalChannels: s.fiscalChannels ?? [],
       accounts: (s.marketplaceAccounts ?? []).map(({ marketplaceTag, accountId }) => ({
         marketplaceTag,
         accountId,

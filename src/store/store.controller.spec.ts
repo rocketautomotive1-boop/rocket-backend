@@ -64,11 +64,33 @@ describe('StoreController', () => {
       {
         storeId: 'S1',
         name: 'RCK_AUTOMOTIVE',
+        legalEntityId: null,
+        fiscalChannels: [],
         accounts: [
           { marketplaceTag: 'mercadolivre', accountId: 'ACC_1', accountLabel: 'RCK_AUTOMOTIVE Principal' },
           { marketplaceTag: 'mercadolivre', accountId: 'ACC_2', accountLabel: 'RCK_AUTOMOTIVE B2B' },
         ],
       },
+    ]);
+  });
+
+  it('list: retorna legalEntityId e fiscalChannels quando a loja já tem entidade legal vinculada (admin precisa disso pra refletir o vínculo na UI)', async () => {
+    storeService.findAll.mockResolvedValue([
+      {
+        id: 'S1',
+        name: 'Max Eshop',
+        legalEntityId: 'LEGAL_1',
+        fiscalChannels: [{ marketplaceTag: 'mercadolivre', accountId: 'ACC_1', series: 1, counter: 5 }],
+        marketplaceAccounts: [],
+      } as any,
+    ]);
+    configCache.getAll.mockResolvedValue([]);
+
+    const result = await controller.list();
+
+    expect(result[0].legalEntityId).toBe('LEGAL_1');
+    expect(result[0].fiscalChannels).toEqual([
+      { marketplaceTag: 'mercadolivre', accountId: 'ACC_1', series: 1, counter: 5 },
     ]);
   });
 

@@ -284,16 +284,14 @@ export class FiscalService {
             throw new Error('O pedido não possui itens para emissão da NFe.');
         }
 
-        // 1. Resolve Store → LegalEntity + FiscalChannel (série, contador, sellerId) para a conta que recebeu o pedido.
-        const { store, legalEntity, channel } = await this.resolveFiscalContext(
-            orderData.marketplaceTag,
-            orderData.accountId,
-        );
-        let issuer = legalEntity;
-
-        // 2. Check if a reusable NFe already exists for this order.
+        // 1. Check if a reusable NFe already exists for this order.
         //    Resolve both MongoDB ObjectIds and external marketplace IDs so that
         //    retries never generate a new sequence number for ERROR/DRAFT/REJECTED NFes.
+        // Feito ANTES de resolveFiscalContext (que pode lançar por config ausente,
+        // ex: loja sem canal fiscal) para que o catch abaixo sempre tenha um `nfe`
+        // para marcar como ERROR/persistir/notificar — sem isso, um erro de
+        // configuração nunca cria FiscalDocument e a modal do app fica travada
+        // para sempre, já que não há nada para o catch-up ou o polling encontrarem.
         const internalOrderId = await this.resolveInternalOrderId(orderId);
         let nfe = internalOrderId
             ? await this.fiscalDocumentModel
@@ -315,36 +313,42 @@ export class FiscalService {
             }
             // DRAFT / ERROR / REJECTED — safe to retry with the same number
             this.logger.log(`Reusing existing NFe ${nfe.number} série ${nfe.series} (status: ${nfe.status}) for retry.`);
-        }
-
-        if (!nfe) {
-            // Reserva atômica: Store.fiscalChannels.$.counter, escopado por loja+canal.
-            const { series: reservedSeries, number: newNfeNumber } = await this.storePort.reserveFiscalNumber(
-                store.id,
-                orderData.marketplaceTag,
-                orderData.accountId,
-            );
-            this.logger.log(`NFe counter reserved: série ${reservedSeries} número ${newNfeNumber} (loja ${store.name})`);
-
+        } else {
             nfe = new this.fiscalDocumentModel({
                 orderId: internalOrderId,
                 order: internalOrderId,
-                storeId: new Types.ObjectId(store.id),
-                issuer: issuer.toObject(),
                 status: 'DRAFT',
                 environment: orderData?.environment === 'HOMOLOGATION' ? 'HOMOLOGATION' : 'PRODUCTION',
-                number: newNfeNumber,
-                series: reservedSeries,
                 createdAt: new Date()
             });
+            await nfe.save();
         }
 
-        // Update Series/Store just in case (retry path may reuse an older doc)
-        nfe.series = channel.series;
-        nfe.storeId = new Types.ObjectId(store.id);
-        await nfe.save();
-
         try {
+            // 2. Resolve Store → LegalEntity + FiscalChannel (série, contador, sellerId) para a conta que recebeu o pedido.
+            const { store, legalEntity, channel } = await this.resolveFiscalContext(
+                orderData.marketplaceTag,
+                orderData.accountId,
+            );
+            const issuer = legalEntity;
+
+            // Reserva atômica de número apenas se ainda não reservado (retry reusa o mesmo).
+            if (!nfe.number) {
+                const { series: reservedSeries, number: newNfeNumber } = await this.storePort.reserveFiscalNumber(
+                    store.id,
+                    orderData.marketplaceTag,
+                    orderData.accountId,
+                );
+                this.logger.log(`NFe counter reserved: série ${reservedSeries} número ${newNfeNumber} (loja ${store.name})`);
+                nfe.number = newNfeNumber;
+                nfe.series = reservedSeries;
+            } else {
+                nfe.series = channel.series;
+            }
+            nfe.storeId = new Types.ObjectId(store.id);
+            nfe.issuer = issuer.toObject();
+            await nfe.save();
+
             // 3. Build XML (Draft) — tpEmis=4 se a LegalEntity já estiver em contingência
             const tpEmis = issuer.contingencyMode ? '4' : '1';
             const xml = await this.xmlBuilderService.buildNFeXml(nfe, orderData, issuer, channel.marketplaceSellerId, tpEmis);

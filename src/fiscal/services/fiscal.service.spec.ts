@@ -153,6 +153,37 @@ describe('FiscalService — environment on new NFe', () => {
     expect(listener.mock.calls[0][0]).toMatchObject({ series: 1, number: 1 });
   });
 
+  it('persiste FiscalDocument em ERROR e emite FISCAL_EVENTS.NFE_ERROR quando resolveFiscalContext falha (ex: loja sem canal fiscal) — antes essa falha ocorria fora do try/catch e nunca criava documento nem notificava, deixando a modal do app travada para sempre', async () => {
+    const emitter = service['eventEmitter'] as EventEmitter2;
+    const listener = jest.fn();
+    emitter.on(FISCAL_EVENTS.NFE_ERROR, listener);
+
+    storePort.resolveFiscalChannel.mockResolvedValueOnce(null);
+
+    const orderData = {
+      environment: 'HOMOLOGATION',
+      marketplaceTag: 'mercado_livre',
+      accountId: 'acc1',
+      buyer: { document: '06726952430', address: { street: 'Rua X', state: 'PE' } },
+      items: [{ id: '1', quantity: 1, unit_price: 10 }],
+    };
+
+    await expect(service.emitNFe('000000000000000000000001', orderData)).rejects.toThrow(/não tem canal fiscal configurado/);
+
+    // FiscalDocument criado e persistido em ERROR, mesmo sem store/issuer/série resolvidos
+    const createdArg = fiscalDocumentModel.mock.calls[0][0];
+    expect(createdArg.status).toBe('DRAFT');
+    const savedDoc = fiscalDocumentModel.mock.results[0].value;
+    expect(savedDoc.status).toBe('ERROR');
+    expect(savedDoc.rejectionReason).toMatch(/não tem canal fiscal configurado/);
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener.mock.calls[0][0]).toMatchObject({
+      orderId: '000000000000000000000001',
+      message: expect.stringMatching(/não tem canal fiscal configurado/),
+    });
+  });
+
   it('emite FISCAL_EVENTS.NFE_ERROR quando a transmissão falha (fora do fluxo de contingência)', async () => {
     const emitter = service['eventEmitter'] as EventEmitter2;
     const listener = jest.fn();

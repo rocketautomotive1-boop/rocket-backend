@@ -40,8 +40,12 @@ export class FiscalIssuanceConsumer {
         try {
             await this.fiscalService.emitNFe(msg.orderId, msg.overrides || {});
         } catch (err) {
+            // FiscalService.emitNFe já persiste o FiscalDocument em ERROR e emite
+            // FISCAL_EVENTS.NFE_ERROR antes de relançar (mesmo para erros de config
+            // como resolveFiscalContext, que agora rodam dentro do try de emitNFe) —
+            // o consumer não precisa (nem deve) duplicar essa notificação.
             if (err instanceof NotFoundException || err instanceof BadRequestException) {
-                // Erro de configuração/negócio — já não é recuperável por retry automático.
+                // Erro de configuração/negócio — não é recuperável por retry automático.
                 this.logger.warn(`Emissão de NFe pulada para pedido ${msg.orderId} (não recuperável): ${err.message}`);
                 return;
             }
