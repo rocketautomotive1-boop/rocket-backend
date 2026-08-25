@@ -263,8 +263,18 @@ export class FiscalService {
             orderData = {
                 ...prepared,
                 ...modalOverrides,
-                // Merge nested objects so partial modal edits don't wipe prepared fields
-                buyer:  { ...prepared.buyer,  ...(modalOverrides?.buyer  || {}) },
+                // Merge profundo em buyer.address — um merge raso aqui perdia zipCode/city/etc
+                // sempre que o modal do app mandava um override parcial (ex.: só street/number),
+                // já que address é objeto aninhado dentro de buyer e {...a,...b} não desce nível.
+                // Foi exatamente essa perda que fez o ML rejeitar a NFe com CEP "00000000".
+                buyer: {
+                    ...prepared.buyer,
+                    ...(modalOverrides?.buyer || {}),
+                    address: {
+                        ...(prepared.buyer?.address || {}),
+                        ...(modalOverrides?.buyer?.address || {}),
+                    },
+                },
                 totals: { ...prepared.totals, ...(modalOverrides?.totals || {}) },
                 items:  (modalOverrides?.items?.length ? modalOverrides.items : prepared.items),
             };

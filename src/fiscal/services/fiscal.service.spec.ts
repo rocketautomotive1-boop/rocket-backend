@@ -153,6 +153,54 @@ describe('FiscalService — environment on new NFe', () => {
     expect(listener.mock.calls[0][0]).toMatchObject({ series: 1, number: 1 });
   });
 
+  it('merge profundo em buyer.address: override parcial do modal (sem zipCode) preserva o zipCode já preenchido por prepareNFeData — um merge raso aqui apagava o CEP, causando NFe com CEP "00000000" (rejeitada pelo Mercado Livre com wrong_receiver_zipcode)', async () => {
+    orderModel.findById = jest.fn().mockReturnValue({
+      populate: jest.fn().mockReturnValue({
+        lean: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue({
+            ...dbOrderBase,
+            // prepareNFeData lança NotFoundException e emitNFe descarta os dados
+            // enriquecidos (cai no catch, usa só modalOverrides) se items ficar
+            // vazio aqui — precisa de pelo menos 1 item pra exercitar o merge real.
+            items: [{ externalId: 'item-1', title: 'Produto', quantity: 1, unitPrice: 10 }],
+            customer: {
+              name: 'Antonio da Silva Jacinto',
+              document: '06726952430',
+              email: '',
+              phone: '',
+              address: {
+                street: 'Rua Maria Augusta Pereira Vomstein',
+                number: '261',
+                neighborhood: 'Loteamento Sumaré',
+                city: 'Maringá',
+                state: 'PR',
+                zipCode: '87035624',
+              },
+            },
+          }),
+        }),
+      }),
+    });
+
+    const buildNFeXml = service['xmlBuilderService'].buildNFeXml as jest.Mock;
+    buildNFeXml.mockClear();
+
+    // Override do modal (ex.: usuário editou só o nome no NfeBuyerDataModal) — não manda zipCode
+    const modalOverrides = {
+      environment: 'HOMOLOGATION',
+      marketplaceTag: 'mercado_livre',
+      accountId: 'acc1',
+      buyer: { address: { street: 'Rua Maria Augusta Pereira Vomstein' } },
+      items: [{ id: '1', quantity: 1, unit_price: 10 }],
+    };
+
+    await service.emitNFe('000000000000000000000001', modalOverrides);
+
+    const orderDataPassedToXmlBuilder = buildNFeXml.mock.calls[0][1];
+    expect(orderDataPassedToXmlBuilder.buyer.address.zipCode).toBe('87035624');
+    expect(orderDataPassedToXmlBuilder.buyer.address.city).toBe('Maringá');
+  });
+
   it('persiste FiscalDocument em ERROR e emite FISCAL_EVENTS.NFE_ERROR quando resolveFiscalContext falha (ex: loja sem canal fiscal) — antes essa falha ocorria fora do try/catch e nunca criava documento nem notificava, deixando a modal do app travada para sempre', async () => {
     const emitter = service['eventEmitter'] as EventEmitter2;
     const listener = jest.fn();

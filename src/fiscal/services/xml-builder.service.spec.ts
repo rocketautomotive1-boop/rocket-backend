@@ -39,7 +39,7 @@ describe('XmlBuilderService — destinatário CPF/CNPJ', () => {
         const orderData = baseOrderData({
             document: '03697945000100',
             name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
-            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zipCode: '92717330' },
         });
 
         const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
@@ -52,13 +52,69 @@ describe('XmlBuilderService — destinatário CPF/CNPJ', () => {
         const orderData = baseOrderData({
             document: '06726952430',
             name: 'Cliente Pessoa Física',
-            address: { street: 'Rua B', number: '2', neighborhood: 'Bairro', city: 'JABOATAO', state: 'PE', zip_code: '54000000' },
+            address: { street: 'Rua B', number: '2', neighborhood: 'Bairro', city: 'JABOATAO', state: 'PE', zipCode: '54000000' },
         });
 
         const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
 
         expect(xml).toContain('<CPF>06726952430</CPF>');
         expect(xml).not.toContain('<CNPJ>06726952430</CNPJ>');
+    });
+});
+
+describe('XmlBuilderService — endereço do destinatário (sem fallback silencioso)', () => {
+    let service: XmlBuilderService;
+
+    beforeEach(() => {
+        service = new XmlBuilderService();
+    });
+
+    it('grava o CEP real do destinatário no XML — antes um zipCode ausente virava "00000000" sem erro, o que a SEFAZ aceita mas o Mercado Livre rejeita depois (wrong_receiver_zipcode)', async () => {
+        const orderData = baseOrderData({
+            document: '06726952430',
+            name: 'Cliente Teste',
+            address: { street: 'Rua B', number: '2', neighborhood: 'Bairro', city: 'JABOATAO', state: 'PE', zipCode: '54000000' },
+        });
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
+
+        expect(xml).toContain('<CEP>54000000</CEP>');
+        expect(xml).not.toContain('<CEP>00000000</CEP>');
+    });
+
+    it.each([
+        ['street', { number: '2', neighborhood: 'Bairro', city: 'JABOATAO', state: 'PE', zipCode: '54000000' }],
+        ['neighborhood', { street: 'Rua B', number: '2', city: 'JABOATAO', state: 'PE', zipCode: '54000000' }],
+        ['city', { street: 'Rua B', number: '2', neighborhood: 'Bairro', state: 'PE', zipCode: '54000000' }],
+        ['state', { street: 'Rua B', number: '2', neighborhood: 'Bairro', city: 'JABOATAO', zipCode: '54000000' }],
+        ['zipCode', { street: 'Rua B', number: '2', neighborhood: 'Bairro', city: 'JABOATAO', state: 'PE' }],
+    ])('rejeita com erro claro quando address.%s está ausente, em vez de mascarar com fallback', async (field, address) => {
+        const orderData = baseOrderData({ document: '06726952430', name: 'Cliente Teste', address });
+
+        await expect(service.buildNFeXml(baseNfe(), orderData, baseIssuer())).rejects.toThrow(
+            new RegExp(`Endereço do destinatário incompleto.*${field}`),
+        );
+    });
+
+    it('rejeita quando o destinatário não tem documento (CPF/CNPJ) algum — antes gerava CPF fake "00000000000"', async () => {
+        const orderData = baseOrderData({
+            name: 'Cliente Sem Documento',
+            address: { street: 'Rua B', number: '2', neighborhood: 'Bairro', city: 'JABOATAO', state: 'PE', zipCode: '54000000' },
+        });
+
+        await expect(service.buildNFeXml(baseNfe(), orderData, baseIssuer())).rejects.toThrow(/Documento.*destinatário ausente/);
+    });
+
+    it('number ausente usa "S/N" (valor de domínio legítimo — endereço sem numeração —, não fallback de dado faltante)', async () => {
+        const orderData = baseOrderData({
+            document: '06726952430',
+            name: 'Cliente Teste',
+            address: { street: 'Rua B', neighborhood: 'Bairro', city: 'JABOATAO', state: 'PE', zipCode: '54000000' },
+        });
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
+
+        expect(xml).toContain('<nro>S/N</nro>');
     });
 });
 
@@ -74,7 +130,7 @@ describe('XmlBuilderService — indIEDest / IE do destinatário', () => {
             document: '03697945000100',
             ie: '0580097323',
             name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
-            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zipCode: '92717330' },
         });
 
         const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
@@ -90,7 +146,7 @@ describe('XmlBuilderService — indIEDest / IE do destinatário', () => {
         const orderData = baseOrderData({
             document: '03697945000100',
             name: 'Empresa Sem IE Informada',
-            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zipCode: '92717330' },
         });
 
         const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
@@ -112,7 +168,7 @@ describe('XmlBuilderService — CSOSN/CST do item (configurável por LegalEntity
         const orderData = baseOrderData({
             document: '03697945000100',
             name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
-            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zipCode: '92717330' },
         });
 
         const xml = await service.buildNFeXml(baseNfe(), orderData, issuer);
@@ -126,7 +182,7 @@ describe('XmlBuilderService — CSOSN/CST do item (configurável por LegalEntity
         const orderData = baseOrderData({
             document: '03697945000100',
             name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
-            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zipCode: '92717330' },
         });
 
         const xml = await service.buildNFeXml(baseNfe(), orderData, issuer);
@@ -139,7 +195,7 @@ describe('XmlBuilderService — CSOSN/CST do item (configurável por LegalEntity
         const orderData = baseOrderData({
             document: '03697945000100',
             name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
-            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zipCode: '92717330' },
         });
 
         const xml = await service.buildNFeXml(baseNfe(), orderData, issuer);
@@ -153,7 +209,7 @@ describe('XmlBuilderService — CSOSN/CST do item (configurável por LegalEntity
         const orderData = baseOrderData({
             document: '03697945000100',
             name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
-            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zipCode: '92717330' },
         });
 
         const xml = await service.buildNFeXml(baseNfe(), orderData, issuer);
@@ -174,7 +230,7 @@ describe('XmlBuilderService — transp (transportadora Mercado Envios)', () => {
             ...baseOrderData({
                 document: '03697945000100',
                 name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
-                address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+                address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zipCode: '92717330' },
             }),
             marketplaceName: 'Mercado Livre',
         };
@@ -191,7 +247,7 @@ describe('XmlBuilderService — transp (transportadora Mercado Envios)', () => {
         const orderData = baseOrderData({
             document: '03697945000100',
             name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
-            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zipCode: '92717330' },
         });
 
         const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
@@ -213,7 +269,7 @@ describe('XmlBuilderService — pag (indPag, card por meio de pagamento, múltip
             ...baseOrderData({
                 document: '03697945000100',
                 name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
-                address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+                address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zipCode: '92717330' },
             }),
             payments: [
                 { paymentType: 'bank_transfer', authorizationCode: 'PIXE0000000020260805', amount: 100 },
@@ -232,7 +288,7 @@ describe('XmlBuilderService — pag (indPag, card por meio de pagamento, múltip
             ...baseOrderData({
                 document: '03697945000100',
                 name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
-                address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+                address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zipCode: '92717330' },
             }),
             payments: [
                 { paymentType: 'credit_card', paymentMethodId: 'master', authorizationCode: '681582', amount: 234.5 },
@@ -251,7 +307,7 @@ describe('XmlBuilderService — pag (indPag, card por meio de pagamento, múltip
         const orderData = baseOrderData({
             document: '03697945000100',
             name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
-            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zipCode: '92717330' },
         });
         orderData.payment = { paymentType: 'credit_card', paymentMethodId: 'visa', authorizationCode: '818261' };
 
@@ -274,7 +330,7 @@ describe('XmlBuilderService — IPI do item', () => {
         const orderData = baseOrderData({
             document: '03697945000100',
             name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
-            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zipCode: '92717330' },
         });
 
         const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
@@ -286,7 +342,7 @@ describe('XmlBuilderService — IPI do item', () => {
         const orderData = baseOrderData({
             document: '03697945000100',
             name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
-            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zipCode: '92717330' },
         });
         orderData.items[0].cEnq = '123';
 

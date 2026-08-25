@@ -26,12 +26,19 @@ export class XmlBuilderService {
       throw new Error('Dados do pedido inválidos para emissão de NFe');
     }
 
+    // Dados do destinatário: nunca mascarar com fallback silencioso (ex.: UF='SP',
+    // cidade='Cidade', CEP='00000000') — a SEFAZ aceita placeholders bem-formados
+    // sem reclamar, mas isso gera NFe com endereço/imposto errados (UF incorreta
+    // muda CFOP interestadual e ICMS) e passa despercebido até rejeição tardia em
+    // outro sistema (ex.: Mercado Livre recusando por wrong_receiver_zipcode).
+    this.requireBuyerAddress(orderData.buyer);
+
     const isProduction = nfe.environment === 'PRODUCTION';
     const tpAmb = isProduction ? '1' : '2';
 
     // Determine if operation is internal (same state) or interstate
     const issuerUF = this.getStateCode(issuer.address.state);
-    const buyerUF  = this.getStateCode(orderData.buyer.address?.state || '');
+    const buyerUF  = this.getStateCode(orderData.buyer.address.state);
     const isInterstate = !!(buyerUF && buyerUF !== issuerUF);
     const idDest = isInterstate ? '2' : '1';
     const taxRegimeNorm = String(issuer.taxRegime || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -101,7 +108,8 @@ export class XmlBuilderService {
           },
           dest: {
             ...(() => {
-              const digits = (orderData.buyer.cnpj || orderData.buyer.cpf || orderData.buyer.document || '00000000000').replace(/\D/g, '');
+              const digits = (orderData.buyer.cnpj || orderData.buyer.cpf || orderData.buyer.document || '').replace(/\D/g, '');
+              if (!digits) throw new Error('Documento (CPF/CNPJ) do destinatário ausente — não é possível emitir a NFe.');
               // CNPJ tem 14 dígitos, CPF tem 11 — o schema XSD da NFe exige o elemento
               // certo pro tamanho do documento (SEFAZ rejeita com "Falha no esquema XML"
               // se um CNPJ de 14 dígitos for enviado como <CPF>).
@@ -112,15 +120,14 @@ export class XmlBuilderService {
             xNome: isProduction
               ? (orderData.buyer.name || (orderData.buyer.first_name || '') + ' ' + (orderData.buyer.last_name || '')).substring(0, 60)
               : 'NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL',
-            // Fix 275: Use Capital Code if city_ibge is missing but State is known
             enderDest: {
-              xLgr: orderData.buyer.address?.street || 'Rua Desconhecida',
-              nro: orderData.buyer.address?.number || 'S/N',
-              xBairro: orderData.buyer.address?.neighborhood || 'Centro',
-              cMun: orderData.buyer.address?.city_ibge || this.getCapitalIbgeCode(this.getStateCode(orderData.buyer.address?.state || 'SP')),
-              xMun: orderData.buyer.address?.city || 'Cidade',
-              UF: this.getStateCode(orderData.buyer.address?.state || 'SP'),
-              CEP: (orderData.buyer.address?.zipCode || '00000000').replace(/\D/g, ''),
+              xLgr: orderData.buyer.address.street,
+              nro: orderData.buyer.address.number || 'S/N', // "S/N" é valor de domínio legítimo (endereço sem numeração), não fallback de dado ausente
+              xBairro: orderData.buyer.address.neighborhood,
+              cMun: orderData.buyer.address.city_ibge || this.getCapitalIbgeCode(this.getStateCode(orderData.buyer.address.state)),
+              xMun: orderData.buyer.address.city,
+              UF: this.getStateCode(orderData.buyer.address.state),
+              CEP: orderData.buyer.address.zipCode.replace(/\D/g, ''),
               cPais: '1058',
               xPais: 'BRASIL',
               ...(orderData.buyer.phone ? { fone: orderData.buyer.phone.replace(/\D/g, '') } : {})
@@ -281,6 +288,24 @@ export class XmlBuilderService {
     const remainder = sum % 11;
     const digit = remainder < 2 ? 0 : 11 - remainder;
     return digit.toString();
+  }
+
+  /** Exige os campos de endereço que a NFe usa de verdade (rua, bairro, cidade,
+   *  UF, CEP) — sem isso, os campos ficavam mascarados com fallbacks silenciosos
+   *  ('Rua Desconhecida', 'Centro', 'SP', '00000000'), que a SEFAZ aceita sem
+   *  reclamar mas geram NFe com UF/CEP errados (afeta CFOP/ICMS) e são
+   *  rejeitados depois por outros sistemas (ex.: Mercado Livre). */
+  private requireBuyerAddress(buyer: any): void {
+    const addr = buyer?.address;
+    const missing: string[] = [];
+    if (!addr?.street) missing.push('street');
+    if (!addr?.neighborhood) missing.push('neighborhood');
+    if (!addr?.city) missing.push('city');
+    if (!addr?.state) missing.push('state');
+    if (!addr?.zipCode) missing.push('zipCode');
+    if (missing.length) {
+      throw new Error(`Endereço do destinatário incompleto para emissão de NFe: faltando ${missing.join(', ')}.`);
+    }
   }
 
   private getStateCode(stateName: string): string {
