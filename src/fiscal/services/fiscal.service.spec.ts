@@ -201,6 +201,60 @@ describe('FiscalService — environment on new NFe', () => {
     expect(orderDataPassedToXmlBuilder.buyer.address.city).toBe('Maringá');
   });
 
+  it('prepareNFeData não deve perder o zipCode já persistido em dbOrder.customer.address quando o enrichment do marketplace retorna buyer.address com zip_code vazio (objeto truthy sem CEP, ex: MercadoLivreOrderAdapter quando o shipment não tem receiver_address.zip_code) — o "||" em orderData.buyer.address não detecta um objeto vazio como ausente e sobrescreve o CEP correto', async () => {
+    orderModel.findById = jest.fn().mockReturnValue({
+      populate: jest.fn().mockReturnValue({
+        lean: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue({
+            ...dbOrderBase,
+            items: [{ externalId: 'item-1', title: 'Produto', quantity: 1, unitPrice: 10 }],
+            customer: {
+              name: 'Antonio da Silva Jacinto',
+              document: '06726952430',
+              address: {
+                street: 'Rua Maria Augusta Pereira Vomstein',
+                number: '261',
+                neighborhood: 'Loteamento Sumaré',
+                city: 'Maringá',
+                state: 'PR',
+                zipCode: '30421305',
+              },
+            },
+          }),
+        }),
+      }),
+    });
+
+    const marketplaceOrderService = (service as any).marketplaceOrderService;
+    marketplaceOrderService.getOrderDetails = jest.fn().mockResolvedValue({
+      buyer: {
+        name: 'Antonio da Silva Jacinto',
+        document: '06726952430',
+        // Mesmo shape que MercadoLivreOrderAdapter.getOrderDetails monta quando o shipment
+        // existe mas receiver_address não tem zip_code: objeto com todas as chaves, vazias.
+        address: {
+          street: '', number: '', complement: '', neighborhood: '',
+          city: '', state: '', zip_code: '', country: 'BR',
+        },
+      },
+      items: [{ id: 'item-1', quantity: 1, unit_price: 10 }],
+    });
+
+    const buildNFeXml = service['xmlBuilderService'].buildNFeXml as jest.Mock;
+    buildNFeXml.mockClear();
+
+    const modalOverrides = {
+      environment: 'HOMOLOGATION',
+      marketplaceTag: 'mercado_livre',
+      accountId: 'acc1',
+    };
+
+    await service.emitNFe('000000000000000000000001', modalOverrides);
+
+    const orderDataPassedToXmlBuilder = buildNFeXml.mock.calls[0][1];
+    expect(orderDataPassedToXmlBuilder.buyer.address.zipCode || orderDataPassedToXmlBuilder.buyer.address.zip_code).toBe('30421305');
+  });
+
   it('persiste FiscalDocument em ERROR e emite FISCAL_EVENTS.NFE_ERROR quando resolveFiscalContext falha (ex: loja sem canal fiscal) — antes essa falha ocorria fora do try/catch e nunca criava documento nem notificava, deixando a modal do app travada para sempre', async () => {
     const emitter = service['eventEmitter'] as EventEmitter2;
     const listener = jest.fn();

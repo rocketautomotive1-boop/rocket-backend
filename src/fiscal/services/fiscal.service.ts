@@ -162,11 +162,26 @@ export class FiscalService {
                             || orderData.buyer?.name
                             || '';
 
+                        // Um endereço do marketplace sem CEP não conta como "presente": os adapters
+                        // (ex.: MercadoLivreOrderAdapter) sempre retornam um objeto com todas as
+                        // chaves, mesmo vazias, quando o shipment não tem receiver_address.zip_code —
+                        // um "||" simples nunca cairia no fallback e apagava o CEP já persistido em
+                        // dbOrder.customer.address (aquele que a modal de emissão e o card do
+                        // comprador no app já mostram corretos).
+                        const buyerAddress = fullOrder.buyer.address as any;
+                        const mpAddress = buyerAddress?.zip_code || buyerAddress?.zipCode
+                            ? buyerAddress
+                            : undefined;
+                        const rawShippingAddress = (fullOrder as any).shipping_address;
+                        const shippingAddress = rawShippingAddress?.zip_code || rawShippingAddress?.zipCode
+                            ? rawShippingAddress
+                            : undefined;
+
                         orderData.buyer = {
                             ...fullOrder.buyer,
                             name: buyerName,
                             document: fullOrder.buyer.document || orderData.buyer?.document || '',
-                            address: fullOrder.buyer.address || (fullOrder as any).shipping_address || orderData.buyer?.address || {},
+                            address: mpAddress || shippingAddress || orderData.buyer?.address || {},
                         };
                     }
 
