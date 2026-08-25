@@ -83,7 +83,7 @@ export class OrderMessagingService {
         const packId = order.marketplaceData?.pack_id
             || order.marketplaceData?.shipping?.id
             || order.externalId;
-        const sellerId = token.additionalData?.seller_id || token.additionalData?.user_id;
+        const sellerId = token.additionalData?.userId;
 
         if (!packId) throw new NotFoundException('Pack ID not found for this order');
         if (!sellerId) throw new NotFoundException('Seller ID not found in ML token');
@@ -130,7 +130,7 @@ export class OrderMessagingService {
         const packId = order.marketplaceData?.pack_id
             || order.marketplaceData?.shipping?.id
             || order.externalId;
-        const sellerId = token.additionalData?.seller_id || token.additionalData?.user_id;
+        const sellerId = token.additionalData?.userId;
 
         if (!packId) throw new NotFoundException('Pack ID not found for this order');
 
@@ -273,7 +273,7 @@ export class OrderMessagingService {
         const packId = order.marketplaceData?.pack_id
             || order.marketplaceData?.shipping?.id
             || order.externalId;
-        const sellerId = token.additionalData?.seller_id || token.additionalData?.user_id;
+        const sellerId = token.additionalData?.userId;
 
         if (!packId) throw new NotFoundException('Pack ID not found for this order');
 
