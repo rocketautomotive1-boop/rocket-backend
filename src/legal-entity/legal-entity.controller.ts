@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Put, Get, Param, Body, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { LegalEntityService } from './services/legal-entity.service';
@@ -33,8 +33,26 @@ export class LegalEntityController {
         return await this.certificateInspectionService.inspect(pfxBase64, body.password, uf);
     }
 
-    @Post('active')
-    @ApiOperation({ summary: 'Salvar configurações da entidade legal emissora' })
+    @Get()
+    @ApiOperation({ summary: 'Listar entidades legais cadastradas' })
+    async findAll() {
+        return await this.legalEntityService.findAll();
+    }
+
+    @Get('active')
+    @ApiOperation({ summary: '[Legado] Obter a única entidade legal ativa' })
+    async getActive() {
+        return await this.legalEntityService.findActive();
+    }
+
+    @Get(':id')
+    @ApiOperation({ summary: 'Obter uma entidade legal por id' })
+    async findOne(@Param('id') id: string) {
+        return await this.legalEntityService.findById(id);
+    }
+
+    @Post()
+    @ApiOperation({ summary: 'Criar uma nova entidade legal emissora' })
     @ApiConsumes('multipart/form-data')
     @ApiBody({
         schema: {
@@ -46,8 +64,31 @@ export class LegalEntityController {
         },
     })
     @UseInterceptors(FileInterceptor('certificate'))
-    async saveActive(@Body() body: any, @UploadedFile() file: any) {
-        let rawData = body.data ? JSON.parse(body.data) : body;
+    async create(@Body() body: any, @UploadedFile() file: any) {
+        const data = this.parseFormData(body, file);
+        return await this.legalEntityService.create(data);
+    }
+
+    @Put(':id')
+    @ApiOperation({ summary: 'Atualizar uma entidade legal emissora existente' })
+    @ApiConsumes('multipart/form-data')
+    @ApiBody({
+        schema: {
+            type: 'object',
+            properties: {
+                data: { type: 'string', description: 'JSON stringified legal entity data' },
+                certificate: { type: 'string', format: 'binary' },
+            },
+        },
+    })
+    @UseInterceptors(FileInterceptor('certificate'))
+    async update(@Param('id') id: string, @Body() body: any, @UploadedFile() file: any) {
+        const data = this.parseFormData(body, file);
+        return await this.legalEntityService.update(id, data);
+    }
+
+    private parseFormData(body: any, file: any): any {
+        const rawData = body.data ? JSON.parse(body.data) : body;
 
         const { street, number, neighborhood, city, state, zipCode, ibgeCode, certPassword, ...rest } = rawData;
         const data: any = {
@@ -68,12 +109,6 @@ export class LegalEntityController {
             data.certificatePfx = file.buffer.toString('base64');
         }
 
-        return await this.legalEntityService.saveActive(data);
-    }
-
-    @Get('active')
-    @ApiOperation({ summary: 'Obter configurações da entidade legal emissora' })
-    async getActive() {
-        return await this.legalEntityService.findActive();
+        return data;
     }
 }

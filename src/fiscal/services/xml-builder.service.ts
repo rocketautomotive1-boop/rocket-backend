@@ -164,8 +164,15 @@ export class XmlBuilderService {
               imposto: {
                 vTotTrib: vTotTribItem.toFixed(2),
                 ICMS: isSimples
-                  ? { ICMSSN102: { orig: item.origin || '0', CSOSN: '102' } }
-                  : { ICMS40:    { orig: item.origin || '0', CST: '41'   } },
+                  ? { ICMSSN102: { orig: item.origin || '0', CSOSN: issuer.csosn || '102' } }
+                  : { ICMS40:    { orig: item.origin || '0', CST: issuer.cst || '41'   } },
+                // CST 99 (Outras) não tributado — padrão do Faturador do ML mesmo para
+                // itens sem incidência real de IPI; declarar o grupo, mesmo zerado, evita
+                // divergência de leiaute frente a fiscalizações que cruzam NFe de autopeças.
+                IPI: {
+                  cEnq: item.cEnq || '999',
+                  IPITrib: { CST: '99', vBC: vProd.toFixed(2), pIPI: '0.0000', vIPI: '0.00' },
+                },
                 PIS:    { PISNT:    { CST: '07' } },
                 COFINS: { COFINSNT: { CST: '07' } },
               },
@@ -200,23 +207,9 @@ export class XmlBuilderService {
               }
             };
           })(),
-          transp: {
-            modFrete: '9',
-          },
+          transp: this.buildTransp(mpIntermed, orderData.items),
           pag: {
-            detPag: {
-              tPag: this.getPaymentType(orderData.payment?.paymentType),
-              ...(this.getPaymentType(orderData.payment?.paymentType) === '99' ? { xPag: this.getPaymentDescription(orderData.payment?.paymentType) } : {}),
-              vPag: Number(orderData.totals?.amount || orderData.total_amount || 0).toFixed(2),
-              ...((orderData.payment?.paymentType === 'credit_card' || orderData.payment?.paymentType === 'debit_card') ? {
-                card: {
-                  tpIntegra: '1', // Integrado
-                  CNPJ: '03007331000141', // CNPJ da Credenciadora (Mercado Pago/ML)
-                  tBand: this.getTBand(orderData.payment?.paymentMethodId),
-                  cAut: (orderData.payment?.authorizationCode || '').substring(0, 20)
-                }
-              } : {})
-            }
+            detPag: this.buildDetPag(orderData),
           },
           ...(mpIntermed ? {
             infIntermed: {
@@ -332,6 +325,41 @@ export class XmlBuilderService {
     return capitals[uf] || '3550308'; // Default SP - Sao Paulo
   }
 
+  /** Um <detPag> por pagamento — o Faturador do ML sempre gera indPag=0 (à vista) e o
+   *  grupo <card> com cAut sempre que há código de autorização, mesmo em PIX (a
+   *  integradora do marketplace emite um "cAut" próprio tipo "PIXE..."). Se
+   *  orderData.payments não estiver presente (dados antigos/edição manual no modal),
+   *  cai para orderData.payment singular — um só <detPag>, mesmo comportamento de antes. */
+  private buildDetPag(orderData: any): any {
+    const payments: any[] = Array.isArray(orderData.payments) && orderData.payments.length
+      ? orderData.payments
+      : [orderData.payment].filter(Boolean);
+
+    if (payments.length === 0) {
+      return { indPag: '0', tPag: '99', xPag: this.getPaymentDescription(undefined), vPag: Number(orderData.totals?.amount || orderData.total_amount || 0).toFixed(2) };
+    }
+
+    return payments.map((payment) => {
+      const tPag = this.getPaymentType(payment?.paymentType);
+      const vPag = Number(payment?.amount ?? orderData.totals?.amount ?? orderData.total_amount ?? 0).toFixed(2);
+      const authorizationCode = (payment?.authorizationCode || '').substring(0, 20);
+      return {
+        indPag: '0',
+        tPag,
+        ...(tPag === '99' ? { xPag: this.getPaymentDescription(payment?.paymentType) } : {}),
+        vPag,
+        ...(authorizationCode ? {
+          card: {
+            tpIntegra: '1', // Integrado
+            CNPJ: '03007331000141', // CNPJ da Credenciadora (Mercado Pago/ML)
+            tBand: this.getTBand(payment?.paymentMethodId),
+            cAut: authorizationCode,
+          }
+        } : {}),
+      };
+    });
+  }
+
   private getPaymentType(type: string): string {
     const map: { [key: string]: string } = {
       'credit_card': '03',
@@ -362,17 +390,43 @@ export class XmlBuilderService {
   private getMarketplaceIntermed(
     name?: string,
     marketplaceSellerId?: string,
-  ): { cnpj: string; idCadIntTran: string } | null {
+  ): { cnpj: string; idCadIntTran: string; xNome: string } | null {
     if (!name) return null;
     const id = marketplaceSellerId?.trim();
     if (!id || id.length < 2) return null; // omit infIntermed if seller ID not configured
     const n = name.toLowerCase();
-    if (n.includes('mercado') || n.includes('meli'))    return { cnpj: '03007331000141', idCadIntTran: id };
-    if (n.includes('amazon'))                            return { cnpj: '15436940000103', idCadIntTran: id };
-    if (n.includes('shopee'))                             return { cnpj: '43468032000113', idCadIntTran: id };
-    if (n.includes('magalu') || n.includes('magazine'))   return { cnpj: '47960950001921', idCadIntTran: id };
-    if (n.includes('americanas') || n.includes('b2w'))    return { cnpj: '00776574000156', idCadIntTran: id };
+    if (n.includes('mercado') || n.includes('meli'))    return { cnpj: '03007331000141', idCadIntTran: id, xNome: 'Ebazar.com.br LTDA.' };
+    if (n.includes('amazon'))                            return { cnpj: '15436940000103', idCadIntTran: id, xNome: 'Amazon Servicos de Varejo do Brasil LTDA.' };
+    if (n.includes('shopee'))                             return { cnpj: '43468032000113', idCadIntTran: id, xNome: 'Shopee Brasil Servicos e Tecnologia LTDA.' };
+    if (n.includes('magalu') || n.includes('magazine'))   return { cnpj: '47960950001921', idCadIntTran: id, xNome: 'Magazine Luiza S.A.' };
+    if (n.includes('americanas') || n.includes('b2w'))    return { cnpj: '00776574000156', idCadIntTran: id, xNome: 'B2W Companhia Digital' };
     return null;
+  }
+
+  /** modFrete=2 (destinatário/emitente contrata, mas transporte é feito pelo próprio
+   *  marketplace via Mercado Envios/Fulfillment) + grupo transporta/vol quando há
+   *  intermediador resolvido e ao menos um item com peso informado. Sem isso, modFrete=9
+   *  (sem transporte), igual ao comportamento anterior. */
+  private buildTransp(
+    mpIntermed: { cnpj: string; idCadIntTran: string; xNome: string } | null,
+    items: any[],
+  ): any {
+    if (!mpIntermed) return { modFrete: '9' };
+
+    const totalWeight = (items || []).reduce((sum, item) => sum + (Number(item.weight) || 0) * (Number(item.quantity) || 1), 0);
+    if (totalWeight <= 0) return { modFrete: '9' };
+
+    return {
+      modFrete: '2',
+      transporta: {
+        CNPJ: mpIntermed.cnpj,
+        xNome: mpIntermed.xNome,
+      },
+      vol: {
+        pesoL: totalWeight.toFixed(3),
+        pesoB: totalWeight.toFixed(3),
+      },
+    };
   }
 
   private getTBand(methodId: string): string {

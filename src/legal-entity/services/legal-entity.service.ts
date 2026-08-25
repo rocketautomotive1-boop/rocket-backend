@@ -21,7 +21,12 @@ export class LegalEntityService {
         return entity;
     }
 
-    /** Atalho para telas de configuração — válido apenas enquanto existe uma única LegalEntity. */
+    async findAll(): Promise<LegalEntityDocument[]> {
+        return this.legalEntityModel.find().sort({ companyName: 1 }).exec();
+    }
+
+    /** Atalho legado para telas antigas — só faz sentido enquanto existir uma única
+     *  LegalEntity ativa. Novas telas devem resolver por id (findAll + findById). */
     async findActive(): Promise<LegalEntityDocument | null> {
         return this.legalEntityModel.findOne({ isActive: true }).exec();
     }
@@ -30,7 +35,7 @@ export class LegalEntityService {
         return this.legalEntityModel.find({ contingencyMode: true }).exec();
     }
 
-    async saveActive(data: Partial<LegalEntityModel>): Promise<LegalEntityDocument> {
+    private normalizeTaxRegime(data: Partial<LegalEntityModel>): void {
         if (data.taxRegime !== undefined) {
             const raw = String(data.taxRegime).toUpperCase().replace(/[^A-Z0-9]/g, '');
             const SIMPLES_VARIANTS = ['SIMPLESNACIONAL', 'SIMPLES', 'SN', '1', 'SIMPLESNACIOANL'];
@@ -38,12 +43,20 @@ export class LegalEntityService {
                 data.taxRegime = 'SIMPLES_NACIONAL';
             }
         }
-        const entity = await this.legalEntityModel.findOneAndUpdate(
-            { isActive: true },
-            data,
-            { new: true, upsert: true, setDefaultsOnInsert: true },
-        ).exec();
-        this.logger.log(`LegalEntity saved. taxRegime=${entity?.taxRegime}`);
+    }
+
+    async create(data: Partial<LegalEntityModel>): Promise<LegalEntityDocument> {
+        this.normalizeTaxRegime(data);
+        const entity = await this.legalEntityModel.create(data);
+        this.logger.log(`LegalEntity criada. id=${entity._id} taxRegime=${entity.taxRegime}`);
+        return entity;
+    }
+
+    async update(id: string, data: Partial<LegalEntityModel>): Promise<LegalEntityDocument> {
+        this.normalizeTaxRegime(data);
+        const entity = await this.legalEntityModel.findByIdAndUpdate(id, data, { new: true }).exec();
+        if (!entity) throw new NotFoundException(`Entidade legal ${id} não encontrada.`);
+        this.logger.log(`LegalEntity atualizada. id=${entity._id} taxRegime=${entity.taxRegime}`);
         return entity;
     }
 

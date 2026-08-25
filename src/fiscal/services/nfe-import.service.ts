@@ -13,7 +13,7 @@ import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 import { ProductService } from '../../product/product.service';
 import { ProductDraftsService } from '../../ai/product-drafts.service';
 import { FinancialService } from '../../financial/services/financial.service';
-import { Inject, forwardRef } from '@nestjs/common';
+import { Inject } from '@nestjs/common';
 
 @Injectable()
 export class NfeImportService {
@@ -27,7 +27,6 @@ export class NfeImportService {
         @InjectModel(BrandModel.name) private brandModel: Model<BrandModel>,
         private readonly stockService: StockService,
         @Inject(PRICING_PORT) private readonly pricing: PricingPort,
-        @Inject(forwardRef(() => ProductService))
         private readonly productService: ProductService,
         private readonly productDraftsService: ProductDraftsService,
         private readonly financialService: FinancialService,

@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 
 import { FiscalController } from './fiscal.controller';
 import { FiscalEntryController } from './controllers/fiscal-entry.controller';
@@ -11,6 +11,7 @@ import { FiscalIssuanceRequestService } from './services/fiscal-issuance-request
 import { FiscalDanfeService } from './services/fiscal-danfe.service';
 import { FiscalIssuanceConsumer } from './consumers/fiscal-issuance.consumer';
 import { FiscalIssuanceOrderListener } from './listeners/fiscal-issuance-order.listener';
+import { FiscalMlAttachListener } from './listeners/fiscal-ml-attach.listener';
 import { DanfeQrCodeService } from './services/danfe-qrcode.service';
 import { EpecSyncWorker } from './services/epec-sync.worker';
 // import { Order } from '../order/schemas/order.schema';
@@ -45,9 +46,9 @@ import { BrandModel, BrandSchema } from '../product/schemas/brand.schema';
             { name: ProductModel.name, schema: ProductSchema },
             { name: BrandModel.name, schema: BrandSchema },
         ]),
-        forwardRef(() => ProductModule),
-        forwardRef(() => MarketplaceModule),
-        forwardRef(() => AiModule),
+        ProductModule,
+        MarketplaceModule,
+        AiModule,
         FinancialModule,
         LegalEntityModule, // StorePort/StoreModule é @Global — não precisa import explícito aqui
         FiscalCustomerModule,
@@ -66,6 +67,7 @@ import { BrandModel, BrandSchema } from '../product/schemas/brand.schema';
         DanfeQrCodeService,
         FiscalIssuanceConsumer,
         FiscalIssuanceOrderListener,
+        FiscalMlAttachListener,
         EpecSyncWorker,
     ],
     exports: [FiscalService, NfeImportService, FiscalIssuanceRequestService],

@@ -99,3 +99,199 @@ describe('XmlBuilderService — indIEDest / IE do destinatário', () => {
         expect(xml.indexOf('<dest>') < xml.indexOf('<IE>') && xml.indexOf('<IE>') < xml.indexOf('</dest>')).toBe(false);
     });
 });
+
+describe('XmlBuilderService — CSOSN/CST do item (configurável por LegalEntity)', () => {
+    let service: XmlBuilderService;
+
+    beforeEach(() => {
+        service = new XmlBuilderService();
+    });
+
+    it('usa o CSOSN configurado em issuer.csosn para emitente do Simples Nacional', async () => {
+        const issuer = { ...baseIssuer(), taxRegime: 'SIMPLES_NACIONAL', csosn: '500' };
+        const orderData = baseOrderData({
+            document: '03697945000100',
+            name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+        });
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, issuer);
+
+        expect(xml).toContain('<CSOSN>500</CSOSN>');
+        expect(xml).not.toContain('<CSOSN>102</CSOSN>');
+    });
+
+    it('usa CSOSN 102 como default quando issuer.csosn não está configurado (Simples Nacional)', async () => {
+        const issuer = { ...baseIssuer(), taxRegime: 'SIMPLES_NACIONAL' };
+        const orderData = baseOrderData({
+            document: '03697945000100',
+            name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+        });
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, issuer);
+
+        expect(xml).toContain('<CSOSN>102</CSOSN>');
+    });
+
+    it('usa o CST configurado em issuer.cst para emitente fora do Simples Nacional', async () => {
+        const issuer = { ...baseIssuer(), taxRegime: 'NORMAL', cst: '00' };
+        const orderData = baseOrderData({
+            document: '03697945000100',
+            name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+        });
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, issuer);
+
+        expect(xml).toContain('<CST>00</CST>');
+        expect(xml).not.toContain('<CST>41</CST>');
+    });
+
+    it('usa CST 41 como default quando issuer.cst não está configurado (fora do Simples)', async () => {
+        const issuer = { ...baseIssuer(), taxRegime: 'NORMAL' };
+        const orderData = baseOrderData({
+            document: '03697945000100',
+            name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+        });
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, issuer);
+
+        expect(xml).toContain('<CST>41</CST>');
+    });
+});
+
+describe('XmlBuilderService — transp (transportadora Mercado Envios)', () => {
+    let service: XmlBuilderService;
+
+    beforeEach(() => {
+        service = new XmlBuilderService();
+    });
+
+    it('declara transporta + vol quando orderData.marketplaceName é Mercado Livre e há peso do item', async () => {
+        const orderData = {
+            ...baseOrderData({
+                document: '03697945000100',
+                name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
+                address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+            }),
+            marketplaceName: 'Mercado Livre',
+        };
+        orderData.items[0].weight = 1.48;
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer(), '3475525806');
+
+        expect(xml).toContain('<modFrete>2</modFrete>');
+        expect(xml).toContain('<transporta><CNPJ>03007331000141</CNPJ><xNome>Ebazar.com.br LTDA.</xNome>');
+        expect(xml).toContain('<vol><pesoL>1.480</pesoL><pesoB>1.480</pesoB></vol>');
+    });
+
+    it('mantém modFrete=9 sem transporta quando não há marketplace resolvido', async () => {
+        const orderData = baseOrderData({
+            document: '03697945000100',
+            name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+        });
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
+
+        expect(xml).toContain('<modFrete>9</modFrete>');
+        expect(xml).not.toContain('<transporta>');
+    });
+});
+
+describe('XmlBuilderService — pag (indPag, card por meio de pagamento, múltiplos pagamentos)', () => {
+    let service: XmlBuilderService;
+
+    beforeEach(() => {
+        service = new XmlBuilderService();
+    });
+
+    it('inclui indPag=0 e card com cAut para pagamento via PIX (orderData.payments)', async () => {
+        const orderData = {
+            ...baseOrderData({
+                document: '03697945000100',
+                name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
+                address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+            }),
+            payments: [
+                { paymentType: 'bank_transfer', authorizationCode: 'PIXE0000000020260805', amount: 100 },
+            ],
+        };
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
+
+        // cAut truncado em 20 chars — limite do XSD da NFe 4.00 (o Faturador do ML excede
+        // esse limite nos exemplos reais, mas isso é uma inconsistência do ML, não do schema).
+        expect(xml).toContain('<detPag><indPag>0</indPag><tPag>17</tPag><vPag>100.00</vPag><card><tpIntegra>1</tpIntegra><CNPJ>03007331000141</CNPJ><tBand>99</tBand><cAut>PIXE0000000020260805</cAut></card></detPag>');
+    });
+
+    it('gera um <detPag> por pagamento quando o pedido tem múltiplos pagamentos', async () => {
+        const orderData = {
+            ...baseOrderData({
+                document: '03697945000100',
+                name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
+                address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+            }),
+            payments: [
+                { paymentType: 'credit_card', paymentMethodId: 'master', authorizationCode: '681582', amount: 234.5 },
+                { paymentType: 'credit_card', paymentMethodId: 'master', authorizationCode: '681520', amount: 265.5 },
+            ],
+        };
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
+
+        expect(xml).toContain('<cAut>681582</cAut>');
+        expect(xml).toContain('<cAut>681520</cAut>');
+        expect((xml.match(/<detPag>/g) || []).length).toBe(2);
+    });
+
+    it('mantém compatibilidade com orderData.payment singular quando payments[] não está presente', async () => {
+        const orderData = baseOrderData({
+            document: '03697945000100',
+            name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+        });
+        orderData.payment = { paymentType: 'credit_card', paymentMethodId: 'visa', authorizationCode: '818261' };
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
+
+        expect(xml).toContain('<indPag>0</indPag>');
+        expect(xml).toContain('<cAut>818261</cAut>');
+        expect((xml.match(/<detPag>/g) || []).length).toBe(1);
+    });
+});
+
+describe('XmlBuilderService — IPI do item', () => {
+    let service: XmlBuilderService;
+
+    beforeEach(() => {
+        service = new XmlBuilderService();
+    });
+
+    it('declara IPITrib CST 99 não tributado (padrão do Faturador do ML)', async () => {
+        const orderData = baseOrderData({
+            document: '03697945000100',
+            name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+        });
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
+
+        expect(xml).toContain('<IPI><cEnq>999</cEnq><IPITrib><CST>99</CST><vBC>100.00</vBC><pIPI>0.0000</pIPI><vIPI>0.00</vIPI></IPITrib></IPI>');
+    });
+
+    it('usa cEnq do item quando informado, em vez do default 999', async () => {
+        const orderData = baseOrderData({
+            document: '03697945000100',
+            name: 'DATATECK INDUSTRIA E COMERCIO LTDA.',
+            address: { street: 'Costa Gama', number: '110', neighborhood: 'Columbia City', city: 'GUAIBA', state: 'RS', zip_code: '92717330' },
+        });
+        orderData.items[0].cEnq = '123';
+
+        const xml = await service.buildNFeXml(baseNfe(), orderData, baseIssuer());
+
+        expect(xml).toContain('<cEnq>123</cEnq>');
+    });
+});

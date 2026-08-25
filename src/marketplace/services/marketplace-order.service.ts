@@ -37,7 +37,7 @@ export class MarketplaceOrderService {
         orderId: string,
         marketplaceId: string,
         xmlContent: string,
-        options?: { packId?: string; pdfBase64?: string },
+        options?: { packId?: string; pdfBase64?: string; accountId?: string },
     ): Promise<any> {
         const marketplace = await this.registryService.findOne(marketplaceId);
         if (!marketplace) throw new BadRequestException('Marketplace not found');

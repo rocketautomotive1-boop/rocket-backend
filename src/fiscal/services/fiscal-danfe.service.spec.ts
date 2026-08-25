@@ -3,7 +3,6 @@ import { getModelToken } from '@nestjs/mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FiscalDanfeService } from './fiscal-danfe.service';
 import { FiscalDocumentModel } from '../schemas/fiscal.schema';
-import { LegalEntityService } from '../../legal-entity/services/legal-entity.service';
 import { S3Service } from '../../common/s3/s3.service';
 import { DanfeQrCodeService } from './danfe-qrcode.service';
 import { FISCAL_EVENTS, FiscalNfeAuthorizedEvent } from '../events/fiscal.events';
@@ -36,8 +35,7 @@ const SAMPLE_XML = `<?xml version="1.0"?><nfeProc><NFe><infNFe>
 
 describe('FiscalDanfeService', () => {
   let service: FiscalDanfeService;
-  let fiscalDocumentModel: { updateOne: jest.Mock };
-  let legalEntityService: { findActive: jest.Mock };
+  let fiscalDocumentModel: { updateOne: jest.Mock; findById: jest.Mock };
   let s3: { uploadFile: jest.Mock };
   let qrCodeService: { buildQrCodeDataUri: jest.Mock };
   let eventEmitter: EventEmitter2;
@@ -47,8 +45,13 @@ describe('FiscalDanfeService', () => {
   );
 
   beforeEach(async () => {
-    fiscalDocumentModel = { updateOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(undefined) }) };
-    legalEntityService = { findActive: jest.fn().mockResolvedValue({ csc: 'csc-secret', cscId: '000001' }) };
+    fiscalDocumentModel = {
+      updateOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(undefined) }),
+      findById: jest.fn().mockReturnValue({
+        lean: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue({ issuer: { csc: 'csc-secret', cscId: '000001' } }),
+      }),
+    };
     s3 = { uploadFile: jest.fn().mockResolvedValue('https://s3.example.com/fiscal/danfe/CHAVE123.pdf') };
     qrCodeService = { buildQrCodeDataUri: jest.fn().mockResolvedValue('data:image/png;base64,fakeqr') };
 
@@ -56,7 +59,6 @@ describe('FiscalDanfeService', () => {
       providers: [
         FiscalDanfeService,
         { provide: getModelToken(FiscalDocumentModel.name), useValue: fiscalDocumentModel },
-        { provide: LegalEntityService, useValue: legalEntityService },
         { provide: S3Service, useValue: s3 },
         { provide: DanfeQrCodeService, useValue: qrCodeService },
         EventEmitter2,

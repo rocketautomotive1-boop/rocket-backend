@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, Inject } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -14,6 +14,7 @@ import { OrderModel, OrderDocument } from '../../order/schemas/order.schema';
 import { STORE_PORT, StorePort } from '../../store/ports/store.port';
 import { LegalEntityService } from '../../legal-entity/services/legal-entity.service';
 import { FiscalCustomerService } from '../../fiscal-customer/services/fiscal-customer.service';
+import { mapMarketplacePayments, enrichItemWithProductData } from './fiscal-nfe-data.helpers';
 import {
     FISCAL_EVENTS,
     FiscalNfeAuthorizedEvent,
@@ -36,9 +37,7 @@ export class FiscalService {
         private readonly xmlBuilderService: XmlBuilderService,
         private readonly signatureService: SignatureService,
         private readonly sefazService: SefazService,
-        @Inject(forwardRef(() => MarketplaceService))
         private readonly marketplaceService: MarketplaceService,
-        @Inject(forwardRef(() => ProductService))
         private readonly productService: ProductService,
         private readonly marketplaceOrderService: MarketplaceOrderService,
         private readonly marketplaceRegistry: MarketplaceRegistryService,
@@ -171,13 +170,13 @@ export class FiscalService {
                     }
 
                     if (fullOrder.payments?.length) {
-                        const payment = fullOrder.payments.find((p: any) => p.status === 'approved') || fullOrder.payments[0];
-                        orderData.payment = {
-                            paymentMethodId: payment.payment_method_id,
-                            paymentType: payment.payment_type,
-                            authorizationCode: payment.authorization_code,
-                            installments: payment.installments,
-                        };
+                        const approvedPayments = mapMarketplacePayments(fullOrder.payments);
+                        orderData.payments = approvedPayments;
+                        // Compat: orderData.payment singular ainda alimenta callers antigos
+                        // (ex.: modalOverrides parcial no admin) — primeiro pagamento aprovado.
+                        if (approvedPayments.length) {
+                            orderData.payment = approvedPayments[0];
+                        }
                     }
                 }
             } catch (e) {
@@ -244,6 +243,7 @@ export class FiscalService {
                     item.cest = product.cest || item.cest;
                     item.origin = product.origin || '0';
                     item.uCom = product.unit?.code || 'UN';
+                    enrichItemWithProductData(item, product);
                 }
             }
         }

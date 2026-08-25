@@ -6,7 +6,6 @@ import { XMLParser } from 'fast-xml-parser';
 import * as puppeteer from 'puppeteer';
 import * as bwipjs from 'bwip-js';
 import { FiscalDocumentModel, FiscalDocumentDocument } from '../schemas/fiscal.schema';
-import { LegalEntityService } from '../../legal-entity/services/legal-entity.service';
 import { FISCAL_EVENTS, FiscalNfeAuthorizedEvent, FiscalDanfeReadyEvent } from '../events/fiscal.events';
 import { S3Service } from '../../common/s3/s3.service';
 import { DanfeQrCodeService } from './danfe-qrcode.service';
@@ -35,7 +34,6 @@ export class FiscalDanfeService {
     constructor(
         @InjectModel(FiscalDocumentModel.name)
         private readonly fiscalDocumentModel: Model<FiscalDocumentDocument>,
-        private readonly legalEntityService: LegalEntityService,
         private readonly s3: S3Service,
         private readonly eventEmitter: EventEmitter2,
         private readonly qrCodeService: DanfeQrCodeService,
@@ -45,10 +43,12 @@ export class FiscalDanfeService {
     async onAuthorized(event: FiscalNfeAuthorizedEvent): Promise<void> {
         try {
             const parsed = this.parseNFeXml(event.xml);
-            // Só existe uma LegalEntity ativa hoje (ver LegalEntityService.findActive) —
-            // não busca por CNPJ do XML porque não há método de lookup por CNPJ ainda,
-            // e seria prematuro adicioná-lo sem um segundo caso de uso real (YAGNI).
-            const legalEntity = await this.legalEntityService.findActive();
+            // csc/cscId vêm do snapshot da LegalEntity gravado no FiscalDocument no momento
+            // da emissão (fiscal.service.ts: issuer.toObject()) — não de LegalEntityService,
+            // que resolveria a entidade "ativa" errada quando há mais de uma LegalEntity
+            // cadastrada e a nota foi emitida por outra que não essa.
+            const fiscalDocument = await this.fiscalDocumentModel.findById(event.nfeId).lean().exec();
+            const legalEntity = fiscalDocument?.issuer;
             const qrCodeDataUri = await this.qrCodeService.buildQrCodeDataUri({
                 accessKey: event.accessKey,
                 uf: parsed.emit?.enderEmit?.UF || 'PE',

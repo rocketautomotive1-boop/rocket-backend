@@ -26,6 +26,14 @@ export class LegalEntityModel {
     @Prop({ default: 'SIMPLES_NACIONAL' })
     taxRegime: string;
 
+    /** CSOSN do item na NFe quando taxRegime é Simples Nacional (grupo ICMSSN102). Default '102'. */
+    @Prop()
+    csosn?: string;
+
+    /** CST do ICMS do item na NFe quando taxRegime não é Simples Nacional (grupo ICMS40). Default '41'. */
+    @Prop()
+    cst?: string;
+
     @Prop()
     email: string;
 

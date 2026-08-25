@@ -16,6 +16,7 @@ import { MarketplaceOrderService } from '../marketplace/services/marketplace-ord
 import { SaleNotificationReconcilerService } from './services/sale-notification-reconciler.service';
 import { MarketplaceConfigCacheService } from '../marketplace/services/marketplace-config-cache.service';
 import { OrderLabelService } from './services/order-label.service';
+import { OrderMessagingService } from './services/order-messaging.service';
 import {
     BalcaoOrderDraftModel,
     BalcaoOrderDraftDocument,
@@ -43,6 +44,7 @@ export class OrderController {
         @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
         private readonly marketplaceConfigCache: MarketplaceConfigCacheService,
         private readonly orderLabel: OrderLabelService,
+        private readonly orderMessaging: OrderMessagingService,
         @InjectModel(BalcaoOrderDraftModel.name)
         private readonly balcaoDraftModel: Model<BalcaoOrderDraftDocument>,
         @Inject(STORE_PORT) private readonly storePort: StorePort,
@@ -176,11 +178,12 @@ export class OrderController {
         }
 
         const packId = (order as any).packId || undefined;
+        const accountId = (order as any).accountId || undefined;
         return this.marketplaceOrderService.attachFiscalDocument(
             order.externalId,
             marketplaceId,
             xmlContent,
-            { packId },
+            { packId, accountId },
         );
     }
 
@@ -362,5 +365,43 @@ export class OrderController {
         const result = await this.orderFulfillment.retryLogistics(res.getValue(), body.userId || 'admin');
         if (result.isFailure) throw new BadRequestException(result.error);
         return { success: true };
+    }
+
+    @Get(':id/messages')
+    async getMessages(@Req() req: any, @Param('id') id: string) {
+        const res = await this.orderQuery.getOrder(id);
+        if (res.isFailure) throw new NotFoundException(res.error);
+        await this.assertOwnsOrder(req, res.getValue());
+        const thread = await this.orderMessaging.getMessages(id);
+        return {
+            ...thread,
+            messages: thread.messages.map((m) => ({
+                id: m.id,
+                from: m.from,
+                text: m.text,
+                imageUrl: m.attachments?.find((a) => a.type === 'image')?.url,
+                createdAt: m.createdAt,
+            })),
+        };
+    }
+
+    @Post(':id/messages')
+    async sendMessage(@Req() req: any, @Param('id') id: string, @Body() body: { text: string }) {
+        const res = await this.orderQuery.getOrder(id);
+        if (res.isFailure) throw new NotFoundException(res.error);
+        await this.assertOwnsOrder(req, res.getValue());
+        return this.orderMessaging.sendMessage(id, body.text);
+    }
+
+    @Post(':id/messages/image')
+    async sendMessageImage(
+        @Req() req: any,
+        @Param('id') id: string,
+        @Body() body: { imageBase64: string; mimeType: string },
+    ) {
+        const res = await this.orderQuery.getOrder(id);
+        if (res.isFailure) throw new NotFoundException(res.error);
+        await this.assertOwnsOrder(req, res.getValue());
+        return this.orderMessaging.sendImage(id, body.imageBase64, body.mimeType);
     }
 }
