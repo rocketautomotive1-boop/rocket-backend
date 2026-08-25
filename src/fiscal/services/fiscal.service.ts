@@ -167,15 +167,17 @@ export class FiscalService {
                         // chaves, mesmo vazias, quando o shipment não tem receiver_address.zip_code —
                         // um "||" simples nunca cairia no fallback e apagava o CEP já persistido em
                         // dbOrder.customer.address (aquele que a modal de emissão e o card do
-                        // comprador no app já mostram corretos).
-                        const buyerAddress = fullOrder.buyer.address as any;
-                        const mpAddress = buyerAddress?.zip_code || buyerAddress?.zipCode
-                            ? buyerAddress
-                            : undefined;
-                        const rawShippingAddress = (fullOrder as any).shipping_address;
-                        const shippingAddress = rawShippingAddress?.zip_code || rawShippingAddress?.zipCode
-                            ? rawShippingAddress
-                            : undefined;
+                        // comprador no app já mostram corretos). E quando o marketplace TEM o CEP,
+                        // ele vem na chave zip_code (snake_case) — normaliza pra zipCode aqui, já
+                        // que XmlBuilderService.requireBuyerAddress só reconhece zipCode (camelCase);
+                        // sem isso, um endereço válido do marketplace ainda rejeitava a NFe com
+                        // "faltando zipCode" mesmo com o CEP presente no payload.
+                        const normalizeAddress = (a: any): any | undefined => {
+                            const zipCode = a?.zip_code || a?.zipCode;
+                            return zipCode ? { ...a, zipCode } : undefined;
+                        };
+                        const mpAddress = normalizeAddress(fullOrder.buyer.address);
+                        const shippingAddress = normalizeAddress((fullOrder as any).shipping_address);
 
                         orderData.buyer = {
                             ...fullOrder.buyer,
@@ -288,6 +290,12 @@ export class FiscalService {
                     address: {
                         ...(prepared.buyer?.address || {}),
                         ...(modalOverrides?.buyer?.address || {}),
+                        // modalOverrides pode carregar o CEP como zip_code (snake_case, ex.: outbox
+                        // salvo com o shape bruto do marketplace) — normaliza pra zipCode aqui
+                        // também, senão o requireBuyerAddress do XmlBuilderService não reconhece.
+                        zipCode: modalOverrides?.buyer?.address?.zipCode
+                            || modalOverrides?.buyer?.address?.zip_code
+                            || prepared.buyer?.address?.zipCode,
                     },
                 },
                 totals: { ...prepared.totals, ...(modalOverrides?.totals || {}) },

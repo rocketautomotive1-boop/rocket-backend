@@ -252,7 +252,58 @@ describe('FiscalService — environment on new NFe', () => {
     await service.emitNFe('000000000000000000000001', modalOverrides);
 
     const orderDataPassedToXmlBuilder = buildNFeXml.mock.calls[0][1];
-    expect(orderDataPassedToXmlBuilder.buyer.address.zipCode || orderDataPassedToXmlBuilder.buyer.address.zip_code).toBe('30421305');
+    // requireBuyerAddress do XmlBuilderService só reconhece zipCode (camelCase) — precisa
+    // estar nessa chave especificamente, não basta o CEP estar presente em zip_code.
+    expect(orderDataPassedToXmlBuilder.buyer.address.zipCode).toBe('30421305');
+  });
+
+  it('prepareNFeData normaliza zip_code (snake_case, shape bruto do MercadoLivreOrderAdapter) para zipCode quando o marketplace retorna um endereço válido — sem isso, mesmo um CEP presente no payload do marketplace era rejeitado por requireBuyerAddress, que só reconhece zipCode', async () => {
+    orderModel.findById = jest.fn().mockReturnValue({
+      populate: jest.fn().mockReturnValue({
+        lean: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue({
+            ...dbOrderBase,
+            items: [{ externalId: 'item-1', title: 'Produto', quantity: 1, unitPrice: 10 }],
+            customer: {
+              name: 'Maria de Fátima Campos De Aquino',
+              document: '39165760700',
+              address: {
+                street: 'Rua Içana', number: '71', neighborhood: 'Nova Suíssa',
+                city: 'Belo Horizonte', state: 'MG', zipCode: '30421305',
+              },
+            },
+          }),
+        }),
+      }),
+    });
+
+    const marketplaceOrderService = (service as any).marketplaceOrderService;
+    marketplaceOrderService.getOrderDetails = jest.fn().mockResolvedValue({
+      buyer: {
+        name: 'Maria de Fátima Campos De Aquino',
+        document: '39165760700',
+        address: {
+          street: 'Rua Içana', number: '71', complement: 'Apartamento 101',
+          neighborhood: 'Nova Suíssa', city: 'Belo Horizonte', state: 'MG',
+          zip_code: '30421305', country: 'BR',
+        },
+      },
+      items: [{ id: 'item-1', quantity: 1, unit_price: 10 }],
+    });
+
+    const buildNFeXml = service['xmlBuilderService'].buildNFeXml as jest.Mock;
+    buildNFeXml.mockClear();
+
+    const modalOverrides = {
+      environment: 'HOMOLOGATION',
+      marketplaceTag: 'mercado_livre',
+      accountId: 'acc1',
+    };
+
+    await service.emitNFe('000000000000000000000001', modalOverrides);
+
+    const orderDataPassedToXmlBuilder = buildNFeXml.mock.calls[0][1];
+    expect(orderDataPassedToXmlBuilder.buyer.address.zipCode).toBe('30421305');
   });
 
   it('persiste FiscalDocument em ERROR e emite FISCAL_EVENTS.NFE_ERROR quando resolveFiscalContext falha (ex: loja sem canal fiscal) — antes essa falha ocorria fora do try/catch e nunca criava documento nem notificava, deixando a modal do app travada para sempre', async () => {
