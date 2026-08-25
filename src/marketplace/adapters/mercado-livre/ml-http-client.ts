@@ -30,6 +30,11 @@ export class MlHttpClient extends MarketplaceHttpClient {
   }
 
   protected async sign(spec: HttpRequestSpec, token: ResolvedToken): Promise<SignedRequest> {
+    // spec.body já vem resolvido (a factory de MarketplaceHttpClient.request roda
+    // antes de sign()) — quando é um FormData (form-data), os headers precisam vir
+    // DESSA mesma instância (boundary é gerado por instância), não de spec.headers
+    // estático, senão o boundary do header não bate com o do corpo enviado.
+    const formHeaders = typeof spec.body?.getHeaders === 'function' ? spec.body.getHeaders() : undefined;
     return {
       url: `${this.baseUrl()}${spec.path}`,
       config: {
@@ -37,6 +42,7 @@ export class MlHttpClient extends MarketplaceHttpClient {
         data: spec.body,
         headers: {
           Authorization: `Bearer ${token.accessToken}`,
+          ...formHeaders,
           ...(spec.headers ?? {}),
         },
       },

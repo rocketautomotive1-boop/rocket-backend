@@ -47,4 +47,30 @@ describe('MercadoLivreOrderAdapter', () => {
     expect(out.id).toBe('9');
     expect(http.get).toHaveBeenCalledWith('/orders/9', expect.objectContaining({ accountId: 'ACC_B' }));
   });
+
+  describe('uploadInvoice', () => {
+    it('passa body como FACTORY (função), não como instância pronta de FormData — necessário para MarketplaceHttpClient regenerar o form em cada tentativa de retry (auth 401 ou rate limit 429); um FormData reusado é um stream já drenado e trava o request até o socket cair', async () => {
+      http.request.mockResolvedValueOnce({ data: { id: 'fd-1' } });
+
+      await adapter.uploadInvoice('123', '<xml/>', { packId: '999' });
+
+      expect(http.request).toHaveBeenCalledTimes(1);
+      const [spec] = http.request.mock.calls[0];
+      expect(spec.path).toBe('/packs/999/fiscal_documents');
+      expect(typeof spec.body).toBe('function');
+
+      // A factory precisa produzir um FormData válido a cada chamada
+      const form1 = spec.body();
+      const form2 = spec.body();
+      expect(typeof form1.getHeaders).toBe('function');
+      expect(form1).not.toBe(form2); // instâncias distintas, não a mesma reaproveitada
+    });
+
+    it('sem packId, usa o path de fallback por orderId', async () => {
+      http.request.mockResolvedValueOnce({ data: {} });
+      await adapter.uploadInvoice('123', '<xml/>', {});
+      const [spec] = http.request.mock.calls[0];
+      expect(spec.path).toBe('/orders/123/fiscal_documents');
+    });
+  });
 });

@@ -23,7 +23,7 @@ class TestHttpClient extends MarketplaceHttpClient {
   protected async sign(spec: HttpRequestSpec, t: ResolvedToken): Promise<SignedRequest> {
     return {
       url: `${this.baseUrl()}${spec.path}`,
-      config: { params: spec.query, headers: { Authorization: `Bearer ${t.accessToken}` } },
+      config: { params: spec.query, data: spec.body, headers: { Authorization: `Bearer ${t.accessToken}` } },
     };
   }
 }
@@ -126,5 +126,81 @@ describe('MarketplaceHttpClient — request com retry de 429', () => {
       expect.objectContaining({ selector: { accountId: 'acc1' }, context: 'test' }),
       expect.any(Function),
     );
+  });
+});
+
+describe('MarketplaceHttpClient — body factory (stream de uso único, ex.: FormData)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  /** Simula o comportamento REAL de AuthRetryService.run: na primeira falha de
+   *  auth, invoca `op` de novo (mesmo padrão de refreshAndRetry) — é isso que
+   *  expõe o bug do FormData reusado entre tentativas. */
+  function makeSutWithAuthRetryOnce() {
+    const authRetry = {
+      run: jest.fn(async (_args: any, op: any) => {
+        try {
+          return await op(token);
+        } catch (err) {
+          return op(token); // 1 retry, como AuthRetryService.refreshAndRetry
+        }
+      }),
+    };
+    const marketplaceRegistry = { findByName: jest.fn().mockResolvedValue({ _id: 'mkt1' }) };
+    const sut = new TestHttpClient(authRetry as any, marketplaceRegistry as any);
+    return { sut, authRetry };
+  }
+
+  it('body como valor fixo é reenviado tal qual em cada tentativa (comportamento prévio preservado)', async () => {
+    const { sut } = makeSutWithAuthRetryOnce();
+    mockedAxios.request
+      .mockRejectedValueOnce({ response: { status: 401 } })
+      .mockResolvedValueOnce({ data: { ok: true } } as any);
+
+    const body = { fixed: true };
+    const data = await sut.post('/x', { context: 'test' }, body);
+
+    expect(data).toEqual({ ok: true });
+    expect(mockedAxios.request.mock.calls[0][0].data).toBe(body);
+    expect(mockedAxios.request.mock.calls[1][0].data).toBe(body);
+  });
+
+  it('body como factory gera uma instância NOVA a cada tentativa — sem isso, um FormData já consumido na 1ª tentativa trava a 2ª (bug real: upload de NFe pro Mercado Livre travando após renovação de token)', async () => {
+    const { sut } = makeSutWithAuthRetryOnce();
+    mockedAxios.request
+      .mockRejectedValueOnce({ response: { status: 401 } })
+      .mockResolvedValueOnce({ data: { ok: true } } as any);
+
+    let callCount = 0;
+    const bodyFactory = () => ({ instance: ++callCount });
+
+    const data = await sut.post('/x', { context: 'test' }, bodyFactory);
+
+    expect(data).toEqual({ ok: true });
+    expect(callCount).toBe(2); // uma instância nova por tentativa
+    expect(mockedAxios.request.mock.calls[0][0].data).toEqual({ instance: 1 });
+    expect(mockedAxios.request.mock.calls[1][0].data).toEqual({ instance: 2 });
+  });
+
+  it('body como factory também é regenerado no retry de rate limit (429), não só no retry de auth', async () => {
+    const { sut } = makeSut();
+    jest.useFakeTimers();
+    mockedAxios.request
+      .mockRejectedValueOnce(rateLimitError())
+      .mockResolvedValueOnce({ data: { ok: true } } as any);
+
+    let callCount = 0;
+    const bodyFactory = () => ({ instance: ++callCount });
+
+    const promise = sut.post('/x', { context: 'test' }, bodyFactory);
+    await jest.runAllTimersAsync();
+    const data = await promise;
+    jest.useRealTimers();
+
+    expect(data).toEqual({ ok: true });
+    expect(callCount).toBe(2);
+    expect(mockedAxios.request.mock.calls[0][0].data).toEqual({ instance: 1 });
+    expect(mockedAxios.request.mock.calls[1][0].data).toEqual({ instance: 2 });
   });
 });

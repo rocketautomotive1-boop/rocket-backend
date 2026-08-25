@@ -652,15 +652,19 @@ export class FiscalService {
                 await nfe.save();
             }
 
+            // number/série podem não existir ainda (erro de config antes de reservar
+            // o número, ex: loja sem canal fiscal) — rótulo genérico nesse caso.
+            const nfeLabel = nfe.number ? `NFe ${nfe.number} série ${nfe.series}` : 'NFe';
             const logMsg = nfe.status === 'AUTHORIZED'
-                ? `NFe ${nfe.number} série ${nfe.series} autorizada. Chave: ${nfe.accessKey}`
+                ? `${nfeLabel} autorizada. Chave: ${nfe.accessKey}`
                 : nfe.status === 'CANCELLED'
-                    ? `NFe ${nfe.number} série ${nfe.series} cancelada. ${nfe.rejectionReason || ''}`
-                    : `NFe ${nfe.number} série ${nfe.series} ${nfe.status}. ${nfe.rejectionReason || ''}`;
+                    ? `${nfeLabel} cancelada. ${nfe.rejectionReason || ''}`
+                    : `${nfeLabel} ${nfe.status}. ${nfe.rejectionReason || ''}`;
 
+            // fiscalDocuments é campo virtual (populate por foreignField: 'order' em
+            // order.schema.ts) — não existe pra gravar via $addToSet; o vínculo real
+            // é nfe.order = dbOrder._id acima, que o virtual já resolve sozinho.
             await this.orderModel.findByIdAndUpdate(dbOrder._id, {
-                // $addToSet prevents duplicate ObjectId refs in fiscalDocuments array
-                $addToSet: { fiscalDocuments: nfe._id },
                 $push: {
                     logs: {
                         logType: 'fiscal',

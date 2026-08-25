@@ -11,8 +11,15 @@ export interface HttpRequestSpec {
   path: string;
   /** Query params (antes da assinatura). */
   query?: Record<string, any>;
-  /** Corpo JSON. */
-  body?: any;
+  /**
+   * Corpo da requisição. Aceita um valor fixo (JSON) ou uma factory `() => body`
+   * — obrigatória para bodies de stream único (ex.: FormData do pacote
+   * `form-data`), que são consumidos ao serem enviados e não podem ser
+   * reenviados no retry de auth (AuthRetryService invoca `op` de novo após
+   * renovar o token). Sem a factory, o retry reenvia o MESMO stream já
+   * drenado — o request trava até o socket cair (nenhum dado, nenhum erro).
+   */
+  body?: any | (() => any);
   /** Headers extra (mesclados com os da família). */
   headers?: Record<string, string>;
   /** Config axios extra pass-through (ex.: maxBodyLength p/ multipart). */
@@ -80,13 +87,17 @@ export abstract class MarketplaceHttpClient {
     return this.authRetry.run<AxiosResponse<T>>(
       { marketplaceId: String(mkt._id), selector, context: ctx.context },
       async (token) => {
-        const signed = await this.sign(spec, token);
+        // Resolve o body a cada tentativa — se for factory, gera uma instância
+        // nova (necessário para stream de uso único, ver HttpRequestSpec.body).
+        const bodyFactory = typeof spec.body === 'function' ? spec.body : undefined;
+        const freshSpec = bodyFactory ? { ...spec, body: bodyFactory() } : spec;
+        const signed = await this.sign(freshSpec, token);
         return this.requestWithRateLimitRetry<T>({
-          method: spec.method,
+          method: freshSpec.method,
           url: signed.url,
           ...signed.config,
-          ...(spec.axiosConfig ?? {}),
-        }, ctx.context);
+          ...(freshSpec.axiosConfig ?? {}),
+        }, ctx.context, bodyFactory);
       },
     );
   }
@@ -95,15 +106,21 @@ export abstract class MarketplaceHttpClient {
    * Executa o axios.request retentando em 429 (rate limit) com backoff. Honra
    * Retry-After quando presente; senão usa backoff exponencial curto. Erros de
    * auth (401/403) NÃO são tratados aqui — sobem para o AuthRetryService.
+   *
+   * `bodyFactory`, se presente, regenera `config.data` a cada tentativa — o
+   * mesmo motivo do retry em request(): um FormData/stream já consumido na
+   * tentativa anterior trava silenciosamente em vez de reenviar.
    */
   private async requestWithRateLimitRetry<T>(
     config: AxiosRequestConfig,
     context: string,
+    bodyFactory?: () => any,
   ): Promise<AxiosResponse<T>> {
     let lastError: unknown;
     for (let attempt = 0; attempt <= MarketplaceHttpClient.RATE_LIMIT_BACKOFF_MS.length; attempt++) {
       try {
-        return await axios.request<T>(config);
+        const attemptConfig = (attempt > 0 && bodyFactory) ? { ...config, data: bodyFactory() } : config;
+        return await axios.request<T>(attemptConfig);
       } catch (error) {
         if (!MarketplaceHttpClient.isRateLimited(error) ||
             attempt === MarketplaceHttpClient.RATE_LIMIT_BACKOFF_MS.length) {

@@ -225,32 +225,35 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
 
     this.logger.log(`Enviando NFe para ML: ${resourcePath}`);
 
-    const form = new FormData();
-
-    // XML is required; filename must end in .xml so ML accepts it
-    const xmlBuffer = Buffer.from(xmlContent, 'utf-8');
-    form.append('fiscal_document', xmlBuffer, {
-      filename: 'nota_fiscal.xml',
-      contentType: 'application/xml',
-      knownLength: xmlBuffer.length,
-    });
-
-    // Optional: attach PDF if provided
-    if (options?.pdfBase64) {
-      const pdfBuffer = Buffer.from(options.pdfBase64, 'base64');
-      form.append('fiscal_document', pdfBuffer, {
-        filename: 'nota_fiscal.pdf',
-        contentType: 'application/pdf',
-        knownLength: pdfBuffer.length,
+    // FormData (form-data) é um stream de uso único — se AuthRetryService
+    // renovar o token e retentar, ou o rate-limit retry reagir a um 429, a
+    // mesma instância já está drenada e o request trava até o socket cair
+    // (nenhum dado, nenhum erro). buildForm() é passado como factory para que
+    // MarketplaceHttpClient gere um FormData novo em cada tentativa.
+    const buildForm = () => {
+      const form = new FormData();
+      const xmlBuffer = Buffer.from(xmlContent, 'utf-8');
+      form.append('fiscal_document', xmlBuffer, {
+        filename: 'nota_fiscal.xml',
+        contentType: 'application/xml',
+        knownLength: xmlBuffer.length,
       });
-    }
+      if (options?.pdfBase64) {
+        const pdfBuffer = Buffer.from(options.pdfBase64, 'base64');
+        form.append('fiscal_document', pdfBuffer, {
+          filename: 'nota_fiscal.pdf',
+          contentType: 'application/pdf',
+          knownLength: pdfBuffer.length,
+        });
+      }
+      return form;
+    };
 
     const res = await this.http.request<any>(
       {
         method: 'POST',
         path: resourcePath,
-        body: form,
-        headers: form.getHeaders(),
+        body: buildForm,
         axiosConfig: { maxBodyLength: Infinity },
       },
       this.ctx('uploadInvoice', options?.accountId),
