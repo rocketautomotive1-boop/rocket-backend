@@ -6,6 +6,7 @@ import { DiscoveryGateway } from './discovery.gateway';
 import { OrderGateway } from './order.gateway';
 import { RembgGateway } from './rembg.gateway';
 import { SyncGateway } from './sync.gateway';
+import { FiscalGateway } from './fiscal.gateway';
 import { RembgController } from './rembg.controller';
 import { RembgJob, RembgJobSchema } from './schemas/rembg-job.schema';
 import { RembgEnqueueService } from './rembg-enqueue.service';
@@ -17,6 +18,7 @@ import { AuthModule } from '../auth/auth.module';
 import { ProcessedImageModule } from '../processed-image/processed-image.module';
 import { ProductDiscoveryModel, ProductDiscoverySchema } from '../product/schemas/product-discovery.schema';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
+import { FiscalDocumentModel, FiscalDocumentSchema } from '../fiscal/schemas/fiscal.schema';
 
 @Module({
     imports: [
@@ -30,6 +32,7 @@ import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
             { name: RembgJob.name, schema: RembgJobSchema },
             { name: ProductDiscoveryModel.name, schema: ProductDiscoverySchema },
             { name: ProductModel.name, schema: ProductSchema },
+            { name: FiscalDocumentModel.name, schema: FiscalDocumentSchema },
         ]),
         S3Module,
         AuthModule,
@@ -41,6 +44,7 @@ import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
         OrderGateway,
         RembgGateway,
         SyncGateway,
+        FiscalGateway,
         RembgEnqueueService,
         RembgCompletionService,
         RembgDispatchWorker,
@@ -51,6 +55,7 @@ import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
         OrderGateway,
         RembgGateway,
         SyncGateway,
+        FiscalGateway,
         ProcessedImageModule,
         RembgEnqueueService,
         RembgCompletionService,

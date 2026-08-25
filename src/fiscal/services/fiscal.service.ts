@@ -19,6 +19,7 @@ import {
     FISCAL_EVENTS,
     FiscalNfeAuthorizedEvent,
     FiscalNfeRejectedEvent,
+    FiscalNfeErrorEvent,
     FiscalNfeCancelledEvent,
 } from '../events/fiscal.events';
 
@@ -421,6 +422,15 @@ export class FiscalService {
             nfe.rejectionReason = error.message;
             await nfe.save();
             await this.linkNFeToOrder(nfe, orderId);
+            try {
+                this.eventEmitter.emit(FISCAL_EVENTS.NFE_ERROR, new FiscalNfeErrorEvent(
+                    String(nfe._id),
+                    nfe.order ? String(nfe.order) : (nfe.orderId ? String(nfe.orderId) : null),
+                    error.message,
+                ));
+            } catch (emitErr) {
+                this.logger.warn(`Falha ao emitir evento de erro para NFe ${nfe._id}: ${emitErr.message}`);
+            }
             throw error;
         }
     }

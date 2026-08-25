@@ -1,6 +1,7 @@
 export const FISCAL_EVENTS = {
     NFE_AUTHORIZED: 'fiscal.nfe.authorized',
     NFE_REJECTED: 'fiscal.nfe.rejected',
+    NFE_ERROR: 'fiscal.nfe.error',
     NFE_ISSUANCE_STUCK: 'fiscal.nfe.issuance.stuck',
     NFE_CANCELLED: 'fiscal.nfe.cancelled',
     /** DANFE (PDF) gerado e disponível em S3 — gatilho do e-mail transacional ao cliente
@@ -32,6 +33,17 @@ export class FiscalNfeRejectedEvent {
         public readonly nfeId: string,
         public readonly orderId: string | null,
         public readonly rejectionReason: string,
+    ) { }
+}
+
+/** Emitido quando a emissão falha antes de obter um resultado de negócio da SEFAZ
+ *  (erro de transporte, assinatura, config) — distinto de NFE_REJECTED, que é uma
+ *  rejeição de negócio já respondida pela SEFAZ. */
+export class FiscalNfeErrorEvent {
+    constructor(
+        public readonly nfeId: string,
+        public readonly orderId: string | null,
+        public readonly message: string,
     ) { }
 }
 
