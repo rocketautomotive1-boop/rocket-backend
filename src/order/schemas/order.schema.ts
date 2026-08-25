@@ -159,6 +159,14 @@ export class OrderModel {
     @Prop()
     trackingCode: string;
 
+    /** Timestamp do último anexo bem-sucedido da NFe ao pedido no marketplace (ex.: ML). */
+    @Prop()
+    fiscalAttachedAt?: Date;
+
+    /** Mensagem de erro do último anexo malsucedido — limpa quando um anexo tem sucesso. */
+    @Prop()
+    fiscalAttachError?: string;
+
     /**
      * Estado de ENVIO do pedido (distinto de `status` comercial e de `logisticsStatus`,
      * que é estoque). Atualizado por webhooks orders_v2 de logística. `history` é

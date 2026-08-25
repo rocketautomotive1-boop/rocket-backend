@@ -45,10 +45,19 @@ export class MarketplaceOrderService {
         try {
             const adapter = this.adapterRegistry.getOrderAdapter(marketplace.name);
             if (adapter.uploadInvoice) {
-                return await adapter.uploadInvoice(orderId, xmlContent, options);
+                const result = await adapter.uploadInvoice(orderId, xmlContent, options);
+                await this.orderModel.updateOne(
+                    { externalId: orderId },
+                    { $set: { fiscalAttachedAt: new Date() }, $unset: { fiscalAttachError: '' } },
+                ).exec();
+                return result;
             }
         } catch (e) {
             this.logger.warn(`uploadInvoice not supported for ${marketplace.name}: ${e.message}`);
+            await this.orderModel.updateOne(
+                { externalId: orderId },
+                { $set: { fiscalAttachError: e.message } },
+            ).exec();
         }
 
         throw new BadRequestException(`Fiscal Document upload failed or not supported for ${marketplace.name}`);

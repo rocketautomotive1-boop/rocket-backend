@@ -460,7 +460,7 @@ export class MarketplaceController {
     return this.marketplaceOrderService.ignoreOrder(marketplaceIdRaw, orderId);
   }
 
-  // attach-fiscal moved to OrderController (POST /marketplaces/:marketplaceId/orders/:orderId/attach-fiscal)
+  // attach-fiscal moved to OrderController (POST /orders/marketplaces/:marketplaceId/orders/:orderId/attach-fiscal)
   // so the marketplace module no longer depends on the order module (cycle removed).
 
   @Get(':marketplaceId/listings')
