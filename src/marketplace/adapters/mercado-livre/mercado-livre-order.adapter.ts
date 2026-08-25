@@ -209,15 +209,77 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
   }
 
   /**
-   * Upload NF-e fiscal document to Mercado Livre.
+   * Envia a NFe ao Mercado Livre — a rota certa depende do logistic_type do
+   * envio, então resolvemos isso primeiro:
    *
-   * Per ML docs (NF Flex / Turbo / ME1 / Drop-Off):
-   *   POST /packs/{pack_id}/fiscal_documents    ← preferred when pack_id is available
-   *   POST /orders/{order_id}/fiscal_documents  ← fallback
-   *
-   * Accepts XML alone, or PDF + XML (max 2 files, 1 MB each).
+   * - fulfillment/cross_docking/xd_drop_off/drop_off/xd_same_day: ML REJEITA
+   *   (403 "you must use the biller of MercadoLibre") o upload via
+   *   /packs/{pack_id}/fiscal_documents para esses tipos — é preciso "importar"
+   *   a nota via POST /shipments/{id}/invoice_data/?siteId=MLB, com o XML cru
+   *   (Content-Type: application/xml), não multipart. Essa importação destrava
+   *   o substatus invoice_pending do envio (necessário pra imprimir etiqueta),
+   *   diferente do endpoint de pack, que só disponibiliza o doc ao comprador.
+   *   Ver docs.mercadolivre.com.br/pt_br/nf-places-crossdocking-xdsameday.
+   * - demais tipos (Flex/Turbo/ME1 clássico): endpoint de pack, como antes.
    */
+  private static readonly INVOICE_DATA_LOGISTIC_TYPES = new Set([
+    'fulfillment', 'cross_docking', 'xd_drop_off', 'drop_off', 'xd_same_day',
+  ]);
+
   async uploadInvoice(orderId: string, xmlContent: string, options?: { packId?: string; pdfBase64?: string; accountId?: string }): Promise<any> {
+    const ctx = this.ctx('uploadInvoice', options?.accountId);
+    const shipment = await this.resolveShipment(orderId, ctx);
+
+    if (shipment && MercadoLivreOrderAdapter.INVOICE_DATA_LOGISTIC_TYPES.has(shipment.logisticType)) {
+      return this.importShipmentInvoice(shipment.shipmentId, xmlContent, ctx);
+    }
+    return this.uploadPackInvoice(orderId, xmlContent, options, ctx);
+  }
+
+  /** Busca shipmentId + logistic_type do envio deste pedido; null se o pedido não
+   *  tiver shipping ou a busca falhar — nesse caso, cai no fluxo de pack (padrão
+   *  anterior a esta mudança, sempre foi o único fluxo suportado). */
+  private async resolveShipment(orderId: string, ctx: HttpAuthContext): Promise<{ shipmentId: string; logisticType: string } | null> {
+    try {
+      const order = await this.http.get<any>(`/orders/${orderId}`, ctx);
+      const shipmentId = order?.shipping?.id;
+      if (!shipmentId) return null;
+      const shipment = await this.http.get<any>(`/shipments/${shipmentId}`, ctx);
+      const logisticType = shipment?.logistic_type ?? shipment?.logistic?.type;
+      return logisticType ? { shipmentId: String(shipmentId), logisticType } : null;
+    } catch (err: any) {
+      this.logger.warn(`Não foi possível resolver o envio do pedido ${orderId}: ${err.message}`);
+      return null;
+    }
+  }
+
+  /** POST /shipments/{id}/invoice_data — importação de NFe para envios
+   *  fulfillment/cross_docking/xd_drop_off/drop_off/xd_same_day. */
+  private async importShipmentInvoice(shipmentId: string, xmlContent: string, ctx: HttpAuthContext): Promise<any> {
+    this.logger.log(`Importando NFe via invoice_data: /shipments/${shipmentId}/invoice_data`);
+    const res = await this.http.request<any>(
+      {
+        method: 'POST',
+        path: `/shipments/${shipmentId}/invoice_data`,
+        query: { siteId: 'MLB' },
+        body: xmlContent,
+        headers: { 'Content-Type': 'application/xml' },
+      },
+      ctx,
+    );
+    this.logger.log(`NFe importada com sucesso via invoice_data: ${JSON.stringify(res.data)}`);
+    return res.data;
+  }
+
+  /** POST /packs/{pack_id}/fiscal_documents (ou /orders/{id}/fiscal_documents sem
+   *  pack_id) — anexa a NFe ao pacote (fluxo clássico Flex/Turbo/ME1). Aceita XML
+   *  isolado ou XML+PDF (máx. 2 arquivos, 1 MB cada). */
+  private async uploadPackInvoice(
+    orderId: string,
+    xmlContent: string,
+    options: { packId?: string; pdfBase64?: string } | undefined,
+    ctx: HttpAuthContext,
+  ): Promise<any> {
     const packId = options?.packId;
     const resourcePath = packId
       ? `/packs/${packId}/fiscal_documents`
@@ -256,7 +318,7 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
         body: buildForm,
         axiosConfig: { maxBodyLength: Infinity },
       },
-      this.ctx('uploadInvoice', options?.accountId),
+      ctx,
     );
 
     this.logger.log(`NFe enviada com sucesso: ${JSON.stringify(res.data)}`);

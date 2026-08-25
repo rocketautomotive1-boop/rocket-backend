@@ -49,7 +49,15 @@ describe('MercadoLivreOrderAdapter', () => {
   });
 
   describe('uploadInvoice', () => {
-    it('passa body como FACTORY (função), não como instância pronta de FormData — necessário para MarketplaceHttpClient regenerar o form em cada tentativa de retry (auth 401 ou rate limit 429); um FormData reusado é um stream já drenado e trava o request até o socket cair', async () => {
+    /** logistic_type que NÃO está na lista de invoice_data — cai no fluxo de pack padrão. */
+    function mockPackLogistics() {
+      http.get
+        .mockResolvedValueOnce({ shipping: { id: 'SHIP1' } })          // GET /orders/:id
+        .mockResolvedValueOnce({ logistic_type: 'cross_docking_meli' }); // GET /shipments/:id (não está na lista)
+    }
+
+    it('logistic_type de pack clássico (ex.: Flex/Turbo/ME1) — passa body como FACTORY (função), não como instância pronta de FormData — necessário para MarketplaceHttpClient regenerar o form em cada tentativa de retry (auth 401 ou rate limit 429); um FormData reusado é um stream já drenado e trava o request até o socket cair', async () => {
+      mockPackLogistics();
       http.request.mockResolvedValueOnce({ data: { id: 'fd-1' } });
 
       await adapter.uploadInvoice('123', '<xml/>', { packId: '999' });
@@ -67,10 +75,43 @@ describe('MercadoLivreOrderAdapter', () => {
     });
 
     it('sem packId, usa o path de fallback por orderId', async () => {
+      mockPackLogistics();
       http.request.mockResolvedValueOnce({ data: {} });
       await adapter.uploadInvoice('123', '<xml/>', {});
       const [spec] = http.request.mock.calls[0];
       expect(spec.path).toBe('/orders/123/fiscal_documents');
+    });
+
+    it('não consegue resolver o envio (erro de rede) — cai no fluxo de pack por padrão, mesmo comportamento de sempre', async () => {
+      http.get.mockRejectedValueOnce(new Error('network error'));
+      http.request.mockResolvedValueOnce({ data: {} });
+
+      await adapter.uploadInvoice('123', '<xml/>', { packId: '999' });
+
+      const [spec] = http.request.mock.calls[0];
+      expect(spec.path).toBe('/packs/999/fiscal_documents');
+    });
+
+    describe.each([
+      'fulfillment', 'cross_docking', 'xd_drop_off', 'drop_off', 'xd_same_day',
+    ])('logistic_type=%s (envios que o ML bloqueia no endpoint de pack)', (logisticType) => {
+      it('usa POST /shipments/:id/invoice_data com XML cru — não é o endpoint de pack, que o ML rejeita com 403 "you must use the biller of MercadoLibre" para esses tipos (docs.mercadolivre.com.br/pt_br/nf-places-crossdocking-xdsameday)', async () => {
+        http.get
+          .mockResolvedValueOnce({ shipping: { id: 'SHIP42' } })
+          .mockResolvedValueOnce({ logistic_type: logisticType });
+        http.request.mockResolvedValueOnce({ data: { status: 'approved' } });
+
+        const xml = '<?xml version="1.0" encoding="UTF-8"?><nfeProc>...</nfeProc>';
+        const result = await adapter.uploadInvoice('123', xml, { packId: '999' });
+
+        expect(result).toEqual({ status: 'approved' });
+        expect(http.request).toHaveBeenCalledTimes(1);
+        const [spec] = http.request.mock.calls[0];
+        expect(spec.path).toBe('/shipments/SHIP42/invoice_data');
+        expect(spec.query).toEqual({ siteId: 'MLB' });
+        expect(spec.body).toBe(xml); // XML cru, NÃO multipart/FormData
+        expect(spec.headers).toEqual({ 'Content-Type': 'application/xml' });
+      });
     });
   });
 });
