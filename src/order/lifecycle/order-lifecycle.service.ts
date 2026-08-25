@@ -155,9 +155,17 @@ export class OrderLifecycleService {
             query = { externalId: orderId };
         }
 
+        // $slice mantém só as últimas MAX_LOGS entradas a cada push — sem isso um
+        // pedido com retry em loop (ex.: NFe falhando repetidamente) acumula logs
+        // sem limite, inflando o documento até travar a serialização no app mobile
+        // (visto em produção: 4833 entradas, 1.4MB, pedido 2000018106826086).
+        const MAX_LOGS = 200;
         await this.orderRepository.updateOne(query, {
             $push: {
-                logs: { logType: type, message, details, createdAt: new Date() },
+                logs: {
+                    $each: [{ logType: type, message, details, createdAt: new Date() }],
+                    $slice: -MAX_LOGS,
+                },
             },
         });
     }
