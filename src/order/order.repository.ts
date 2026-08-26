@@ -72,11 +72,26 @@ export class OrderRepository {
         return { modifiedCount: 0 };
     }
 
-    async findAll(offset: number, limit: number, search?: string, accountIds?: string[]): Promise<OrderDocument[]> {
+    async findAll(
+        offset: number,
+        limit: number,
+        search?: string,
+        accountIds?: string[],
+        marketplaceId?: string,
+        status?: string,
+    ): Promise<OrderDocument[]> {
         const filter: any = {};
 
         if (accountIds) {
             filter.accountId = { $in: accountIds };
+        }
+
+        if (marketplaceId) {
+            filter.marketplaceId = marketplaceId;
+        }
+
+        if (status) {
+            filter.status = status;
         }
 
         if (search) {

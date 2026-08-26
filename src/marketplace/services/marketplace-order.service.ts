@@ -63,114 +63,36 @@ export class MarketplaceOrderService {
         throw new BadRequestException(`Fiscal Document upload failed or not supported for ${marketplace.name}`);
     }
 
+    /**
+     * Fonte única de leitura: banco local (Order collection), nunca live via
+     * marketplace. O banco já é mantido atualizado por webhook (orders_v2,
+     * latência de segundos) + OrderReconciler (delta, latência de minutos) —
+     * não há mais motivo para servir a listagem ao vivo da API do ML/Shopee/etc.
+     * Ver docs/superpowers/specs/2026-08-26-order-list-single-source-design.md.
+     */
     async getAllOrders(
         storeId: string,
-        params?: { status?: string; limit?: number; offset?: number; includeSyncStatus?: boolean; syncStatus?: string; q?: string }
+        params?: { status?: string; limit?: number; offset?: number; q?: string }
     ): Promise<StandardOrder[]> {
-        const marketplaces = await this.registryService.findAll();
-        const enabledMarketplaces = marketplaces
-            .filter(m => m.enabled && this.adapterRegistry.hasOrderAdapter(m.name));
-        this.logger.log(`Enabled Marketplaces for order fetch: [${enabledMarketplaces.map(m => m.name).join(', ')}]`);
+        const store = await this.storePort.findById(storeId);
+        const accountIds = (store?.marketplaceAccounts ?? []).map((a) => a.accountId);
+        if (accountIds.length === 0) return [];
 
-        // Cada marketplace só é consultado com a(s) conta(s) de publicação desta loja —
-        // sem accountId o adapter caía na conta ATIVA global (única, compartilhada entre
-        // lojas), vazando pedidos de outra loja. Ver [[orders-store-scoped-fix]].
-        const results = await Promise.allSettled(
-            enabledMarketplaces.map(async (marketplace) => {
-                try {
-                    const accountIds = await this.storePort.resolveAccountIds(storeId, (marketplace as any).tag);
-                    if (accountIds.length === 0) return [];
+        const orders = await this.findScopedOrders({
+            accountIds,
+            search: params?.q,
+            status: params?.status,
+            limit: params?.limit,
+            offset: params?.offset,
+        });
 
-                    const adapter = this.adapterRegistry.getOrderAdapter(marketplace.name);
-                    const mId = marketplace._id;
-
-                    const perAccountOrders = await Promise.all(
-                        accountIds.map((accountId) => adapter.getOrders({
-                            status: params?.status,
-                            limit: params?.limit,
-                            offset: params?.offset,
-                            accountId,
-                        })),
-                    );
-                    let orders = perAccountOrders.flat();
-
-                    this.logger.log(`Fetched ${orders.length} orders from ${marketplace.name} (loja ${storeId}).`);
-
-                    if (!orders.length) return [];
-
-                    orders = orders.map(o => ({ ...o, marketplaceId: String(mId) }));
-
-                    if (params?.includeSyncStatus || params?.syncStatus) {
-                        return await this.enrichOrdersWithSyncStatus(orders, params?.syncStatus);
-                    }
-
-                    return orders;
-                } catch (error) {
-                    this.logger.error(`Failed to fetch orders from ${marketplace.name}: ${error.message}`, error.stack);
-                    return [];
-                }
-            })
-        );
-
-        const finalOrders = results
-            .filter(r => r.status === 'fulfilled')
-            .map(r => (r as PromiseFulfilledResult<StandardOrder[]>).value)
-            .flat()
-            .filter(Boolean)
-            .map(o => this.normalizeToStandardOrder(o));
-
-        // Lazy Sync: Save fetched orders to DB in background
-        // DISABLED: User requires manual sync trigger. Auto-sync was causing premature 'synced' status with incomplete data.
-        // this.saveOrdersToDb(finalOrders).catch(err => this.logger.error(`Lazy sync failed: ${err.message}`));
-
-        // Hybrid Search: If searching, also get matches from Local DB
-        if (params?.q) {
-            try {
-                // Determine pagination for local search:
-                // If offset=0 (first page), we search local.
-                // If the user provided a search term, we prioritize finding matches.
-                // Repo method: findAll(offset, limit, search)
-                const localMatches = await this.findLocalOrders(params.q);
-                const localOrders = localMatches.filter(Boolean).map(o => this.normalizeToStandardOrder(o));
-
-                // Merge Live + Local (Deduplicate by ID or ExternalID)
-                const liveIds = new Set(finalOrders.map(o => o.id));
-                localOrders.forEach(local => {
-                    if (!liveIds.has(local.id)) {
-                        finalOrders.push(local);
-                    }
-                });
-                this.logger.log(`Hybrid Search: Merged ${localMatches.length} local matches.`);
-            } catch (error) {
-                this.logger.error(`Hybrid Search failed: ${error.message}`);
-            }
-        }
-
-        // Debug: Log composition
-        const composition = finalOrders.reduce((acc, order) => {
-            acc[order.marketplaceId] = (acc[order.marketplaceId] || 0) + 1;
-            return acc;
-        }, {} as Record<string, number>);
-        this.logger.log(`Aggregated ${finalOrders.length} orders from All sources. Composition: ${JSON.stringify(composition)}`);
-
-        // Final Search Filter: Ensure ALL returned orders match the query
-        // (Adapters might have returned "Recent" orders ignoring the search param)
-        if (params?.q) {
-            const term = params.q.toLowerCase();
-            return finalOrders.filter(o =>
-                o.id.toLowerCase().includes(term) ||
-                o.buyer?.name?.toLowerCase().includes(term) ||
-                o.items?.some(i => i.title.toLowerCase().includes(term) || i.sku?.toLowerCase().includes(term))
-            ).sort((a, b) => new Date(b.date_created).getTime() - new Date(a.date_created).getTime());
-        }
-
-        return finalOrders.sort((a, b) => new Date(b.date_created).getTime() - new Date(a.date_created).getTime());
+        return orders.map(o => this.normalizeToStandardOrder(o));
     }
 
     async getOrders(
         marketplaceId: string,
         storeId: string,
-        params?: { status?: string; limit?: number; offset?: number; includeSyncStatus?: boolean; syncStatus?: string }
+        params?: { status?: string; limit?: number; offset?: number }
     ): Promise<StandardOrder[]> {
         const marketplace = await this.registryService.findOne(marketplaceId);
         if (!marketplace) throw new BadRequestException('Marketplace not found');
@@ -178,27 +100,15 @@ export class MarketplaceOrderService {
         const accountIds = await this.storePort.resolveAccountIds(storeId, (marketplace as any).tag);
         if (accountIds.length === 0) return [];
 
-        const adapter = this.adapterRegistry.getOrderAdapter(marketplace.name);
-        const perAccountOrders = await Promise.all(
-            accountIds.map((accountId) => adapter.getOrders({
-                status: params?.status,
-                limit: params?.limit,
-                offset: params?.offset,
-                accountId,
-            })),
-        );
-        let orders = perAccountOrders.flat() as StandardOrder[];
+        const orders = await this.findScopedOrders({
+            accountIds,
+            marketplaceId: String(marketplace._id),
+            status: params?.status,
+            limit: params?.limit,
+            offset: params?.offset,
+        });
 
-        if (!orders.length) return [];
-
-        const mId = marketplace._id;
-        orders = orders.map(o => ({ ...o, marketplaceId: String(mId) }));
-
-        if (params?.includeSyncStatus || params?.syncStatus) {
-            return await this.enrichOrdersWithSyncStatus(orders, params?.syncStatus);
-        }
-
-        return orders;
+        return orders.map(o => this.normalizeToStandardOrder(o));
     }
 
     async getOrderDetails(orderId: string, marketplaceId: string, options?: { skipEnrichment?: boolean }): Promise<StandardOrder> {
@@ -241,44 +151,6 @@ export class MarketplaceOrderService {
             }
         }
         return order;
-    }
-
-    async enrichOrdersWithSyncStatus(orders: StandardOrder[], syncStatusfilter?: string): Promise<StandardOrder[]> {
-        // Collect external IDs (or IDs depending on what the adapter returns as 'id')
-        // Adapter returns 'id' as the marketplace ID (externalId)
-        const externalIds = orders.map(o => String(o.id));
-
-        // Check actual Order Collection (covers both Stock-Synced and Admin-Synced)
-        const existingOrders = await this.orderModel.find(
-            { externalId: { $in: externalIds } },
-            { externalId: 1, syncedAt: 1, marketplaceId: 1, status: 1 },
-        ).exec();
-
-        // Create existence map
-        const existingMap = new Map<string, any>();
-        existingOrders.forEach(o => {
-            existingMap.set(String(o.externalId), o);
-        });
-
-        // Also check movements as fallback/redundancy (optional, but Order existence is the source of truth now)
-        // We can just rely on Order existence since sync() creates the order.
-
-        const enriched = orders.map(order => {
-            const localOrder = existingMap.get(String(order.id));
-            const isSynced = !!localOrder;
-
-            return {
-                ...order,
-                syncStatus: isSynced ? 'synced' : 'pending',
-                isSynced: isSynced,
-                syncedAt: localOrder?.syncedAt ? new Date(localOrder.syncedAt).toISOString() : undefined
-            };
-        });
-
-        if (syncStatusfilter) {
-            return enriched.filter(o => o.syncStatus === syncStatusfilter);
-        }
-        return enriched;
     }
 
     async ignoreOrder(marketplaceId: string, orderId: string): Promise<any> {
@@ -341,7 +213,9 @@ export class MarketplaceOrderService {
 
         return {
             ...raw,
-            id: String(raw.id || raw._id || raw.externalId),
+            // StandardOrder.id é o ID do pedido NO MARKETPLACE (externalId no banco local),
+            // não o ObjectId interno do Mongo — mesmo contrato usado pelo fetch ao vivo.
+            id: String(raw.externalId || raw.id || raw._id),
             marketplaceId: String(raw.marketplaceId),
             date_created: new Date(dateCreated).toISOString(),
             total_amount: Number(totalAmount),
@@ -349,16 +223,38 @@ export class MarketplaceOrderService {
             status: raw.status || 'unknown'
         };
     }
-    /** Local order lookup for hybrid search (direct model query, no order module dependency). */
-    private async findLocalOrders(search: string): Promise<OrderDocument[]> {
-        const regex = new RegExp(search, 'i');
-        return this.orderModel.find({
-            $or: [
+    /**
+     * Fonte única de leitura de pedidos para a listagem (direct model query — sem
+     * depender de OrderModule/OrderRepository, que criaria o ciclo marketplace↔order
+     * que este service já evita por design, ver import de OrderModel no topo do arquivo).
+     * Espelha os filtros de OrderRepository.findAll (accountId/marketplaceId/status/search).
+     */
+    private async findScopedOrders(params: {
+        accountIds: string[];
+        marketplaceId?: string;
+        status?: string;
+        search?: string;
+        limit?: number;
+        offset?: number;
+    }): Promise<OrderDocument[]> {
+        const filter: any = { accountId: { $in: params.accountIds } };
+        if (params.marketplaceId) filter.marketplaceId = params.marketplaceId;
+        if (params.status) filter.status = params.status;
+        if (params.search) {
+            const regex = new RegExp(params.search, 'i');
+            filter.$or = [
                 { externalId: regex },
                 { 'customer.name': regex },
                 { 'customer.email': regex },
                 { 'items.title': regex },
-            ],
-        }).sort({ createdAt: -1 }).limit(50).exec();
+            ];
+        }
+
+        return this.orderModel.find(filter)
+            .sort({ createdAt: -1 })
+            .skip(params.offset || 0)
+            .limit(params.limit || 50)
+            .populate('fiscalDocuments')
+            .exec();
     }
 }

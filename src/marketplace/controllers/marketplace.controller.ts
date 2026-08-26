@@ -342,20 +342,18 @@ export class MarketplaceController {
   @Get('all/orders')
   async getAllOrders(
     @Req() req: Request,
-    @Query('includeSyncStatus') includeSyncStatus?: string,
-    @Query('syncStatus') syncStatus?: string,
     @Query('status') status?: string,
     @Query('limit') limit?: string,
-    @Query('offset') offset?: string
+    @Query('offset') offset?: string,
+    @Query('q') q?: string,
   ) {
     const storeId = this.requireStoreId(req);
     const params = {
-      status: status,
-      syncStatus: syncStatus,
+      status,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
-      includeSyncStatus: includeSyncStatus === 'true'
-    } as any;
+      q,
+    };
     return this.marketplaceOrderService.getAllOrders(storeId, params);
   }
 
@@ -429,20 +427,16 @@ export class MarketplaceController {
   async getOrders(
     @Req() req: Request,
     @Param('marketplaceId') marketplaceId: string,
-    @Query('includeSyncStatus') includeSyncStatus?: string,
-    @Query('syncStatus') syncStatus?: string,
     @Query('status') status?: string,
     @Query('limit') limit?: string,
-    @Query('offset') offset?: string
+    @Query('offset') offset?: string,
   ) {
     const storeId = this.requireStoreId(req);
     const params = {
-      status: status,
-      syncStatus: syncStatus,
+      status,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
-      includeSyncStatus: includeSyncStatus === 'true'
-    } as any;
+    };
     return this.marketplaceOrderService.getOrders(marketplaceId, storeId, params);
   }
 

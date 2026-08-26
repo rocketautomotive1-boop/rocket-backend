@@ -46,8 +46,15 @@ export class OrderQueryService {
         return Result.ok(order);
     }
 
-    async findAll(offset = 0, limit = 50, search?: string, accountIds?: string[]): Promise<OrderDocument[]> {
-        const orders = await this.orderRepository.findAll(offset, limit, search, accountIds);
+    async findAll(
+        offset = 0,
+        limit = 50,
+        search?: string,
+        accountIds?: string[],
+        marketplaceId?: string,
+        status?: string,
+    ): Promise<OrderDocument[]> {
+        const orders = await this.orderRepository.findAll(offset, limit, search, accountIds, marketplaceId, status);
         return this.enrichLogisticsStatus(orders);
     }
 
