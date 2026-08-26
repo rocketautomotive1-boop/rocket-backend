@@ -112,6 +112,26 @@ describe('MercadoLivreOrderAdapter', () => {
         expect(spec.body).toBe(xml); // XML cru, NÃO multipart/FormData
         expect(spec.headers).toEqual({ 'Content-Type': 'application/xml' });
       });
+
+      it('já existe invoice_data salva para o shipment (nota anterior cancelada na SEFAZ e retificada) — usa PUT /shipment_invoice/:invoice_id em vez de tentar POST de novo, que o ML rejeita com shipment_invoice_already_saved', async () => {
+        http.get
+          .mockResolvedValueOnce({ shipping: { id: 'SHIP42' } })          // GET /orders/:id
+          .mockResolvedValueOnce({ logistic_type: logisticType })         // GET /shipments/:id
+          .mockResolvedValueOnce({ id: 'INV-777', status: 'approved' });  // GET /shipments/:id/invoice_data
+        http.request.mockResolvedValueOnce({ data: { status: 'approved' } });
+
+        const xml = '<?xml version="1.0" encoding="UTF-8"?><nfeProc>retificada</nfeProc>';
+        const result = await adapter.uploadInvoice('123', xml, { packId: '999' });
+
+        expect(result).toEqual({ status: 'approved' });
+        expect(http.request).toHaveBeenCalledTimes(1);
+        const [spec] = http.request.mock.calls[0];
+        expect(spec.method).toBe('PUT');
+        expect(spec.path).toBe('/shipment_invoice/INV-777/');
+        expect(spec.query).toEqual({ siteId: 'MLB' });
+        expect(spec.body).toBe(xml);
+        expect(spec.headers).toEqual({ 'Content-Type': 'application/xml' });
+      });
     });
   });
 });

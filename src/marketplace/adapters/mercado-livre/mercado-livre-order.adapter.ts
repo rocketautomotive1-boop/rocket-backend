@@ -264,8 +264,19 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
   }
 
   /** POST /shipments/{id}/invoice_data — importação de NFe para envios
-   *  fulfillment/cross_docking/xd_drop_off/drop_off/xd_same_day. */
+   *  fulfillment/cross_docking/xd_drop_off/drop_off/xd_same_day. Se já existe
+   *  invoice_data salva para o shipment (ex.: NFe original cancelada na SEFAZ e
+   *  retificada), o ML rejeita um novo POST com shipment_invoice_already_saved —
+   *  nesse caso é preciso usar PUT /shipment_invoice/{invoice_id} para substituir
+   *  a nota, referenciando o invoice_id existente (docs.mercadolivre.com.br,
+   *  seção "Atualizar nota fiscal eletrônica"). Só funciona enquanto a etiqueta
+   *  do envio ainda não tiver sido impressa. */
   private async importShipmentInvoice(shipmentId: string, xmlContent: string, ctx: HttpAuthContext): Promise<any> {
+    const existing = await this.getShipmentInvoice(shipmentId, ctx);
+    if (existing?.id) {
+      return this.updateShipmentInvoice(String(existing.id), xmlContent, ctx);
+    }
+
     this.logger.log(`Importando NFe via invoice_data: /shipments/${shipmentId}/invoice_data`);
     const res = await this.http.request<any>(
       {
@@ -278,6 +289,35 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
       ctx,
     );
     this.logger.log(`NFe importada com sucesso via invoice_data: ${JSON.stringify(res.data)}`);
+    return res.data;
+  }
+
+  /** GET /shipments/{id}/invoice_data — retorna a nota já salva para o envio, ou
+   *  null se nenhuma foi importada ainda (404). */
+  private async getShipmentInvoice(shipmentId: string, ctx: HttpAuthContext): Promise<any | null> {
+    try {
+      return await this.http.get<any>(`/shipments/${shipmentId}/invoice_data`, ctx, { siteId: 'MLB' });
+    } catch (err: any) {
+      if (err?.response?.status === 404 || err?.status === 404) return null;
+      throw err;
+    }
+  }
+
+  /** PUT /shipment_invoice/{invoice_id} — substitui a NFe já salva por uma nova
+   *  (ex.: retificação após cancelamento da nota original na SEFAZ). */
+  private async updateShipmentInvoice(invoiceId: string, xmlContent: string, ctx: HttpAuthContext): Promise<any> {
+    this.logger.log(`Atualizando NFe existente via shipment_invoice: /shipment_invoice/${invoiceId}/`);
+    const res = await this.http.request<any>(
+      {
+        method: 'PUT',
+        path: `/shipment_invoice/${invoiceId}/`,
+        query: { siteId: 'MLB' },
+        body: xmlContent,
+        headers: { 'Content-Type': 'application/xml' },
+      },
+      ctx,
+    );
+    this.logger.log(`NFe atualizada com sucesso via shipment_invoice: ${JSON.stringify(res.data)}`);
     return res.data;
   }
 
