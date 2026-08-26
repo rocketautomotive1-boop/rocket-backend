@@ -79,20 +79,19 @@ describe('FiscalIssuanceRequestService', () => {
     expect(outbox.enqueue).toHaveBeenCalled();
   });
 
-  it('bloqueia emissão quando o pedido tem envio programado para o futuro (Envio Programado ML)', async () => {
+  it('bloqueia emissão quando o shipment está em prazo de expedição (status/substatus ML: pending/buffered)', async () => {
     const futureDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
     orderModel.findById.mockReturnValue({
-      select: () => ({ lean: () => ({ exec: async () => ({ shipping: { scheduledShippingDate: futureDate } }) }) }),
+      select: () => ({ lean: () => ({ exec: async () => ({ shipping: { status: 'pending', substatus: 'buffered', scheduledShippingDate: futureDate } }) }) }),
     });
 
-    await expect(service.request(ORDER_ID, {})).rejects.toThrow(/envio programado/i);
+    await expect(service.request(ORDER_ID, {})).rejects.toThrow(/prazo de expedição/i);
     expect(outbox.enqueue).not.toHaveBeenCalled();
   });
 
-  it('permite emissão quando a data de envio programado já passou', async () => {
-    const pastDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  it('permite emissão quando o shipment já saiu do buffer (status/substatus diferentes de pending/buffered)', async () => {
     orderModel.findById.mockReturnValue({
-      select: () => ({ lean: () => ({ exec: async () => ({ shipping: { scheduledShippingDate: pastDate } }) }) }),
+      select: () => ({ lean: () => ({ exec: async () => ({ shipping: { status: 'ready_to_ship', substatus: 'ready_to_print' } }) }) }),
     });
 
     const result = await service.request(ORDER_ID, {});

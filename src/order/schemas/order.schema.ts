@@ -66,6 +66,10 @@ class OrderShippingSnapshot {
     // Prazo de expedição (ML: shipping_option.buffering.date) — enquanto no futuro,
     // NF-e/etiqueta não podem ser emitidas para este pedido.
     @Prop() scheduledShippingDate?: Date;
+    // Insumos para derivar o prazo de expedição em pedidos SEM buffering (a maioria):
+    // deadline = dateHandling + handlingHours. O ML não devolve o deadline pronto.
+    @Prop() dateHandling?: Date;
+    @Prop() handlingHours?: number;
 
     @Prop({ type: [SchemaFactory.createForClass(OrderShippingSubstatusEntry)], default: [] })
     history: OrderShippingSubstatusEntry[];

@@ -97,6 +97,14 @@ export interface StandardOrder {
         estimatedDelivery?: string;
         /** Envio Programado (ML) — data futura antes da qual NF-e/etiqueta não podem ser emitidas. */
         scheduledShippingDate?: string;
+        /**
+         * Prazo de expedição (ML) para pedidos SEM buffering: `dateHandling` é quando o
+         * shipment entrou em handling (status_history.date_handling) e `handlingHours` é
+         * a janela de SLA (shipping_option.estimated_delivery_time.handling, em horas).
+         * O ML não devolve o deadline pronto — é derivado como dateHandling + handlingHours.
+         */
+        dateHandling?: string;
+        handlingHours?: number;
     };
 
     payments?: StandardPayment[];

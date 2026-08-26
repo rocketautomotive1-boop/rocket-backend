@@ -39,19 +39,21 @@ describe('OrderLabelService', () => {
         service = new OrderLabelService(orderModel, configCache, auth, signer);
     });
 
-    it('bloqueia impressão de etiqueta quando o pedido tem envio programado para o futuro', async () => {
-        const futureDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
-        orderModel.findById.mockReturnValue({
-            lean: () => ({ exec: () => Promise.resolve({ ...order, shipping: { scheduledShippingDate: futureDate } }) }),
+    it('bloqueia impressão de etiqueta quando o shipment está em prazo de expedição ao vivo (status/substatus pending/buffered)', async () => {
+        mockedAxios.get.mockImplementation((url: string) => {
+            if (url.includes('/orders/')) return Promise.resolve({ data: { shipping: { id: 47816652986 } } });
+            if (url.includes('/shipments/')) return Promise.resolve({ data: { status: 'pending', substatus: 'buffered' } });
+            return Promise.reject(new Error('unexpected url ' + url));
         });
 
-        await expect(service.getLabel('order-1')).rejects.toThrow(/envio programado/i);
-        expect(configCache.getById).not.toHaveBeenCalled();
+        await expect(service.getLabel('order-1')).rejects.toThrow(/prazo de expedição/i);
+        expect(configCache.getById).toHaveBeenCalled(); // já resolveu marketplace antes do gate ao vivo
     });
 
     it('resolve o token pela conta dona do pedido, não pela default do marketplace', async () => {
         mockedAxios.get.mockImplementation((url: string) => {
             if (url.includes('/orders/')) return Promise.resolve({ data: { shipping: { id: 999 } } });
+            if (url.includes('/shipments/')) return Promise.resolve({ data: { status: 'ready_to_ship', substatus: 'ready_to_print' } });
             if (url.includes('/shipment_labels')) return Promise.resolve({ data: buildZplZip('^XA^FS') });
             return Promise.reject(new Error('unexpected url ' + url));
         });
@@ -66,6 +68,7 @@ describe('OrderLabelService', () => {
             if (url === 'https://api.mercadolibre.com/orders/2000018033874934') {
                 return Promise.resolve({ data: { shipping: { id: 47816652986 } } });
             }
+            if (url.includes('/shipments/')) return Promise.resolve({ data: { status: 'ready_to_ship', substatus: 'ready_to_print' } });
             if (url.includes('/shipment_labels')) return Promise.resolve({ data: buildZplZip('^XA^FS') });
             return Promise.reject(new Error('unexpected url ' + url));
         });
@@ -82,6 +85,7 @@ describe('OrderLabelService', () => {
         const zpl = '^XA\n^FO20,10^GFA...\n^XZ';
         mockedAxios.get.mockImplementation((url: string) => {
             if (url.includes('/orders/')) return Promise.resolve({ data: { shipping: { id: 47816652986 } } });
+            if (url.includes('/shipments/')) return Promise.resolve({ data: { status: 'ready_to_ship', substatus: 'ready_to_print' } });
             if (url === 'https://api.mercadolibre.com/shipment_labels') {
                 return Promise.resolve({ data: buildZplZip(zpl) });
             }
@@ -106,6 +110,7 @@ describe('OrderLabelService', () => {
         };
         mockedAxios.get.mockImplementation((url: string, config?: any) => {
             if (url.includes('/orders/')) return Promise.resolve({ data: { shipping: { id: 47816652986 } } });
+            if (url.includes('/shipments/')) return Promise.resolve({ data: { status: 'delivered', substatus: null } });
             if (url === 'https://api.mercadolibre.com/shipment_labels') {
                 if (config?.params?.response_type === 'zpl2') {
                     return Promise.reject({ response: { data: Buffer.from(JSON.stringify(mlError)) } });
@@ -127,6 +132,7 @@ describe('OrderLabelService', () => {
         };
         mockedAxios.get.mockImplementation((url: string) => {
             if (url.includes('/orders/')) return Promise.resolve({ data: { shipping: { id: 47816652986 } } });
+            if (url.includes('/shipments/')) return Promise.resolve({ data: { status: 'delivered', substatus: null } });
             if (url === 'https://api.mercadolibre.com/shipment_labels') {
                 return Promise.reject({ response: { data: Buffer.from(JSON.stringify(mlError)) } });
             }

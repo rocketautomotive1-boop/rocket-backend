@@ -104,6 +104,8 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
       let shipmentSubstatus: string | undefined;
       let shipmentTracking: string | undefined;
       let shipmentScheduledShippingDate: string | undefined;
+      let shipmentDateHandling: string | undefined;
+      let shipmentHandlingHours: number | undefined;
       if (o.shipping?.receiver_address || o.shipping?.id) {
         try {
           const shipment = (await this.http.get<any>(`/shipments/${o.shipping.id}`, ctx)) || {};
@@ -118,6 +120,12 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
           shipmentScheduledShippingDate = scheduleDate && new Date(scheduleDate) > new Date()
             ? scheduleDate
             : undefined;
+          // Prazo de expedição p/ shipments SEM buffering (maioria dos pedidos): o ML não
+          // devolve um deadline pronto, só os insumos para derivá-lo — status_history.date_handling
+          // (quando entrou em handling) + estimated_delivery_time.handling (janela em horas).
+          // Confirmado ao vivo: 'handling_limit'/'estimated_handling_limit' NÃO existem na API.
+          shipmentDateHandling = shipment.status_history?.date_handling || undefined;
+          shipmentHandlingHours = shipment.shipping_option?.estimated_delivery_time?.handling ?? undefined;
           const ra = shipment.receiver_address || {};
           buyerAddress = {
             street: ra.street_name || '',
@@ -182,6 +190,8 @@ export class MercadoLivreOrderAdapter implements IMarketplaceOrderAdapter, OnMod
           substatus: shipmentSubstatus,
           trackingCode: shipmentTracking,
           scheduledShippingDate: shipmentScheduledShippingDate,
+          dateHandling: shipmentDateHandling,
+          handlingHours: shipmentHandlingHours,
         },
         items: (o.order_items || []).map((i: any) => ({
           id: i.item.id,

@@ -31,7 +31,6 @@ export class OrderLabelService {
     async getLabel(orderId: string): Promise<LabelResult> {
         const order = await this.orderModel.findById(orderId).lean().exec();
         if (!order) throw new NotFoundException(`Order ${orderId} not found`);
-        assertShippingReleased(order);
 
         const marketplace = await this.configCache.getById(String(order.marketplaceId));
         if (!marketplace) throw new NotFoundException(`Marketplace not found for order ${orderId}`);
@@ -64,7 +63,7 @@ export class OrderLabelService {
     private async getMercadoLivreLabel(order: any, marketplace: any, token: any): Promise<LabelResult> {
         // shipping.id não é persistido no schema local — é resolvido ao vivo no
         // mesmo pedido usado pelo MercadoLivreOrderAdapter (GET /orders/{externalId}).
-        const shipmentId = await this.resolveMlShipmentId(order.externalId, token.accessToken);
+        const { shipmentId, status, substatus } = await this.resolveMlShipment(order.externalId, token.accessToken);
 
         if (!shipmentId) {
             throw new NotFoundException(
@@ -72,6 +71,10 @@ export class OrderLabelService {
                 `Order may not have a shipment assigned yet.`
             );
         }
+
+        // Gate contra o estado AO VIVO do shipment (não o snapshot do banco, que pode
+        // estar desatualizado) — status/substatus são a fonte autoritativa do ML.
+        assertShippingReleased({ shipping: { status, substatus, scheduledShippingDate: order.shipping?.scheduledShippingDate } });
 
         this.logger.log(`[ML Label] Fetching ZPL for shipment ${shipmentId}`);
 
@@ -105,12 +108,22 @@ export class OrderLabelService {
         return zip.readAsText(entry);
     }
 
-    private async resolveMlShipmentId(externalOrderId: string, accessToken: string): Promise<number | undefined> {
+    private async resolveMlShipment(
+        externalOrderId: string,
+        accessToken: string,
+    ): Promise<{ shipmentId?: number; status?: string; substatus?: string }> {
         const response = await axios.get(
             `https://api.mercadolibre.com/orders/${externalOrderId}`,
             { headers: { Authorization: `Bearer ${accessToken}` } },
         );
-        return response.data?.shipping?.id;
+        const shipmentId = response.data?.shipping?.id;
+        if (!shipmentId) return {};
+
+        const shipment = await axios.get(
+            `https://api.mercadolibre.com/shipments/${shipmentId}`,
+            { headers: { Authorization: `Bearer ${accessToken}` } },
+        );
+        return { shipmentId, status: shipment.data?.status, substatus: shipment.data?.substatus };
     }
 
     /**
