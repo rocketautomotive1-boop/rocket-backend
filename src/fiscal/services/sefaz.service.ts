@@ -467,9 +467,15 @@ export class SefazService {
         }
 
         const isProduction = nfe.environment === 'PRODUCTION';
+        // URL anterior (www1.nfe.fazenda.gov.br/SVC-RS/...) não existe — dava 404 para
+        // qualquer caminho, inclusive a raiz e o WSDL, confirmado ao vivo em produção
+        // (pedido 2000018139210232: EPEC entrava corretamente em contingência mas
+        // falhava com 404 antes mesmo de chegar num serviço real). O SVC-RS é hospedado
+        // no domínio da SEFAZ-RS, não no portal nacional — confirmado contra a lib de
+        // referência da comunidade nfephp-org/sped-nfe (storage/wsnfe_4.00_mod55.xml).
         const baseUrl = isProduction
-            ? 'https://www1.nfe.fazenda.gov.br/SVC-RS/NFeRecepcaoEvento4/NFeRecepcaoEvento4.asmx'
-            : 'https://hom1.nfe.fazenda.gov.br/SVC-RS/NFeRecepcaoEvento4/NFeRecepcaoEvento4.asmx';
+            ? 'https://nfe.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx'
+            : 'https://nfe-homologacao.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx';
 
         const tpAmb = isProduction ? '1' : '2';
         const chNFe = nfe.accessKey;
