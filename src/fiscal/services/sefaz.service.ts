@@ -167,6 +167,58 @@ export class SefazService {
         }
     }
 
+    /**
+     * Consulta o serviço de status da SEFAZ do emitente (NfeStatusServico4) — usado
+     * pelo EpecSyncWorker para detectar que a SEFAZ voltou mesmo quando não há
+     * nenhuma NFe presa em AUTHORIZED_CONTINGENCY para confirmar (ex: quando o EPEC
+     * em si nunca chegou a funcionar, então nenhuma nota chegou nesse status).
+     */
+    async checkStatus(issuer: any, environment: string): Promise<{ online: boolean; cStat?: string; xMotivo?: string }> {
+        if (!issuer.certificatePfx || !issuer.certificatePassword) {
+            throw new Error('Certificado Digital não configurado para o emitente.');
+        }
+
+        const baseUrl = environment === 'PRODUCTION'
+            ? 'https://nfe.sefaz.pe.gov.br/nfe-service/services/NFeStatusServico4'
+            : 'https://nfehomolog.sefaz.pe.gov.br/nfe-service/services/NFeStatusServico4';
+        const tpAmb = environment === 'PRODUCTION' ? '1' : '2';
+        const cUF = '26'; // PE
+
+        const request = `<consStatServ xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><tpAmb>${tpAmb}</tpAmb><cUF>${cUF}</cUF><xServ>STATUS</xServ></consStatServ>`;
+        const soapEnvelope = `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope" xmlns:nfe="http://www.portalfiscal.inf.br/nfe/wsdl/NFeStatusServico4"><soap12:Header/><soap12:Body><nfe:nfeDadosMsg>${request}</nfe:nfeDadosMsg></soap12:Body></soap12:Envelope>`;
+
+        let pfxBase64 = issuer.certificatePfx;
+        if (pfxBase64.includes('base64,')) pfxBase64 = pfxBase64.split('base64,')[1];
+
+        try {
+            const { cert, key } = this.signatureService.getCertAndKey(pfxBase64, issuer.certificatePassword);
+            const agent = new https.Agent({ cert, key, rejectUnauthorized: false });
+
+            const response$ = this.httpService.post(baseUrl, soapEnvelope, {
+                headers: {
+                    'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeStatusServico4/nfeStatusServicoNF"',
+                },
+                httpsAgent: agent,
+                timeout: 15000,
+            }).pipe(timeout(20000));
+
+            const response = await lastValueFrom(response$);
+            const parsed = this.parser.parse(response.data);
+            const body = parsed?.Envelope?.Body ?? parsed?.Body;
+            const retConsStatServ = body?.nfeResultMsg?.retConsStatServ ?? body?.nfeStatusServicoNFResult?.retConsStatServ;
+            const cStat = retConsStatServ?.cStat;
+            const xMotivo = retConsStatServ?.xMotivo;
+
+            this.logger.log(`SEFAZ Status Servico: ${cStat} - ${xMotivo}`);
+
+            // 107 = Serviço em Operação
+            return { online: cStat == 107, cStat, xMotivo };
+        } catch (error: any) {
+            this.logger.warn(`Falha ao consultar status da SEFAZ: ${error.message}`);
+            return { online: false };
+        }
+    }
+
     async cancelNFe(nfe: any, issuer: any, justification: string): Promise<any> {
         this.logger.log(`Cancelling NFe ${nfe.accessKey} via SEFAZ evento 110111...`);
 

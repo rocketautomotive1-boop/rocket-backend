@@ -10,18 +10,19 @@ describe('EpecSyncWorker', () => {
   let worker: EpecSyncWorker;
   let fiscalDocumentModel: { find: jest.Mock };
   let legalEntityService: { findAllInContingency: jest.Mock; updateContingencyState: jest.Mock };
-  let sefazService: { authorize: jest.Mock };
+  let sefazService: { authorize: jest.Mock; checkStatus: jest.Mock };
   let fiscalService: { emitAuthorizedEvent: jest.Mock };
 
   const entity = { _id: 'legal1', cnpj: '00000000000191', companyName: 'Rocket', contingencySuccessCount: 0 };
 
   beforeEach(async () => {
+    entity.contingencySuccessCount = 0;
     fiscalDocumentModel = { find: jest.fn() };
     legalEntityService = {
       findAllInContingency: jest.fn().mockResolvedValue([entity]),
       updateContingencyState: jest.fn().mockResolvedValue(undefined),
     };
-    sefazService = { authorize: jest.fn() };
+    sefazService = { authorize: jest.fn(), checkStatus: jest.fn() };
     fiscalService = { emitAuthorizedEvent: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
@@ -83,6 +84,7 @@ describe('EpecSyncWorker', () => {
       issuer: { cnpj: '99999999999999' }, save: jest.fn(),
     };
     fiscalDocumentModel.find.mockReturnValue({ limit: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([nfe]) }) });
+    sefazService.checkStatus.mockResolvedValue({ online: false }); // nenhuma nota relevante → cai no probe direto
 
     await worker.syncPendingContingencyNFes();
 
@@ -114,5 +116,46 @@ describe('EpecSyncWorker', () => {
 
     expect(sefazService.authorize).toHaveBeenCalledTimes(1); // não tenta o segundo após falha no primeiro
     expect(legalEntityService.updateContingencyState).not.toHaveBeenCalled();
+  });
+
+  describe('sem NFes AUTHORIZED_CONTINGENCY — probe direto de status da SEFAZ', () => {
+    beforeEach(() => {
+      fiscalDocumentModel.find.mockReturnValue({ limit: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([]) }) });
+    });
+
+    it('sonda o status da SEFAZ quando não há nenhuma NFe presa em contingência — sem isso, contingencyMode ficava travado para sempre se o EPEC nunca tivesse funcionado', async () => {
+      sefazService.checkStatus.mockResolvedValue({ online: true, cStat: '107' });
+
+      await worker.syncPendingContingencyNFes();
+
+      expect(sefazService.checkStatus).toHaveBeenCalledWith(entity, 'PRODUCTION');
+    });
+
+    it('sai de contingência após 3 probes de status online consecutivos (mesmo streak do fluxo normal)', async () => {
+      entity.contingencySuccessCount = 2;
+      sefazService.checkStatus.mockResolvedValue({ online: true, cStat: '107' });
+
+      await worker.syncPendingContingencyNFes();
+
+      expect(legalEntityService.updateContingencyState).toHaveBeenCalledWith('legal1', expect.objectContaining({ contingencyMode: false }));
+    });
+
+    it('não sai de contingência com um único probe online (evita flapping)', async () => {
+      sefazService.checkStatus.mockResolvedValue({ online: true, cStat: '107' });
+
+      await worker.syncPendingContingencyNFes();
+
+      expect(legalEntityService.updateContingencyState).toHaveBeenCalledWith('legal1', { contingencySuccessCount: 1 });
+    });
+
+    it('zera o streak quando o probe reporta SEFAZ offline', async () => {
+      entity.contingencySuccessCount = 2;
+      sefazService.checkStatus.mockResolvedValue({ online: false });
+
+      await worker.syncPendingContingencyNFes();
+
+      expect(legalEntityService.updateContingencyState).toHaveBeenCalledWith('legal1', { contingencySuccessCount: 0 });
+      expect(legalEntityService.updateContingencyState).not.toHaveBeenCalledWith('legal1', expect.objectContaining({ contingencyMode: false }));
+    });
   });
 });

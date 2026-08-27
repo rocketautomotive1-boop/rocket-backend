@@ -48,7 +48,18 @@ export class EpecSyncWorker {
         // Filtra pelas notas cujo issuer snapshot bate com esta LegalEntity (issuer é
         // gravado como snapshot no momento da emissão — não há FK direta aqui).
         const relevant = pending.filter((nfe: any) => nfe.issuer?.cnpj === entity.cnpj);
-        if (!relevant.length) return;
+        if (!relevant.length) {
+            // Sem nenhuma NFe presa em AUTHORIZED_CONTINGENCY não há nada para o fluxo
+            // de confirmação abaixo processar — mas isso não significa que a SEFAZ ainda
+            // está fora do ar: pode ser que o EPEC em si nunca tenha funcionado (bug de
+            // transporte, por exemplo), então nenhuma nota chegou a esse status. Sem este
+            // probe direto, contingencyMode ficaria travado em true para sempre nesse
+            // cenário, mesmo com a SEFAZ já respondendo normalmente (confirmado ao vivo em
+            // produção, pedido 2000018139210232 — a SEFAZ-PE já respondia consultas
+            // normalmente enquanto o EPEC seguia dando erro de transporte).
+            await this.probeAndExitIfOnline(entity);
+            return;
+        }
 
         let successCount = 0;
         for (const nfe of relevant) {
@@ -90,6 +101,30 @@ export class EpecSyncWorker {
                 contingencySuccessCount: 0,
             });
             this.logger.log(`LegalEntity ${entity.companyName} saiu de contingência — SEFAZ normalizada.`);
+        } else {
+            await this.legalEntityService.updateContingencyState(entity._id, { contingencySuccessCount: newStreak });
+        }
+    }
+
+    /** Sonda o serviço de status da SEFAZ diretamente (NfeStatusServico4) quando não há
+     *  nenhuma NFe AUTHORIZED_CONTINGENCY para usar como sinal de confirmação. Mesmo
+     *  streak de sucessos consecutivos do fluxo normal, para não sair de contingência
+     *  por uma resposta isolada (SEFAZ instável, caindo e voltando). */
+    private async probeAndExitIfOnline(entity: LegalEntityDocument): Promise<void> {
+        const { online } = await this.sefazService.checkStatus(entity, 'PRODUCTION').catch(() => ({ online: false }));
+        if (!online) {
+            await this.legalEntityService.updateContingencyState(entity._id, { contingencySuccessCount: 0 });
+            return;
+        }
+
+        const newStreak = (entity.contingencySuccessCount || 0) + 1;
+        if (newStreak >= SUCCESS_STREAK_TO_EXIT_CONTINGENCY) {
+            await this.legalEntityService.updateContingencyState(entity._id, {
+                contingencyMode: false,
+                contingencyConsecutiveFailures: 0,
+                contingencySuccessCount: 0,
+            });
+            this.logger.log(`LegalEntity ${entity.companyName} saiu de contingência via probe de status — SEFAZ normalizada.`);
         } else {
             await this.legalEntityService.updateContingencyState(entity._id, { contingencySuccessCount: newStreak });
         }
