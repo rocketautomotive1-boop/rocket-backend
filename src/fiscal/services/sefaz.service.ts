@@ -545,11 +545,13 @@ export class SefazService {
             }).pipe(timeout(35000));
 
             const response = await lastValueFrom(response$);
-            this.logger.log(`[EPEC DEBUG] resposta SOAP crua: ${String(response.data).slice(0, 3000)}`);
             const parsed = this.parser.parse(response.data);
 
+            // O provedor AN embrulha a resposta em nfeRecepcaoEventoNFResult (não
+            // nfeResultMsg, que é o wrapper usado pela SEFAZ-PE no cancelamento).
+            // Confirmado ao vivo em produção (pedido 2000018139210232).
             const body = parsed?.Envelope?.Body ?? parsed?.Body;
-            const retEnvEvento = body?.nfeResultMsg?.retEnvEvento;
+            const retEnvEvento = body?.nfeRecepcaoEventoNFResult?.retEnvEvento ?? body?.nfeResultMsg?.retEnvEvento;
             const batchCStat = retEnvEvento?.cStat;
             const retEvento = retEnvEvento?.retEvento;
             const infEvento = Array.isArray(retEvento) ? retEvento[0]?.infEvento : retEvento?.infEvento;
