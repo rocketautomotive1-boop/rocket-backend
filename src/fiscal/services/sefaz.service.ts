@@ -575,6 +575,11 @@ export class SefazService {
             };
         } catch (error: any) {
             this.logger.error(`SVC EPEC Error: ${error.message}`);
+            if (error.response) {
+                this.logger.error(`[EPEC DEBUG] status=${error.response.status} url=${error.config?.url} data=${JSON.stringify(error.response.data).slice(0, 1000)}`);
+            } else {
+                this.logger.error(`[EPEC DEBUG] sem response — provável erro de rede/TLS. code=${error.code} url=${error.config?.url}`);
+            }
             throw error;
         }
     }
