@@ -476,15 +476,19 @@ export class SefazService {
         }
 
         const isProduction = nfe.environment === 'PRODUCTION';
-        // URL anterior (www1.nfe.fazenda.gov.br/SVC-RS/...) não existe — dava 404 para
-        // qualquer caminho, inclusive a raiz e o WSDL, confirmado ao vivo em produção
-        // (pedido 2000018139210232: EPEC entrava corretamente em contingência mas
-        // falhava com 404 antes mesmo de chegar num serviço real). O SVC-RS é hospedado
-        // no domínio da SEFAZ-RS, não no portal nacional — confirmado contra a lib de
-        // referência da comunidade nfephp-org/sped-nfe (storage/wsnfe_4.00_mod55.xml).
+        // URL confirmada na página oficial da SEFAZ-PE (sefaz.pe.gov.br > Serviços >
+        // Nota Fiscal Eletrônica > Contingência SVC-RS): o serviço de RecepcaoEvento da
+        // contingência SVC-RS é VERSÃO 1.00, endpoint "recepcaoevento.asmx" — SEM o
+        // sufixo "4". "recepcaoevento4.asmx" (versão 4, mesmo padrão do NFeRecepcaoEvento4
+        // usado no fluxo normal/cancelamento) é um serviço DIFERENTE e mais novo — aceita
+        // a conexão e devolve uma resposta SOAP válida, mas rejeita com "215 - Falha no
+        // schema XML" porque o formato de evento v1.00 que o SVC-RS-contingência espera
+        // não é o mesmo validado por esse endpoint. Confirmado ao vivo em produção (pedido
+        // 2000018139210232): XML validado localmente contra o schema oficial completo
+        // (incluindo assinatura) e a rejeição segue vindo do endpoint errado, não do XML.
         const baseUrl = isProduction
-            ? 'https://nfe.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx'
-            : 'https://nfe-homologacao.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx';
+            ? 'https://nfe.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento.asmx'
+            : 'https://nfe-homologacao.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento.asmx';
 
         const tpAmb = isProduction ? '1' : '2';
         const chNFe = nfe.accessKey;
@@ -523,11 +527,17 @@ export class SefazService {
 
         const signedEvento = await this.signatureService.signEventXml(eventoXml, pfxBase64, issuer.certificatePassword);
         const cleanSigned = signedEvento.replace(/<\?xml.*?\?>/g, '').trim();
-        const soapEnvelope = `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope" xmlns:nfe="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4"><soap12:Header/><soap12:Body><nfe:nfeDadosMsg>${cleanSigned}</nfe:nfeDadosMsg></soap12:Body></soap12:Envelope>`;
-        // TEMP DEBUG: capturar XML exato enviado ao SVC-RS para diagnosticar "215 - Falha
-        // no schema XML" — mensagem da SEFAZ não indica o campo específico. Remover após
-        // identificar a causa raiz real.
-        this.logger.warn(`[EPEC DEBUG] eventoXml assinado: ${cleanSigned}`);
+        // O SVC-RS de contingência usa o webservice LEGADO RecepcaoEvento (versão 1.00,
+        // namespace "http://www.portalfiscal.inf.br/nfe/wsdl/RecepcaoEvento" — sem "NFe",
+        // sem "4"), diferente do NFeRecepcaoEvento4 usado no cancelamento/fluxo normal.
+        // Esse serviço legado exige um <soap:Header> com nfeCabecMsg{cUF, versaoDados} —
+        // sem isso a SEFAZ rejeita com "215 - Falha no schema XML" no nível de LOTE, antes
+        // mesmo de olhar o conteúdo do evento (confirmado ao vivo: o XML do evento em si
+        // já validava corretamente contra o schema oficial completo, incluindo a
+        // assinatura — o header ausente era a causa real). Confirmado contra o stub Java
+        // de referência (wmixvideo/nfe, RecepcaoEventoStub — QName do header e operação).
+        const RECEPCAO_EVENTO_NS = 'http://www.portalfiscal.inf.br/nfe/wsdl/RecepcaoEvento';
+        const soapEnvelope = `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope" xmlns:nfe="${RECEPCAO_EVENTO_NS}"><soap12:Header><nfe:nfeCabecMsg><cUF>${cUF}</cUF><versaoDados>1.00</versaoDados></nfe:nfeCabecMsg></soap12:Header><soap12:Body><nfe:nfeDadosMsg>${cleanSigned}</nfe:nfeDadosMsg></soap12:Body></soap12:Envelope>`;
 
         try {
             const { cert, key } = this.signatureService.getCertAndKey(pfxBase64, issuer.certificatePassword);
@@ -535,17 +545,13 @@ export class SefazService {
 
             const response$ = this.httpService.post(baseUrl, soapEnvelope, {
                 headers: {
-                    'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4/nfeRecepcaoEvento"',
+                    'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/RecepcaoEvento/nfeRecepcaoEvento"',
                 },
                 httpsAgent: agent,
                 timeout: 30000,
             }).pipe(timeout(35000));
 
             const response = await lastValueFrom(response$);
-            // TEMP DEBUG: resposta SOAP crua da SEFAZ — "215 - Falha no schema XML" pode
-            // ser rejeição de LOTE (retEnvEvento.cStat, sem retEvento) em vez de rejeição
-            // do evento individual, e a mensagem genérica não distingue os dois casos.
-            this.logger.warn(`[EPEC DEBUG] resposta SOAP crua: ${response.data}`);
             const parsed = this.parser.parse(response.data);
 
             const body = parsed?.Envelope?.Body ?? parsed?.Body;

@@ -2,12 +2,19 @@ import { of } from 'rxjs';
 import { SefazService } from './sefaz.service';
 
 /**
- * Cobertura focada em transmitEpec — bug real corrigido em produção: "215 - Rejeição:
- * Falha no schema XML" porque <dest> do evento EPEC ia sem CNPJ/CPF do destinatário e
- * com vNF/vICMS/vST fora de <dest> (o schema oficial, nfephp-org/sped-nfe
- * schemes/PL_009_V4/leiauteEPEC_v1.00.xsd, exige documento obrigatório e os valores
- * DENTRO de <dest>). Também cobre cOrgao=91 (não a UF do emitente) — outro erro real
- * anterior ("582 - UF não atendida pela SVC-[AN/RS]").
+ * Cobertura focada em transmitEpec — três bugs reais corrigidos em produção, todos
+ * culminando no mesmo sintoma "215 - Rejeição: Falha no schema XML":
+ * 1. cOrgao=91 (Ambiente Nacional), não a UF do emitente — causava "582 - UF não
+ *    atendida pela SVC-[AN/RS]".
+ * 2. <dest> sem CNPJ/CPF do destinatário e vNF/vICMS/vST fora de <dest> (schema oficial,
+ *    nfephp-org/sped-nfe schemes/PL_009_V4/leiauteEPEC_v1.00.xsd, exige documento
+ *    obrigatório e os valores DENTRO de <dest>).
+ * 3. Causa raiz real do "215" persistente mesmo com o XML do evento validando
+ *    corretamente contra o schema completo: o SVC-RS de contingência usa o webservice
+ *    LEGADO RecepcaoEvento (v1.00, namespace .../wsdl/RecepcaoEvento — sem "NFe", sem
+ *    "4"), que exige um <soap:Header><nfeCabecMsg>{cUF, versaoDados}</nfeCabecMsg>
+ *    ausente antes — a SEFAZ rejeitava o LOTE inteiro antes de validar o evento em si
+ *    (confirmado ao vivo comparando `nível: lote` vs `nível: evento` na resposta).
  */
 describe('SefazService.transmitEpec — montagem do evento EPEC', () => {
   let service: SefazService;
@@ -72,5 +79,19 @@ describe('SefazService.transmitEpec — montagem do evento EPEC', () => {
 
   it('lança erro claro quando o XML da NFe está sem dest/total (malformado)', async () => {
     await expect(service.transmitEpec(nfe, issuer, '<NFe><infNFe></infNFe></NFe>')).rejects.toThrow(/dest\/total/);
+  });
+
+  it('inclui soap:Header com nfeCabecMsg{cUF, versaoDados} — sem isso a SEFAZ rejeitava o LOTE inteiro (215)', async () => {
+    await service.transmitEpec(nfe, issuer, nfeXmlWithCnpjDest);
+
+    const soapEnvelope: string = httpService.post.mock.calls[0][1];
+    expect(soapEnvelope).toContain('<soap12:Header><nfe:nfeCabecMsg><cUF>26</cUF><versaoDados>1.00</versaoDados></nfe:nfeCabecMsg></soap12:Header>');
+  });
+
+  it('usa o webservice legado RecepcaoEvento (v1.00, sem sufixo "4") — recepcaoevento4.asmx é um serviço diferente que rejeita o formato v1.00', async () => {
+    await service.transmitEpec(nfe, issuer, nfeXmlWithCnpjDest);
+
+    const url: string = httpService.post.mock.calls[0][0];
+    expect(url).toBe('https://nfe.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento.asmx');
   });
 });
