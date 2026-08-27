@@ -2,19 +2,18 @@ import { of } from 'rxjs';
 import { SefazService } from './sefaz.service';
 
 /**
- * Cobertura focada em transmitEpec — três bugs reais corrigidos em produção, todos
- * culminando no mesmo sintoma "215 - Rejeição: Falha no schema XML":
+ * Cobertura focada em transmitEpec — bugs reais corrigidos em produção:
  * 1. cOrgao=91 (Ambiente Nacional), não a UF do emitente — causava "582 - UF não
  *    atendida pela SVC-[AN/RS]".
  * 2. <dest> sem CNPJ/CPF do destinatário e vNF/vICMS/vST fora de <dest> (schema oficial,
  *    nfephp-org/sped-nfe schemes/PL_009_V4/leiauteEPEC_v1.00.xsd, exige documento
  *    obrigatório e os valores DENTRO de <dest>).
- * 3. Causa raiz real do "215" persistente mesmo com o XML do evento validando
- *    corretamente contra o schema completo: o SVC-RS de contingência usa o webservice
- *    LEGADO RecepcaoEvento (v1.00, namespace .../wsdl/RecepcaoEvento — sem "NFe", sem
- *    "4"), que exige um <soap:Header><nfeCabecMsg>{cUF, versaoDados}</nfeCabecMsg>
- *    ausente antes — a SEFAZ rejeitava o LOTE inteiro antes de validar o evento em si
- *    (confirmado ao vivo comparando `nível: lote` vs `nível: evento` na resposta).
+ * 3. Causa raiz real: o EPEC não vai para o SVC-RS. Duas tentativas anteriores miraram
+ *    SVC-RS (v4 "recepcaoevento4.asmx" → 215 nível lote; v1.00 "recepcaoevento.asmx"
+ *    com nfeCabecMsg → 404). Confirmado contra a lib de referência nfephp-org/sped-nfe
+ *    (src/Tools.php::sefazEPEC chama sefazEvento('AN', ...)): o alvo real é o provedor
+ *    AN (Ambiente Nacional, www.nfe.fazenda.gov.br), usando o MESMO serviço
+ *    NFeRecepcaoEvento4 (v4) já usado no cancelamento — sem soap:Header extra.
  */
 describe('SefazService.transmitEpec — montagem do evento EPEC', () => {
   let service: SefazService;
@@ -81,17 +80,18 @@ describe('SefazService.transmitEpec — montagem do evento EPEC', () => {
     await expect(service.transmitEpec(nfe, issuer, '<NFe><infNFe></infNFe></NFe>')).rejects.toThrow(/dest\/total/);
   });
 
-  it('inclui soap:Header com nfeCabecMsg{cUF, versaoDados} — sem isso a SEFAZ rejeitava o LOTE inteiro (215)', async () => {
+  it('usa soap:Header vazio (padrão v4, mesmo do cancelamento) — sem nfeCabecMsg, que é do webservice legado v1.00 (não usado aqui)', async () => {
     await service.transmitEpec(nfe, issuer, nfeXmlWithCnpjDest);
 
     const soapEnvelope: string = httpService.post.mock.calls[0][1];
-    expect(soapEnvelope).toContain('<soap12:Header><nfe:nfeCabecMsg><cUF>26</cUF><versaoDados>1.00</versaoDados></nfe:nfeCabecMsg></soap12:Header>');
+    expect(soapEnvelope).toContain('<soap12:Header/>');
+    expect(soapEnvelope).not.toContain('nfeCabecMsg');
   });
 
-  it('usa o webservice legado RecepcaoEvento (v1.00, sem sufixo "4") — recepcaoevento4.asmx é um serviço diferente que rejeita o formato v1.00', async () => {
+  it('usa o webservice NFeRecepcaoEvento4 do provedor AN (Ambiente Nacional) — o EPEC não vai para o SVC-RS, vai para www.nfe.fazenda.gov.br', async () => {
     await service.transmitEpec(nfe, issuer, nfeXmlWithCnpjDest);
 
     const url: string = httpService.post.mock.calls[0][0];
-    expect(url).toBe('https://nfe.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento.asmx');
+    expect(url).toBe('https://www.nfe.fazenda.gov.br/NFeRecepcaoEvento4/NFeRecepcaoEvento4.asmx');
   });
 });

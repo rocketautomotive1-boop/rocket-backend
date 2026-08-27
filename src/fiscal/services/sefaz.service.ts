@@ -476,19 +476,18 @@ export class SefazService {
         }
 
         const isProduction = nfe.environment === 'PRODUCTION';
-        // URL confirmada na página oficial da SEFAZ-PE (sefaz.pe.gov.br > Serviços >
-        // Nota Fiscal Eletrônica > Contingência SVC-RS): o serviço de RecepcaoEvento da
-        // contingência SVC-RS é VERSÃO 1.00, endpoint "recepcaoevento.asmx" — SEM o
-        // sufixo "4". "recepcaoevento4.asmx" (versão 4, mesmo padrão do NFeRecepcaoEvento4
-        // usado no fluxo normal/cancelamento) é um serviço DIFERENTE e mais novo — aceita
-        // a conexão e devolve uma resposta SOAP válida, mas rejeita com "215 - Falha no
-        // schema XML" porque o formato de evento v1.00 que o SVC-RS-contingência espera
-        // não é o mesmo validado por esse endpoint. Confirmado ao vivo em produção (pedido
-        // 2000018139210232): XML validado localmente contra o schema oficial completo
-        // (incluindo assinatura) e a rejeição segue vindo do endpoint errado, não do XML.
+        // Causa raiz real (confirmada na lib de referência nfephp-org/sped-nfe,
+        // src/Tools.php::sefazEPEC → sefazEvento('AN', ...)): o EPEC NÃO vai para o
+        // SVC-RS. Ele vai para o provedor AN (Ambiente Nacional, www.nfe.fazenda.gov.br),
+        // no MESMO serviço NFeRecepcaoEvento4 (v4) já usado no cancelamento — só o
+        // host muda (AN em vez da SEFAZ do emitente). As duas tentativas anteriores
+        // (SVC-RS v4 "recepcaoevento4.asmx" → 215 nível lote; SVC-RS v1.00
+        // "recepcaoevento.asmx" com nfeCabecMsg → 404) miravam o host errado. A página
+        // da SEFAZ-PE sobre "Contingência SVC-RS" descreve o webservice de eventos
+        // NORMAIS quando a UF migra pra contingência SVC-RS (não o EPEC em si).
         const baseUrl = isProduction
-            ? 'https://nfe.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento.asmx'
-            : 'https://nfe-homologacao.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento.asmx';
+            ? 'https://www.nfe.fazenda.gov.br/NFeRecepcaoEvento4/NFeRecepcaoEvento4.asmx'
+            : 'https://hom.nfe.fazenda.gov.br/NFeRecepcaoEvento4/NFeRecepcaoEvento4.asmx';
 
         const tpAmb = isProduction ? '1' : '2';
         const chNFe = nfe.accessKey;
@@ -527,17 +526,11 @@ export class SefazService {
 
         const signedEvento = await this.signatureService.signEventXml(eventoXml, pfxBase64, issuer.certificatePassword);
         const cleanSigned = signedEvento.replace(/<\?xml.*?\?>/g, '').trim();
-        // O SVC-RS de contingência usa o webservice LEGADO RecepcaoEvento (versão 1.00,
-        // namespace "http://www.portalfiscal.inf.br/nfe/wsdl/RecepcaoEvento" — sem "NFe",
-        // sem "4"), diferente do NFeRecepcaoEvento4 usado no cancelamento/fluxo normal.
-        // Esse serviço legado exige um <soap:Header> com nfeCabecMsg{cUF, versaoDados} —
-        // sem isso a SEFAZ rejeita com "215 - Falha no schema XML" no nível de LOTE, antes
-        // mesmo de olhar o conteúdo do evento (confirmado ao vivo: o XML do evento em si
-        // já validava corretamente contra o schema oficial completo, incluindo a
-        // assinatura — o header ausente era a causa real). Confirmado contra o stub Java
-        // de referência (wmixvideo/nfe, RecepcaoEventoStub — QName do header e operação).
-        const RECEPCAO_EVENTO_NS = 'http://www.portalfiscal.inf.br/nfe/wsdl/RecepcaoEvento';
-        const soapEnvelope = `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope" xmlns:nfe="${RECEPCAO_EVENTO_NS}"><soap12:Header><nfe:nfeCabecMsg><cUF>${cUF}</cUF><versaoDados>1.00</versaoDados></nfe:nfeCabecMsg></soap12:Header><soap12:Body><nfe:nfeDadosMsg>${cleanSigned}</nfe:nfeDadosMsg></soap12:Body></soap12:Envelope>`;
+        // Mesmo serviço/namespace v4 do cancelamento (NFeRecepcaoEvento4), sem
+        // soap:Header (o header nfeCabecMsg é do webservice legado v1.00, que não é
+        // o usado aqui — ver comentário do baseUrl acima).
+        const RECEPCAO_EVENTO_NS = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4';
+        const soapEnvelope = `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope" xmlns:nfe="${RECEPCAO_EVENTO_NS}"><soap12:Header/><soap12:Body><nfe:nfeDadosMsg>${cleanSigned}</nfe:nfeDadosMsg></soap12:Body></soap12:Envelope>`;
 
         try {
             const { cert, key } = this.signatureService.getCertAndKey(pfxBase64, issuer.certificatePassword);
@@ -545,7 +538,7 @@ export class SefazService {
 
             const response$ = this.httpService.post(baseUrl, soapEnvelope, {
                 headers: {
-                    'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/RecepcaoEvento/nfeRecepcaoEvento"',
+                    'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4/nfeRecepcaoEvento"',
                 },
                 httpsAgent: agent,
                 timeout: 30000,
@@ -575,11 +568,6 @@ export class SefazService {
             };
         } catch (error: any) {
             this.logger.error(`SVC EPEC Error: ${error.message}`);
-            if (error.response) {
-                this.logger.error(`[EPEC DEBUG] status=${error.response.status} url=${error.config?.url} data=${JSON.stringify(error.response.data).slice(0, 1000)}`);
-            } else {
-                this.logger.error(`[EPEC DEBUG] sem response — provável erro de rede/TLS. code=${error.code} url=${error.config?.url}`);
-            }
             throw error;
         }
     }
