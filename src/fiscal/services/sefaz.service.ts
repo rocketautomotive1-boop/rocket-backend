@@ -485,7 +485,14 @@ export class SefazService {
         const idLote = Math.floor(Math.random() * 1000000);
         const cnpj = issuer.cnpj.replace(/\D/g, '');
 
-        const eventoXml = `<envEvento versao="1.00" xmlns="http://www.portalfiscal.inf.br/nfe"><idLote>${idLote}</idLote><evento versao="1.00"><infEvento Id="${idEvento}"><cOrgao>${cUF}</cOrgao><tpAmb>${tpAmb}</tpAmb><CNPJ>${cnpj}</CNPJ><chNFe>${chNFe}</chNFe><dhEvento>${dhEvento}</dhEvento><tpEvento>110140</tpEvento><nSeqEvento>1</nSeqEvento><verEvento>1.00</verEvento><detEvento versao="1.00"><descEvento>EPEC</descEvento><cOrgaoAutor>${cUF}</cOrgaoAutor><tpAutor>1</tpAutor><verAplic>Rocket 1.0</verAplic><dhEmi>${dhEvento}</dhEmi><tpNF>1</tpNF><IE>${issuer.ie.replace(/\D/g, '')}</IE><dest><UF>${chNFe.substring(0, 2)}</UF></dest><vNF>0.00</vNF><vICMS>0.00</vICMS><vST>0.00</vST></detEvento></infEvento></evento></envEvento>`;
+        // cOrgao (nível infEvento) precisa ser 91 (Ambiente Nacional) para EPEC — é pra
+        // onde o evento é transmitido (SVC-RS/SVC-AN), não a UF do emitente. Usar cUF (26,
+        // PE) aqui causa rejeição 582 "UF não atendida pela SVC-[AN/RS]" (confirmado ao
+        // vivo em produção, pedido 2000018139210232) mesmo com a UF do emitente sendo
+        // corretamente atendida pelo SVC-RS. cOrgaoAutor continua sendo cUF — esse sim é a
+        // UF real que autorou o evento, campo distinto de cOrgao.
+        const ORGAO_AMBIENTE_NACIONAL = '91';
+        const eventoXml = `<envEvento versao="1.00" xmlns="http://www.portalfiscal.inf.br/nfe"><idLote>${idLote}</idLote><evento versao="1.00"><infEvento Id="${idEvento}"><cOrgao>${ORGAO_AMBIENTE_NACIONAL}</cOrgao><tpAmb>${tpAmb}</tpAmb><CNPJ>${cnpj}</CNPJ><chNFe>${chNFe}</chNFe><dhEvento>${dhEvento}</dhEvento><tpEvento>110140</tpEvento><nSeqEvento>1</nSeqEvento><verEvento>1.00</verEvento><detEvento versao="1.00"><descEvento>EPEC</descEvento><cOrgaoAutor>${cUF}</cOrgaoAutor><tpAutor>1</tpAutor><verAplic>Rocket 1.0</verAplic><dhEmi>${dhEvento}</dhEmi><tpNF>1</tpNF><IE>${issuer.ie.replace(/\D/g, '')}</IE><dest><UF>${chNFe.substring(0, 2)}</UF></dest><vNF>0.00</vNF><vICMS>0.00</vICMS><vST>0.00</vST></detEvento></infEvento></evento></envEvento>`;
 
         let pfxBase64 = issuer.certificatePfx;
         if (pfxBase64.includes('base64,')) pfxBase64 = pfxBase64.split('base64,')[1];
