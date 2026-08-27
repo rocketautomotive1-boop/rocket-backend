@@ -542,6 +542,10 @@ export class SefazService {
             }).pipe(timeout(35000));
 
             const response = await lastValueFrom(response$);
+            // TEMP DEBUG: resposta SOAP crua da SEFAZ — "215 - Falha no schema XML" pode
+            // ser rejeição de LOTE (retEnvEvento.cStat, sem retEvento) em vez de rejeição
+            // do evento individual, e a mensagem genérica não distingue os dois casos.
+            this.logger.warn(`[EPEC DEBUG] resposta SOAP crua: ${response.data}`);
             const parsed = this.parser.parse(response.data);
 
             const body = parsed?.Envelope?.Body ?? parsed?.Body;
@@ -555,7 +559,7 @@ export class SefazService {
 
             // 135 = evento registrado
             const success = cStat == 135;
-            this.logger.log(`SVC EPEC: ${cStat} - ${xMotivo}`);
+            this.logger.log(`SVC EPEC: ${cStat} - ${xMotivo} (nível: ${infEvento ? 'evento' : 'lote'})`);
 
             return {
                 status: success ? 'authorized_contingency' : 'error',
