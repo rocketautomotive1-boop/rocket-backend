@@ -56,12 +56,23 @@ describe('FiscalIssuanceConsumer', () => {
     const listener = jest.fn();
     eventEmitter.on(FISCAL_EVENTS.NFE_ISSUANCE_STUCK, listener);
 
-    const amqpMsg = { fields: { 'x-death': [{ count: 4 }] } }; // attempts = 4 + 1 = 5 = MAX
+    // x-death é injetado pelo broker em properties.headers, não em .fields — bug real
+    // corrigido nesta sessão (o guard nunca disparava em produção porque lia o campo
+    // errado, e a fila reentregava sem dead-letter de qualquer forma).
+    const amqpMsg = { properties: { headers: { 'x-death': [{ count: 4 }] } } }; // attempts = 4 + 1 = 5 = MAX
 
     await expect(
       consumer.handle({ orderId: 'order-1', overrides: {}, requestedAt: '' }, amqpMsg),
     ).resolves.toBeUndefined();
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener.mock.calls[0][0]).toMatchObject({ orderId: 'order-1', attempts: 5 });
+  });
+
+  it('sem x-death (primeira tentativa / fila sem dead-letter) usa attempts=1, não trava no limite', async () => {
+    fiscalService.emitNFe.mockRejectedValue(new Error('ETIMEDOUT'));
+
+    await expect(
+      consumer.handle({ orderId: 'order-1', overrides: {}, requestedAt: '' }, {}),
+    ).rejects.toThrow('ETIMEDOUT');
   });
 });

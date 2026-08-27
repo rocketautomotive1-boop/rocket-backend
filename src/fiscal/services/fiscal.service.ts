@@ -697,20 +697,32 @@ export class FiscalService {
             // fiscalDocuments é campo virtual (populate por foreignField: 'order' em
             // order.schema.ts) — não existe pra gravar via $addToSet; o vínculo real
             // é nfe.order = dbOrder._id acima, que o virtual já resolve sozinho.
+            //
+            // $slice mantém só as últimas MAX_LOGS entradas a cada push — mesmo cap já
+            // usado em OrderLifecycleService.createLog. Sem isso, retry em loop na
+            // emissão (ex.: SEFAZ fora do ar + fila sem dead-letter) acumula um log
+            // idêntico por tentativa sem limite, inflando o documento até travar a
+            // serialização no app mobile (visto em produção: pedido 2000018139210232,
+            // 18.103 entradas, ~5MB, mesmo padrão do incidente documentado em
+            // order-lifecycle.service.ts, pedido diferente).
+            const MAX_LOGS = 200;
             await this.orderModel.findByIdAndUpdate(dbOrder._id, {
                 $push: {
                     logs: {
-                        logType: 'fiscal',
-                        message: logMsg.trim(),
-                        details: {
-                            nfeId: String(nfe._id),
-                            number: nfe.number,
-                            series: nfe.series,
-                            status: nfe.status,
-                            accessKey: nfe.accessKey,
-                            protocol: nfe.protocol,
-                        },
-                        createdAt: new Date(),
+                        $each: [{
+                            logType: 'fiscal',
+                            message: logMsg.trim(),
+                            details: {
+                                nfeId: String(nfe._id),
+                                number: nfe.number,
+                                series: nfe.series,
+                                status: nfe.status,
+                                accessKey: nfe.accessKey,
+                                protocol: nfe.protocol,
+                            },
+                            createdAt: new Date(),
+                        }],
+                        $slice: -MAX_LOGS,
                     },
                 },
             }).exec();
