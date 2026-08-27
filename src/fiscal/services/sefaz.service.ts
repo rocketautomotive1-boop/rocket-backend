@@ -524,6 +524,10 @@ export class SefazService {
         const signedEvento = await this.signatureService.signEventXml(eventoXml, pfxBase64, issuer.certificatePassword);
         const cleanSigned = signedEvento.replace(/<\?xml.*?\?>/g, '').trim();
         const soapEnvelope = `<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope" xmlns:nfe="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4"><soap12:Header/><soap12:Body><nfe:nfeDadosMsg>${cleanSigned}</nfe:nfeDadosMsg></soap12:Body></soap12:Envelope>`;
+        // TEMP DEBUG: capturar XML exato enviado ao SVC-RS para diagnosticar "215 - Falha
+        // no schema XML" — mensagem da SEFAZ não indica o campo específico. Remover após
+        // identificar a causa raiz real.
+        this.logger.warn(`[EPEC DEBUG] eventoXml assinado: ${cleanSigned}`);
 
         try {
             const { cert, key } = this.signatureService.getCertAndKey(pfxBase64, issuer.certificatePassword);
