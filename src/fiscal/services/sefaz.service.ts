@@ -545,6 +545,7 @@ export class SefazService {
             }).pipe(timeout(35000));
 
             const response = await lastValueFrom(response$);
+            this.logger.log(`[EPEC DEBUG] resposta SOAP crua: ${String(response.data).slice(0, 3000)}`);
             const parsed = this.parser.parse(response.data);
 
             const body = parsed?.Envelope?.Body ?? parsed?.Body;
