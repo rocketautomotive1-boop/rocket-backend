@@ -3,6 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { LegalEntityService } from './services/legal-entity.service';
 import { CertificateInspectionService } from './services/certificate-inspection.service';
+import { SignatureService } from '../fiscal/services/signature.service';
 
 @ApiTags('LegalEntity')
 @Controller('legal-entities')
@@ -10,6 +11,7 @@ export class LegalEntityController {
     constructor(
         private readonly legalEntityService: LegalEntityService,
         private readonly certificateInspectionService: CertificateInspectionService,
+        private readonly signatureService: SignatureService,
     ) { }
 
     @Post('inspect-certificate')
@@ -107,6 +109,17 @@ export class LegalEntityController {
 
         if (file) {
             data.certificatePfx = file.buffer.toString('base64');
+            // Sem isso, certificateValidUntil nunca era persistido no create/update
+            // (só o endpoint de preview /inspect-certificate extraía, sem salvar) —
+            // certificate-expiry-check.worker.ts nunca tinha o que checar, e uma
+            // eventual expiração passava despercebida até falhar na emissão real.
+            try {
+                const extracted = this.signatureService.extractCertificateData(data.certificatePfx, data.certificatePassword);
+                data.certificateValidUntil = extracted.validUntil;
+            } catch {
+                // Certificado inválido/senha errada — deixa a validação de negócio
+                // (assinatura na emissão) reportar o erro real; não bloqueia o cadastro aqui.
+            }
         }
 
         return data;
