@@ -6,6 +6,7 @@ import { FiscalDocumentModel, FiscalDocumentDocument } from '../schemas/fiscal.s
 import { LegalEntityDocument } from '../../legal-entity/schemas/legal-entity.schema';
 import { LegalEntityService } from '../../legal-entity/services/legal-entity.service';
 import { SefazService } from './sefaz.service';
+import { FiscalService } from './fiscal.service';
 
 const SUCCESS_STREAK_TO_EXIT_CONTINGENCY = 3;
 
@@ -25,6 +26,7 @@ export class EpecSyncWorker {
         private readonly fiscalDocumentModel: Model<FiscalDocumentDocument>,
         private readonly legalEntityService: LegalEntityService,
         private readonly sefazService: SefazService,
+        private readonly fiscalService: FiscalService,
     ) { }
 
     @Cron('*/10 * * * *') // a cada 10 minutos — mais frequente que o poll de Distribuição DFe (sem rate-limit oficial para authorize())
@@ -63,6 +65,13 @@ export class EpecSyncWorker {
                     await nfe.save();
                     successCount++;
                     this.logger.log(`NFe ${nfe.accessKey} sincronizada pós-contingência (protocolo ${result.protocol}).`);
+
+                    // Sem isso, uma NFe emitida via EPEC nunca disparava o anexo automático
+                    // ao Mercado Livre (FiscalMlAttachListener), o DANFE (FiscalDanfeService)
+                    // nem a notificação — todos escutam NFE_AUTHORIZED, que só era emitido no
+                    // fluxo de emissão normal (fiscal.service.ts emitPostEmissionEvent), nunca
+                    // aqui na confirmação pós-contingência.
+                    this.fiscalService.emitAuthorizedEvent(nfe);
                 }
             } catch (err: any) {
                 this.logger.warn(`Sincronização de NFe ${nfe.accessKey} ainda falhando: ${err.message}`);

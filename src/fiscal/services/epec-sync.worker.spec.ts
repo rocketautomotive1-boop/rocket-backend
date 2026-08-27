@@ -4,12 +4,14 @@ import { EpecSyncWorker } from './epec-sync.worker';
 import { FiscalDocumentModel } from '../schemas/fiscal.schema';
 import { LegalEntityService } from '../../legal-entity/services/legal-entity.service';
 import { SefazService } from './sefaz.service';
+import { FiscalService } from './fiscal.service';
 
 describe('EpecSyncWorker', () => {
   let worker: EpecSyncWorker;
   let fiscalDocumentModel: { find: jest.Mock };
   let legalEntityService: { findAllInContingency: jest.Mock; updateContingencyState: jest.Mock };
   let sefazService: { authorize: jest.Mock };
+  let fiscalService: { emitAuthorizedEvent: jest.Mock };
 
   const entity = { _id: 'legal1', cnpj: '00000000000191', companyName: 'Rocket', contingencySuccessCount: 0 };
 
@@ -20,6 +22,7 @@ describe('EpecSyncWorker', () => {
       updateContingencyState: jest.fn().mockResolvedValue(undefined),
     };
     sefazService = { authorize: jest.fn() };
+    fiscalService = { emitAuthorizedEvent: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -27,6 +30,7 @@ describe('EpecSyncWorker', () => {
         { provide: getModelToken(FiscalDocumentModel.name), useValue: fiscalDocumentModel },
         { provide: LegalEntityService, useValue: legalEntityService },
         { provide: SefazService, useValue: sefazService },
+        { provide: FiscalService, useValue: fiscalService },
       ],
     }).compile();
 
@@ -45,6 +49,32 @@ describe('EpecSyncWorker', () => {
 
     expect(nfe.status).toBe('AUTHORIZED');
     expect(nfe.save).toHaveBeenCalled();
+  });
+
+  it('emite NFE_AUTHORIZED ao confirmar uma NFe pós-contingência — sem isso o anexo automático ao Mercado Livre, o DANFE e a notificação nunca disparavam para notas emitidas via EPEC', async () => {
+    const nfe = {
+      accessKey: 'CHAVE1', xml: '<xml/>', environment: 'PRODUCTION', status: 'AUTHORIZED_CONTINGENCY',
+      issuer: { cnpj: '00000000000191' }, save: jest.fn().mockResolvedValue(undefined),
+    };
+    fiscalDocumentModel.find.mockReturnValue({ limit: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([nfe]) }) });
+    sefazService.authorize.mockResolvedValue({ status: 'authorized', protocol: 'prot-1' });
+
+    await worker.syncPendingContingencyNFes();
+
+    expect(fiscalService.emitAuthorizedEvent).toHaveBeenCalledWith(nfe);
+  });
+
+  it('não emite NFE_AUTHORIZED quando a sincronização ainda falha (SEFAZ ainda indisponível)', async () => {
+    const nfe = {
+      accessKey: 'CHAVE1', xml: '<xml/>', environment: 'PRODUCTION', status: 'AUTHORIZED_CONTINGENCY',
+      issuer: { cnpj: '00000000000191' }, save: jest.fn(),
+    };
+    fiscalDocumentModel.find.mockReturnValue({ limit: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([nfe]) }) });
+    sefazService.authorize.mockRejectedValue(new Error('ETIMEDOUT'));
+
+    await worker.syncPendingContingencyNFes();
+
+    expect(fiscalService.emitAuthorizedEvent).not.toHaveBeenCalled();
   });
 
   it('ignora NFes cujo issuer não bate com a LegalEntity em contingência', async () => {

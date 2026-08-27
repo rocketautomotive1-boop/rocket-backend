@@ -613,17 +613,7 @@ export class FiscalService {
         try {
             if (nfe.status === 'AUTHORIZED') {
                 this.upsertFiscalCustomerFromEmission(orderData);
-                this.eventEmitter.emit(FISCAL_EVENTS.NFE_AUTHORIZED, new FiscalNfeAuthorizedEvent(
-                    String(nfe._id),
-                    nfe.order ? String(nfe.order) : (nfe.orderId ? String(nfe.orderId) : null),
-                    nfe.storeId ? String(nfe.storeId) : null,
-                    nfe.accessKey,
-                    nfe.series,
-                    nfe.number,
-                    nfe.xml,
-                    orderData?.buyer?.email,
-                    orderData?.buyer?.name,
-                ));
+                this.emitAuthorizedEvent(nfe, orderData?.buyer?.email, orderData?.buyer?.name);
             } else if (nfe.status === 'REJECTED') {
                 this.eventEmitter.emit(FISCAL_EVENTS.NFE_REJECTED, new FiscalNfeRejectedEvent(
                     String(nfe._id),
@@ -634,6 +624,28 @@ export class FiscalService {
         } catch (err) {
             this.logger.warn(`Falha ao emitir evento pós-emissão para NFe ${nfe._id}: ${err.message}`);
         }
+    }
+
+    /**
+     * Emite FISCAL_EVENTS.NFE_AUTHORIZED — extraído de emitPostEmissionEvent para ser
+     * reutilizável pelo EpecSyncWorker, que confirma uma NFe AUTHORIZED_CONTINGENCY para
+     * AUTHORIZED (protocolo definitivo) sem ter o orderData completo à mão. Sem isso, o
+     * anexo automático ao Mercado Livre (FiscalMlAttachListener), o DANFE
+     * (FiscalDanfeService) e a notificação (FiscalNotificationTranslator) nunca disparavam
+     * para nenhuma NFe que passou por contingência — gap real, não só na emissão original.
+     */
+    emitAuthorizedEvent(nfe: any, customerEmail?: string, customerName?: string): void {
+        this.eventEmitter.emit(FISCAL_EVENTS.NFE_AUTHORIZED, new FiscalNfeAuthorizedEvent(
+            String(nfe._id),
+            nfe.order ? String(nfe.order) : (nfe.orderId ? String(nfe.orderId) : null),
+            nfe.storeId ? String(nfe.storeId) : null,
+            nfe.accessKey,
+            nfe.series,
+            nfe.number,
+            nfe.xml,
+            customerEmail,
+            customerName,
+        ));
     }
 
     /** Persiste/atualiza o cadastro fiscal reutilizável — só ao emitir com sucesso,
