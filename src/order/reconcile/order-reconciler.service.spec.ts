@@ -65,18 +65,43 @@ describe('OrderReconciler (integration)', () => {
       { id: 'MISSING', status: 'paid', date_last_updated: '2026-06-06T00:00:00Z' },
     ]);
 
-    // seed KNOWN with matching status so it is NOT re-ingested
+    // seed KNOWN com status igual E shipping já num substatus TERMINAL (entregue) —
+    // só assim não há gap nenhum a reconciliar (nem status, nem shipping).
     await repo.create({
       externalId: 'KNOWN',
       marketplaceId: '650000000000000000000001',
       status: 'paid',
       totalAmount: 1,
       items: [],
+      shipping: { substatus: 'delivered' },
     });
 
     await reconciler.runFor('mkt1');
 
     expect(ingest.ingest).toHaveBeenCalledTimes(1);
     expect(ingest.ingest).toHaveBeenCalledWith('MISSING', 'mkt1', 'reconcile', undefined);
+  });
+
+  it('reingesta pedido com status comercial IGUAL mas shipping.substatus ainda não-terminal (rede de segurança p/ webhook de shipments perdido)', async () => {
+    gateway.listOrdersSince.mockResolvedValue([
+      { id: 'STALE_SHIPPING', status: 'paid', date_last_updated: '2026-06-07T00:00:00Z' },
+    ]);
+
+    // status comercial não divergiu (paid === paid), mas substatus travado em 'invoice_pending'
+    // — exatamente o bug confirmado em produção (pedido preso ~24h enquanto o shipment real
+    // avançou 7 estados). Precisa reingestar mesmo sem divergência de status comercial.
+    await repo.create({
+      externalId: 'STALE_SHIPPING',
+      marketplaceId: '650000000000000000000001',
+      status: 'paid',
+      totalAmount: 1,
+      items: [],
+      shipping: { substatus: 'invoice_pending' },
+    });
+
+    await reconciler.runFor('mkt1');
+
+    expect(ingest.ingest).toHaveBeenCalledTimes(1);
+    expect(ingest.ingest).toHaveBeenCalledWith('STALE_SHIPPING', 'mkt1', 'reconcile', undefined);
   });
 });

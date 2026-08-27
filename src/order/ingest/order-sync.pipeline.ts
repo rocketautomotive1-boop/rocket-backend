@@ -401,6 +401,11 @@ export class OrderSyncPipeline {
             status: 'cancelled',
             logisticsStatus: 'cancelled',
             syncedAt: new Date(),
+            // Sem isso, shipping.status/substatus fica congelado no valor pré-cancelamento
+            // (ex.: pending/buffered) e a UI segue mostrando "Para enviar em breve" para um
+            // pedido cancelado — bug confirmado em produção.
+            'shipping.status': 'cancelled',
+            'shipping.substatus': 'cancelled',
             $push: {
                 history: {
                     status: 'cancelled',

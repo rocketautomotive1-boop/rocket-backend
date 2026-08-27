@@ -26,3 +26,21 @@ export function maxCursor(refs: Array<{ date_last_updated: string }>, fallback: 
 export function isStatusDivergent(localStatus?: string, externalStatus?: string): boolean {
   return (localStatus ?? '').toLowerCase() !== (externalStatus ?? '').toLowerCase();
 }
+
+/**
+ * Substatus de shipment que não mudam mais — uma vez aqui, não há gap a reconciliar
+ * (delivered/not_delivered terminam o fluxo de entrega; cancelled é setado só no
+ * cancelamento do pedido em si, não avança sozinho).
+ */
+const TERMINAL_SHIPPING_SUBSTATUSES = new Set(['delivered', 'not_delivered', 'cancelled']);
+
+/**
+ * True quando o pedido apareceu no delta (date_last_updated moveu no marketplace) mas
+ * o shipping.substatus local ainda não está num estado terminal — o ML atualiza
+ * date_last_updated do pedido em toda transição de shipment (confirmado ao vivo), então
+ * isso cobre o caso em que o webhook (orders_v2 ou shipments) não entregou a atualização:
+ * rede de segurança complementar ao handler do tópico `shipments`, não substituto dele.
+ */
+export function isShippingPossiblyStale(localSubstatus?: string): boolean {
+  return !TERMINAL_SHIPPING_SUBSTATUSES.has((localSubstatus ?? '').toLowerCase());
+}

@@ -1,6 +1,7 @@
 export const WEBHOOK_DOMAIN_COMMANDS = {
   ORDER_SYNC_REQUESTED: 'order.sync_requested',
   ORDER_PACK_SYNC_REQUESTED: 'order.pack_sync_requested',
+  SHIPMENT_SYNC_REQUESTED: 'order.shipment_sync_requested',
   QUESTION_INGEST_REQUESTED: 'question.ingest_requested',
   MODERATION_PROBE_REQUESTED: 'moderation.probe_requested',
   RETURN_INGEST_REQUESTED: 'return.ingest_requested',
@@ -22,6 +23,21 @@ export interface OrderPackSyncRequestedCommand {
   /** Seller id no marketplace (ML user_id) → conta multi-client destino. */
   externalUserId?: string | null;
   resource: string;
+  receivedAt: Date;
+  source: 'webhook';
+}
+
+/**
+ * Mudança de status/substatus do envio (ML topic `shipments`) — resource é
+ * `/shipments/{shipment_id}`, não o id do pedido. O listener resolve
+ * shipment↔order via API antes de reingerir (mesmo padrão de expandMlPack).
+ */
+export interface ShipmentSyncRequestedCommand {
+  marketplace: 'mercadolivre';
+  externalShipmentId: string;
+  /** Seller id no marketplace (ML user_id) → conta multi-client destino. */
+  externalUserId?: string | null;
+  resource?: string | null;
   receivedAt: Date;
   source: 'webhook';
 }

@@ -1,4 +1,4 @@
-import { nextInterval, maxCursor, isStatusDivergent, RECONCILE } from './reconcile-cursor';
+import { nextInterval, maxCursor, isStatusDivergent, isShippingPossiblyStale, RECONCILE } from './reconcile-cursor';
 
 describe('reconcile-cursor', () => {
   it('doubles interval on clean run, capped at ceiling', () => {
@@ -26,5 +26,19 @@ describe('reconcile-cursor', () => {
   it('isStatusDivergent compares case-insensitively', () => {
     expect(isStatusDivergent('Paid', 'paid')).toBe(false);
     expect(isStatusDivergent('paid', 'shipped')).toBe(true);
+  });
+
+  it('isShippingPossiblyStale: substatus não-terminal (buffered/invoice_pending/in_hub/undefined) precisa de refresh', () => {
+    expect(isShippingPossiblyStale('buffered')).toBe(true);
+    expect(isShippingPossiblyStale('invoice_pending')).toBe(true);
+    expect(isShippingPossiblyStale('in_hub')).toBe(true);
+    expect(isShippingPossiblyStale(undefined)).toBe(true);
+  });
+
+  it('isShippingPossiblyStale: substatus terminal (delivered/not_delivered/cancelled) não precisa de refresh', () => {
+    expect(isShippingPossiblyStale('delivered')).toBe(false);
+    expect(isShippingPossiblyStale('not_delivered')).toBe(false);
+    expect(isShippingPossiblyStale('cancelled')).toBe(false);
+    expect(isShippingPossiblyStale('DELIVERED')).toBe(false);
   });
 });

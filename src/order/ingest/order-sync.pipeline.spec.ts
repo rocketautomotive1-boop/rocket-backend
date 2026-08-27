@@ -5,6 +5,7 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { EventEmitter2, EventEmitterModule } from '@nestjs/event-emitter';
 import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
 import { OrderModel, OrderSchema } from '../schemas/order.schema';
+import { FiscalDocumentModel, FiscalDocumentSchema } from '../../fiscal/schemas/fiscal.schema';
 import { OrderRepository } from '../order.repository';
 import { OrderMapperService } from './order-mapper.service';
 import { OrderSyncPipeline } from './order-sync.pipeline';
@@ -36,7 +37,10 @@ describe('OrderSyncPipeline (integration)', () => {
       imports: [
         EventEmitterModule.forRoot(),
         MongooseModule.forRoot(mongo.getUri()),
-        MongooseModule.forFeature([{ name: OrderModel.name, schema: OrderSchema }]),
+        MongooseModule.forFeature([
+          { name: OrderModel.name, schema: OrderSchema },
+          { name: FiscalDocumentModel.name, schema: FiscalDocumentSchema },
+        ]),
       ],
       providers: [
         OrderSyncPipeline,
@@ -152,5 +156,46 @@ describe('OrderSyncPipeline (integration)', () => {
     gateway.fetchOrder.mockResolvedValue(null);
     await pipeline.execute('MISSING-2', '650000000000000000000099', 'reconcile');
     expect(stock.mirrorAfterCommit).not.toHaveBeenCalled();
+  });
+
+  it('cancelamento limpa shipping.status/substatus (bug confirmado em produção: pedido cancelado mostrava status de envio antigo)', async () => {
+    gateway.fetchOrder.mockResolvedValue({
+      id: 'EXT-CANCEL',
+      marketplaceId: '650000000000000000000099',
+      marketplaceName: 'ML',
+      status: 'paid',
+      date_created: new Date().toISOString(),
+      total_amount: 100,
+      items: [{ id: 'i1', sku: 'S1', title: 'X', quantity: 1, unit_price: 100 }],
+      shipping: { status: 'pending', substatus: 'buffered' },
+    });
+    stock.deductAndLink.mockResolvedValue({
+      movementIds: ['650000000000000000000abd'],
+      items: [{ productId: '650000000000000000000001', quantity: 1 }],
+    });
+
+    await pipeline.execute('EXT-CANCEL', '650000000000000000000099', 'webhook');
+
+    const orderModel = moduleRef.get<Model<any>>(getModelToken(OrderModel.name));
+    const created = await orderModel.findOne({ externalId: 'EXT-CANCEL' }).lean();
+    expect(created!.shipping.substatus).toBe('buffered');
+
+    gateway.fetchOrder.mockResolvedValue({
+      id: 'EXT-CANCEL',
+      marketplaceId: '650000000000000000000099',
+      marketplaceName: 'ML',
+      status: 'cancelled',
+      date_created: new Date().toISOString(),
+      total_amount: 100,
+      items: [{ id: 'i1', sku: 'S1', title: 'X', quantity: 1, unit_price: 100 }],
+      shipping: { status: 'pending', substatus: 'buffered' },
+    });
+
+    await pipeline.execute('EXT-CANCEL', '650000000000000000000099', 'webhook');
+
+    const cancelled = await orderModel.findOne({ externalId: 'EXT-CANCEL' }).lean();
+    expect(cancelled!.status).toBe('cancelled');
+    expect(cancelled!.shipping.status).toBe('cancelled');
+    expect(cancelled!.shipping.substatus).toBe('cancelled');
   });
 });

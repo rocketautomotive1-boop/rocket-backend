@@ -36,10 +36,10 @@ export class OrderRepository {
 
     async findStatusByExternalId(
         externalId: string,
-    ): Promise<{ _id: any; externalId: string; status: string; logisticsStatus?: string } | null> {
+    ): Promise<{ _id: any; externalId: string; status: string; logisticsStatus?: string; shipping?: { substatus?: string } } | null> {
         return this.orderModel
-            .findOne({ externalId }, { externalId: 1, status: 1, logisticsStatus: 1 })
-            .lean<{ _id: any; externalId: string; status: string; logisticsStatus?: string }>()
+            .findOne({ externalId }, { externalId: 1, status: 1, logisticsStatus: 1, 'shipping.substatus': 1 })
+            .lean<{ _id: any; externalId: string; status: string; logisticsStatus?: string; shipping?: { substatus?: string } }>()
             .exec();
     }
 

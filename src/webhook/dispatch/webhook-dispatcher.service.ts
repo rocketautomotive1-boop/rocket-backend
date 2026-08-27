@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { WEBHOOK_DOMAIN_COMMANDS } from '../events/webhook.events';
 export interface DispatchInput {
   marketplace: string; topic: string;
-  kind: 'order' | 'order_pack' | 'question' | 'moderation' | 'return' | 'unparseable';
+  kind: 'order' | 'order_pack' | 'shipment' | 'question' | 'moderation' | 'return' | 'unparseable';
   externalId?: string; externalUserId?: string; resource?: string; payload: any; receivedAt: Date;
 }
 @Injectable()
@@ -19,6 +19,9 @@ export class WebhookDispatcher {
         return;
       case 'order_pack':
         await this.emitter.emitAsync(WEBHOOK_DOMAIN_COMMANDS.ORDER_PACK_SYNC_REQUESTED, { marketplace: input.marketplace, externalPackId: input.externalId, externalUserId: input.externalUserId ?? null, resource: input.resource, receivedAt: input.receivedAt, source: 'webhook' });
+        return;
+      case 'shipment':
+        await this.emitter.emitAsync(WEBHOOK_DOMAIN_COMMANDS.SHIPMENT_SYNC_REQUESTED, { marketplace: input.marketplace, externalShipmentId: input.externalId, externalUserId: input.externalUserId ?? null, resource: input.resource ?? null, receivedAt: input.receivedAt, source: 'webhook' });
         return;
       case 'question':
         await this.emitter.emitAsync(WEBHOOK_DOMAIN_COMMANDS.QUESTION_INGEST_REQUESTED, { marketplace: input.marketplace, externalQuestionId: input.externalId, resource: input.resource, receivedAt: input.receivedAt });

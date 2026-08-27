@@ -18,6 +18,13 @@ export class MercadoLivreAdapter implements WebhookAdapter {
     const externalUserId = ctx.payload?.user_id != null ? String(ctx.payload.user_id) : undefined;
     if (resource.startsWith('/packs/')) return { kind:'order_pack', eventId:`mercadolivre:packs:${resource}`, externalId:lastSeg(resource), resource, externalUserId, raw:ctx.payload };
     if (topic==='orders_v2'||resource.startsWith('/orders/')) return { kind:'order', eventId:`mercadolivre:orders_v2:${resource}`, externalId:lastSeg(resource), resource, externalUserId, raw:ctx.payload };
+    // `shipments` = mudança de status/substatus do envio (impresso, postado, coletado, em
+    // trânsito, entregue...) que NÃO dispara `orders_v2` correlato de forma confiável — sem
+    // isso, shipping.status/substatus fica congelado na última sync (confirmado em produção:
+    // pedido travado ~24h em 'invoice_pending' enquanto o shipment real já tinha avançado 7
+    // estados). `resource` é `/shipments/{shipment_id}` — não é o id do pedido; o listener
+    // resolve pedido↔shipment via API antes de reingerir.
+    if (topic==='shipments'||resource.startsWith('/shipments/')) return { kind:'shipment', eventId:`mercadolivre:shipments:${resource}`, externalId:lastSeg(resource), resource, externalUserId, raw:ctx.payload };
     if (topic==='questions'||resource.startsWith('/questions/')) return { kind:'question', eventId:`mercadolivre:questions:${resource}`, externalId:lastSeg(resource), resource, externalUserId, raw:ctx.payload };
     // `items` is the only signal ML gives for moderation (no `moderations` topic exists): a
     // moderated listing changes sub_status → fires `items`. Treat it as a low-latency probe;

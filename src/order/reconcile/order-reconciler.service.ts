@@ -11,7 +11,7 @@ import { OrderIngestService } from '../ingest/order-ingest.service';
 import { OrderMetricsService } from '../observability/order-metrics.service';
 import { MarketplaceRegistryService } from '../../marketplace/services/marketplace-registry.service';
 import { MarketplaceTokenBrokerService } from '../../marketplace/auth/services/marketplace-token-broker.service';
-import { RECONCILE, nextInterval, maxCursor, isStatusDivergent } from './reconcile-cursor';
+import { RECONCILE, nextInterval, maxCursor, isStatusDivergent, isShippingPossiblyStale } from './reconcile-cursor';
 
 /**
  * Safety net for orders the webhook never delivered (or whose status got stuck). Per marketplace
@@ -78,7 +78,17 @@ export class OrderReconciler implements OnModuleInit {
     let gaps = 0;
     for (const ref of refs) {
       const existing = await this.repo.findStatusByExternalId(ref.id);
-      if (!existing || isStatusDivergent(existing.status, ref.status)) {
+      // Rede de segurança p/ shipping: o pedido apareceu no delta (date_last_updated moveu
+      // no ML — toda transição de shipment atualiza esse campo, confirmado ao vivo), mas o
+      // status COMERCIAL não divergiu porque a mudança foi só de shipping.substatus. Sem
+      // isso, um webhook de shipments perdido deixa o substatus congelado indefinidamente
+      // (bug confirmado em produção: pedido travado ~24h em 'invoice_pending' enquanto o
+      // shipment real avançou 7 estados). Só reingesta se o substatus local ainda não é
+      // terminal — evita reingestar pedidos entregues/cancelados a cada ciclo.
+      const needsShippingRefresh = !!existing
+        && !isStatusDivergent(existing.status, ref.status)
+        && isShippingPossiblyStale(existing.shipping?.substatus);
+      if (!existing || isStatusDivergent(existing.status, ref.status) || needsShippingRefresh) {
         gaps++;
         await this.ingest.ingest(ref.id, marketplaceId, 'reconcile', accountId);
       }
