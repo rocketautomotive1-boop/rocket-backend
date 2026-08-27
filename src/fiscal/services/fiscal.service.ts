@@ -400,7 +400,7 @@ export class FiscalService {
             // consecutivas (nunca por uma rejeição de negócio, que authorize() não lança).
             let result: any;
             if (issuer.contingencyMode) {
-                result = await this.transmitViaEpec(nfe, issuer);
+                result = await this.transmitViaEpec(nfe, issuer, signedXml);
             } else {
                 try {
                     result = await this.sefazService.authorize(signedXml, nfe.environment, issuer);
@@ -409,7 +409,7 @@ export class FiscalService {
                     const enteredContingency = await this.recordTransportFailure(issuer);
                     if (enteredContingency) {
                         this.logger.warn(`SEFAZ indisponível — LegalEntity ${issuer._id} entrou em contingência. Transmitindo via EPEC.`);
-                        result = await this.transmitViaEpec(nfe, issuer);
+                        result = await this.transmitViaEpec(nfe, issuer, signedXml);
                     } else {
                         throw transportErr;
                     }
@@ -473,9 +473,12 @@ export class FiscalService {
     }
 
     /** Transmite via EPEC e retorna no mesmo shape de sefazService.authorize
-     *  ({status, protocol, message, ...}) para o chamador tratar uniformemente. */
-    private async transmitViaEpec(nfe: any, issuer: any): Promise<any> {
-        const result = await this.sefazService.transmitEpec(nfe, issuer);
+     *  ({status, protocol, message, ...}) para o chamador tratar uniformemente.
+     *  Recebe signedXml explicitamente — nfe.xml só é setado em nfe.save() após o
+     *  resultado da transmissão (linha ~433), estaria vazio/desatualizado se lido
+     *  de nfe.xml aqui (transmitEpec precisa do XML assinado para extrair dest/total). */
+    private async transmitViaEpec(nfe: any, issuer: any, signedXml: string): Promise<any> {
+        const result = await this.sefazService.transmitEpec(nfe, issuer, signedXml);
         if (result.status !== 'authorized_contingency') {
             throw new Error(`SVC rejeitou o EPEC: ${result.cStat} - ${result.message}`);
         }

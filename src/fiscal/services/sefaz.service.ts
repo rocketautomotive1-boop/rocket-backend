@@ -9,6 +9,7 @@ import { SignatureService } from './signature.service';
 export class SefazService {
     private readonly logger = new Logger(SefazService.name);
     private readonly parser: XMLParser;
+    private readonly nfeXmlParser: XMLParser;
 
     constructor(
         private readonly httpService: HttpService,
@@ -18,6 +19,14 @@ export class SefazService {
         this.parser = new XMLParser({
             ignoreAttributes: false,
             removeNSPrefix: true
+        });
+        // parseTagValue: false — sem isso, CNPJ/CPF/IE com zero à esquerda perdem o
+        // zero (mesmo bug já corrigido em fiscal-danfe.service.ts). Usado só para extrair
+        // dest/total da NFe original ao montar o EPEC (transmitEpec).
+        this.nfeXmlParser = new XMLParser({
+            ignoreAttributes: false,
+            removeNSPrefix: true,
+            parseTagValue: false,
         });
     }
 
@@ -456,7 +465,7 @@ export class SefazService {
      * ser sincronizada quando a SEFAZ volta (ver EpecSyncWorker). PE usa
      * SVC-RS (mesma infraestrutura do CCC/ConsultaCadastro).
      */
-    async transmitEpec(nfe: any, issuer: any): Promise<any> {
+    async transmitEpec(nfe: any, issuer: any, signedXml: string): Promise<any> {
         this.logger.log(`Transmitindo EPEC para NFe (série ${nfe.series} número ${nfe.number})...`);
 
         if (!issuer.certificatePfx || !issuer.certificatePassword) {
@@ -490,9 +499,24 @@ export class SefazService {
         // PE) aqui causa rejeição 582 "UF não atendida pela SVC-[AN/RS]" (confirmado ao
         // vivo em produção, pedido 2000018139210232) mesmo com a UF do emitente sendo
         // corretamente atendida pelo SVC-RS. cOrgaoAutor continua sendo cUF — esse sim é a
-        // UF real que autorou o evento, campo distinto de cOrgao.
+        // UF real que autorou o evento, campo distinto de cOrgao. Confirmado contra o
+        // schema oficial (nfephp-org/sped-nfe schemes/PL_009_V4/leiauteEPEC_v1.00.xsd).
         const ORGAO_AMBIENTE_NACIONAL = '91';
-        const eventoXml = `<envEvento versao="1.00" xmlns="http://www.portalfiscal.inf.br/nfe"><idLote>${idLote}</idLote><evento versao="1.00"><infEvento Id="${idEvento}"><cOrgao>${ORGAO_AMBIENTE_NACIONAL}</cOrgao><tpAmb>${tpAmb}</tpAmb><CNPJ>${cnpj}</CNPJ><chNFe>${chNFe}</chNFe><dhEvento>${dhEvento}</dhEvento><tpEvento>110140</tpEvento><nSeqEvento>1</nSeqEvento><verEvento>1.00</verEvento><detEvento versao="1.00"><descEvento>EPEC</descEvento><cOrgaoAutor>${cUF}</cOrgaoAutor><tpAutor>1</tpAutor><verAplic>Rocket 1.0</verAplic><dhEmi>${dhEvento}</dhEmi><tpNF>1</tpNF><IE>${issuer.ie.replace(/\D/g, '')}</IE><dest><UF>${chNFe.substring(0, 2)}</UF></dest><vNF>0.00</vNF><vICMS>0.00</vICMS><vST>0.00</vST></detEvento></infEvento></evento></envEvento>`;
+
+        // dest/CNPJ|CPF|IE e total/ICMSTot(vNF,vICMS,vST) do detEvento do EPEC precisam
+        // ser os dados REAIS do destinatário/totais da NFe — o schema exige <dest> com
+        // um documento (CNPJ ou CPF) e vNF/vICMS/vST DENTRO de <dest> (não soltos no
+        // nível de detEvento). Faltar o documento ou colocar os valores fora de <dest>
+        // causa "215 - Rejeição: Falha no schema XML" (confirmado ao vivo em produção,
+        // pedido 2000018139210232). Extrai do próprio XML assinado da NFe (nfe.xml) em
+        // vez de reconstruir — garante consistência com o que foi de fato emitido.
+        const dest = this.extractEpecDestFromNFeXml(signedXml);
+
+        const destDocXml = dest.cnpj ? `<CNPJ>${dest.cnpj}</CNPJ>` : `<CPF>${dest.cpf}</CPF>`;
+        const destIeXml = dest.ie ? `<IE>${dest.ie}</IE>` : '';
+        const destXml = `<dest><UF>${dest.uf}</UF>${destDocXml}${destIeXml}<vNF>${dest.vNF}</vNF><vICMS>${dest.vICMS}</vICMS><vST>${dest.vST}</vST></dest>`;
+
+        const eventoXml = `<envEvento versao="1.00" xmlns="http://www.portalfiscal.inf.br/nfe"><idLote>${idLote}</idLote><evento versao="1.00"><infEvento Id="${idEvento}"><cOrgao>${ORGAO_AMBIENTE_NACIONAL}</cOrgao><tpAmb>${tpAmb}</tpAmb><CNPJ>${cnpj}</CNPJ><chNFe>${chNFe}</chNFe><dhEvento>${dhEvento}</dhEvento><tpEvento>110140</tpEvento><nSeqEvento>1</nSeqEvento><verEvento>1.00</verEvento><detEvento versao="1.00"><descEvento>EPEC</descEvento><cOrgaoAutor>${cUF}</cOrgaoAutor><tpAutor>1</tpAutor><verAplic>Rocket 1.0</verAplic><dhEmi>${dhEvento}</dhEmi><tpNF>1</tpNF><IE>${issuer.ie.replace(/\D/g, '')}</IE>${destXml}</detEvento></infEvento></evento></envEvento>`;
 
         let pfxBase64 = issuer.certificatePfx;
         if (pfxBase64.includes('base64,')) pfxBase64 = pfxBase64.split('base64,')[1];
@@ -539,6 +563,39 @@ export class SefazService {
             this.logger.error(`SVC EPEC Error: ${error.message}`);
             throw error;
         }
+    }
+
+    /**
+     * Extrai dest (CNPJ/CPF/IE/UF) e total/ICMSTot (vNF/vICMS/vST) do XML já assinado
+     * da NFe original — usados para montar o <dest> do evento EPEC, que o schema exige
+     * completo (documento do destinatário obrigatório, valores dentro de <dest>).
+     */
+    private extractEpecDestFromNFeXml(nfeXml: string): {
+        cnpj?: string; cpf?: string; ie?: string; uf: string; vNF: string; vICMS: string; vST: string;
+    } {
+        const parsed = this.nfeXmlParser.parse(nfeXml);
+        const infNFe = parsed?.nfeProc?.NFe?.infNFe ?? parsed?.NFe?.infNFe ?? parsed?.infNFe;
+        const dest = infNFe?.dest;
+        const icmsTot = infNFe?.total?.ICMSTot;
+        if (!dest || !icmsTot) {
+            throw new Error('Não foi possível extrair dest/total do XML da NFe para montar o EPEC.');
+        }
+
+        const cnpj: string | undefined = dest.CNPJ ? String(dest.CNPJ).replace(/\D/g, '') : undefined;
+        const cpf: string | undefined = !cnpj && dest.CPF ? String(dest.CPF).replace(/\D/g, '') : undefined;
+        if (!cnpj && !cpf) {
+            throw new Error('NFe sem CNPJ/CPF do destinatário — não é possível montar o EPEC.');
+        }
+
+        return {
+            cnpj,
+            cpf,
+            ie: dest.IE ? String(dest.IE).replace(/\D/g, '') : undefined,
+            uf: dest.enderDest?.UF ?? dest.UF ?? '',
+            vNF: String(icmsTot.vNF ?? '0.00'),
+            vICMS: String(icmsTot.vICMS ?? '0.00'),
+            vST: String(icmsTot.vST ?? '0.00'),
+        };
     }
 
     private escapeXml(text: string): string {

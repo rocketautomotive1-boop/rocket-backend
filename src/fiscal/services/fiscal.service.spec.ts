@@ -543,6 +543,15 @@ describe('FiscalService — environment on new NFe', () => {
       expect(legalEntityDoc.contingencyMode).toBe(true);
       expect(sefazService.transmitEpec).toHaveBeenCalledTimes(1);
       expect(result.status).toBe('AUTHORIZED_CONTINGENCY');
+
+      // signedXml precisa ser passado explicitamente — nfe.xml só é setado DEPOIS do
+      // resultado da transmissão (nfe.save() mais abaixo em emitNFe), estaria
+      // vazio/desatualizado se transmitEpec/sefaz.service.ts lesse nfe.xml direto do
+      // documento nesse ponto. Bug real corrigido nesta sessão (causava "215 - Falha
+      // no schema XML": dest do EPEC ficava sem CNPJ/CPF do comprador).
+      const [, , signedXmlArg] = sefazService.transmitEpec.mock.calls[0];
+      expect(typeof signedXmlArg).toBe('string');
+      expect(signedXmlArg.length).toBeGreaterThan(0);
     });
 
     it('zera o contador de falhas após uma transmissão normal bem-sucedida', async () => {
