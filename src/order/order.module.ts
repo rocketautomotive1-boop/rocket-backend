@@ -45,6 +45,7 @@ import { OrderMetricsService } from './observability/order-metrics.service';
 import { OrderLabelService } from './services/order-label.service';
 import { OrderMessagingService } from './services/order-messaging.service';
 import { OrderMarketplaceDetailsService } from './services/order-marketplace-details.service';
+import { ShippingSubstatusTranslatorService } from './services/shipping-substatus-translator.service';
 
 // Pricing (unchanged — already strategy-based)
 import { OrderPricingService } from './services/order-pricing.service';
@@ -107,6 +108,7 @@ import { WhatsAppModule } from '../whatsapp/whatsapp.module';
         OrderLabelService,
         OrderMessagingService,
         OrderMarketplaceDetailsService,
+        ShippingSubstatusTranslatorService,
         // pricing
         GenericPricingCalculator,
         MercadoLivrePricingCalculator,

@@ -9,6 +9,7 @@ import { ShopeeSignerService } from '../../marketplace/adapters/shopee/shopee-si
 import { MarketplaceOrderService } from '../../marketplace/services/marketplace-order.service';
 import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
 import { MlHttpClient } from '../../marketplace/adapters/mercado-livre/ml-http-client';
+import { ShippingSubstatusTranslatorService } from './shipping-substatus-translator.service';
 
 // ── Shared types ────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,8 @@ export interface MarketplaceOrderDetails {
         id?: string;
         status?: string;
         substatus?: string;
+        /** substatus traduzido PT-BR, pronto para exibição */
+        substatusLabel?: string;
         trackingCode?: string;
         trackingMethod?: string;
         carrier?: string;
@@ -58,7 +61,7 @@ export interface MarketplaceOrderDetails {
             compensation?: number;
         };
         /** Substatus timeline */
-        substatusHistory?: { date: string; substatus: string; status: string }[];
+        substatusHistory?: { date: string; substatus: string; substatusLabel: string; status: string }[];
         dimensions?: { height?: number; width?: number; length?: number; weight?: number };
     };
     payment?: {
@@ -170,6 +173,7 @@ export class OrderMarketplaceDetailsService {
         private readonly auth: MarketplaceAuthService,
         private readonly signer: ShopeeSignerService,
         private readonly mlHttp: MlHttpClient,
+        private readonly substatusTranslator: ShippingSubstatusTranslatorService,
     ) {}
 
     async getDetails(orderId: string): Promise<MarketplaceOrderDetails> {
@@ -550,6 +554,7 @@ export class OrderMarketplaceDetailsService {
                     id: String(shipment.id || shipmentDetails.id || ''),
                     status: shipmentDetails.status || shipment.status || '',
                     substatus: shipmentDetails.substatus || '',
+                    substatusLabel: this.substatusTranslator.translate('mercadolivre', shipmentDetails.substatus) || '',
                     trackingCode: shipmentDetails.tracking_number || shipment.tracking_number || order.trackingCode || '',
                     trackingMethod: shipmentDetails.tracking_method || '',
                     carrier: shipmentDetails.shipping_option?.name || String(shipmentDetails.service_id || ''),
@@ -570,9 +575,10 @@ export class OrderMarketplaceDetailsService {
                         compensation:    shipmentDetails.cost_components.compensation ?? 0,
                     } : undefined,
                     substatusHistory: (shipmentDetails.substatus_history || []).map((h: any) => ({
-                        date:      h.date      || '',
-                        substatus: h.substatus || '',
-                        status:    h.status    || '',
+                        date:           h.date      || '',
+                        substatus:      h.substatus || '',
+                        substatusLabel: this.substatusTranslator.translate('mercadolivre', h.substatus) || h.substatus || '',
+                        status:         h.status    || '',
                     })),
                     dimensions: shipmentDetails.dimensions ? {
                         height: shipmentDetails.dimensions.height,
