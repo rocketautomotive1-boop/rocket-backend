@@ -180,13 +180,16 @@ describe('OrderReconciler (end-to-end)', () => {
   });
 
   it('não re-ingere pedido já presente com mesmo status (idempotente) e marca run limpo', async () => {
-    // Pedido já existe localmente, em dia.
+    // Pedido já existe localmente, em dia — shipping.substatus terminal, senão
+    // isShippingPossiblyStale() sempre dispara needsShippingRefresh (ver
+    // order-reconciler.service.ts) e o cenário deixa de testar idempotência de verdade.
     await repo.create({
       externalId: 'ORDER-OK',
       marketplaceId: MKT,
       status: 'paid',
       totalAmount: 50,
       logisticsStatus: 'deducted',
+      shipping: { substatus: 'delivered' },
       items: [],
     });
     gateway.listOrdersSince.mockResolvedValue([
