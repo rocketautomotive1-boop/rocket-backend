@@ -182,10 +182,10 @@ export class ProductModel {
     @Prop({ required: true, index: true })
     name: string;
 
-    // Dono do produto (quem cadastrou) — usado para resolver a loja/grupo de
-    // publicação em runtime (createdByUserId → user.groupId → conta por
-    // marketplace). Ver GroupModel e
-    // docs/superpowers/specs/2026-08-10-multi-account-publishing-by-group-design.md.
+    // Quem cadastrou o produto. Legado: não participa mais da resolução de
+    // loja/conta de publicação — essa resolução usa Listing.storeId (ver
+    // InternalProductController.getListings). Mantido só como metadado
+    // histórico (0,01% dos produtos em produção o têm preenchido).
     @Prop({ type: SchemaTypes.ObjectId, required: false })
     createdByUserId?: Types.ObjectId;
 
