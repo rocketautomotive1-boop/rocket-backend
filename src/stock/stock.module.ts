@@ -6,12 +6,15 @@ import { StockBalanceModel, StockBalanceSchema } from './schemas/stock-balance.s
 import { StockRepository } from './stock.repository';
 import { StockService } from './stock.service';
 import { StockQueryService } from './stock-query.service';
+import { StoreListingStockQueryService } from './store-listing-stock-query.service';
 import { StockReconcilerService } from './stock-reconciler.service';
 import { StockLedgerProvider } from './stock-ledger.provider';
 import { StockController } from './stock.controller';
 import { STOCK_QUERY_PORT } from './ports/stock-query.port';
 import { STOCK_LEDGER_PORT } from '../order/ports/stock-ledger.port';
 import { StoreListingModule } from '../store-listing/store-listing.module';
+import { StoreListingStockBalanceModel, StoreListingStockBalanceSchema } from '../store-listing/schemas/store-listing-stock-balance.schema';
+import { StoreListingStockMovementModel, StoreListingStockMovementSchema } from '../store-listing/schemas/store-listing-stock-movement.schema';
 import { AuthModule } from '../auth/auth.module';
 
 /**
@@ -32,6 +35,16 @@ import { AuthModule } from '../auth/auth.module';
  * mas já é importado por StockModule (dual-write acima) — um import de volta criaria ciclo
  * real. @Global evita isso sem forwardRef: StoreListingModule injeta o port sem importar o
  * módulo.
+ *
+ * Contract (sub-projeto 4, 2026-08-28): STOCK_QUERY_PORT aponta para
+ * StoreListingStockQueryService (lê StoreListing, resolvendo a loja dona do produto via
+ * STORE_LISTING_PORT.findAnyByProduct — mesma regra que o pipeline de pedidos já usa), não mais
+ * para StockQueryService (legado, stock_balances). StockQueryService continua registrado até a
+ * remoção completa do legado (schemas/repository/reconciler) — ver
+ * docs/superpowers/specs/2026-08-28-stock-contract-legacy-cutover-design.md. Os schemas de
+ * StoreListing precisam de forFeature próprio aqui: Mongoose exige registro por módulo mesmo
+ * quando a collection já está registrada em outro (StoreListingModule só exporta o port, não os
+ * models).
  */
 @Global()
 @Module({
@@ -40,6 +53,8 @@ import { AuthModule } from '../auth/auth.module';
       { name: StockMovementModel.name, schema: StockMovementSchema },
       { name: StockLotModel.name, schema: StockLotSchema },
       { name: StockBalanceModel.name, schema: StockBalanceSchema },
+      { name: StoreListingStockBalanceModel.name, schema: StoreListingStockBalanceSchema },
+      { name: StoreListingStockMovementModel.name, schema: StoreListingStockMovementSchema },
     ]),
     StoreListingModule,
     AuthModule,
@@ -49,9 +64,10 @@ import { AuthModule } from '../auth/auth.module';
     StockRepository,
     StockService,
     StockQueryService,
+    StoreListingStockQueryService,
     StockReconcilerService,
     StockLedgerProvider,
-    { provide: STOCK_QUERY_PORT, useExisting: StockQueryService },
+    { provide: STOCK_QUERY_PORT, useExisting: StoreListingStockQueryService },
     { provide: STOCK_LEDGER_PORT, useExisting: StockLedgerProvider },
   ],
   exports: [STOCK_QUERY_PORT, STOCK_LEDGER_PORT, StockService, StockQueryService],

@@ -4,18 +4,19 @@ import { StockLedgerPort, StockItem } from '../order/ports/stock-ledger.port';
 import { StockService } from './stock.service';
 import { StockMovementType } from './domain/movement-type';
 import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
-import { STORE_PORT, StorePort } from '../store/ports/store.port';
 
 /**
  * The canonical implementation of the order's StockLedgerPort, now living in the StockModule.
  * Maps the order-facing contract onto StockService.move(). The order pipeline is untouched —
  * it keeps depending on the port.
  *
- * Fase 4: Order não tem noção de loja própria ainda (fica pra quando Order.items[].storeListingId
- * for preenchido, fora de escopo aqui) — resolve a loja dona de cada item via o StoreListing já
- * existente do produto (hoje um produto tem no máximo um StoreListing, então isso é
- * inequívoco). Fallback "Rocket Automotive" só se o produto não tiver NENHUM StoreListing ainda
- * (produto nunca visto pelas coleções novas) — mesmo critério do backfill da Fase 2.
+ * Fase 4/Contract: Order não tem noção de loja própria ainda (fica pra quando
+ * Order.items[].storeListingId for preenchido, fora de escopo aqui) — resolve a loja dona de cada
+ * item via o StoreListing já existente do produto (hoje um produto tem no máximo um StoreListing,
+ * então isso é inequívoco). SEM fallback pra loja padrão (removido em 2026-08-28, ver
+ * docs/superpowers/specs/2026-08-28-stock-contract-legacy-cutover-design.md): produto sem NENHUM
+ * StoreListing bloqueia a dedução daquele item explicitamente, mesmo princípio já aplicado ao
+ * roteamento de publish (accountId ausente bloqueia, nunca adivinha a loja).
  */
 @Injectable()
 export class StockLedgerProvider implements StockLedgerPort {
@@ -24,14 +25,11 @@ export class StockLedgerProvider implements StockLedgerPort {
   constructor(
     private readonly stock: StockService,
     @Inject(STORE_LISTING_PORT) private readonly storeListingPort: StoreListingPort,
-    @Inject(STORE_PORT) private readonly storePort: StorePort,
   ) {}
 
   private async resolveStoreId(productId: string): Promise<string | null> {
     const existing = await this.storeListingPort.findAnyByProduct(productId);
-    if (existing) return existing.storeId.toString();
-    const fallback = await this.storePort.findByName('Rocket Automotive');
-    return fallback?.id ?? null;
+    return existing ? existing.storeId.toString() : null;
   }
 
   async deductAndLink(
