@@ -103,9 +103,9 @@ describe('StoreListingStockQueryService', () => {
   });
 
   describe('getAvailableBulk', () => {
-    it('joins store_listings to balances and returns available (onHand - reserved) per productId', async () => {
+    it('starts from store_listings (filtered by productId) and returns available (onHand - reserved) per productId', async () => {
       const P2 = new Types.ObjectId().toHexString();
-      balanceModel.aggregate.mockResolvedValue([
+      storeListingModel.aggregate.mockResolvedValue([
         { _id: PRODUCT_A, onHand: 10, reserved: 2 },
         { _id: P2, onHand: 3, reserved: 3 },
       ]);
@@ -114,12 +114,14 @@ describe('StoreListingStockQueryService', () => {
 
       expect(result.get(PRODUCT_A)).toBe(8);
       expect(result.get(P2)).toBe(0);
+      const pipeline = storeListingModel.aggregate.mock.calls[0][0];
+      expect(pipeline[0]).toEqual({ $match: { productId: { $in: [new Types.ObjectId(PRODUCT_A), new Types.ObjectId(P2)] } } });
     });
 
     it('returns an empty map for an empty input', async () => {
       const result = await service.getAvailableBulk([]);
       expect(result.size).toBe(0);
-      expect(balanceModel.aggregate).not.toHaveBeenCalled();
+      expect(storeListingModel.aggregate).not.toHaveBeenCalled();
     });
   });
 

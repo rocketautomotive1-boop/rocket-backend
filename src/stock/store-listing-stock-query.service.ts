@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
+import { StoreListingModel, StoreListingDocument } from '../store-listing/schemas/store-listing.schema';
 import { StoreListingStockBalanceModel, StoreListingStockBalanceDocument } from '../store-listing/schemas/store-listing-stock-balance.schema';
 import { StoreListingStockMovementModel, StoreListingStockMovementDocument } from '../store-listing/schemas/store-listing-stock-movement.schema';
 import { StockQueryPort, ProductStockSummary, ConditionBalance, LocationBalance } from './ports/stock-query.port';
@@ -21,6 +22,8 @@ import { StockQueryPort, ProductStockSummary, ConditionBalance, LocationBalance 
 export class StoreListingStockQueryService implements StockQueryPort {
   constructor(
     @Inject(STORE_LISTING_PORT) private readonly storeListingPort: StoreListingPort,
+    @InjectModel(StoreListingModel.name)
+    private readonly storeListingModel: Model<StoreListingDocument>,
     @InjectModel(StoreListingStockBalanceModel.name)
     private readonly balanceModel: Model<StoreListingStockBalanceDocument>,
     @InjectModel(StoreListingStockMovementModel.name)
@@ -50,11 +53,21 @@ export class StoreListingStockQueryService implements StockQueryPort {
     const map = new Map<string, number>();
     if (!productIds.length) return map;
     const ids = productIds.map((id) => new Types.ObjectId(id));
-    const rows = await this.balanceModel.aggregate([
-      { $lookup: { from: 'store_listings', localField: 'storeListingId', foreignField: '_id', as: 'sl' } },
-      { $unwind: '$sl' },
-      { $match: { 'sl.productId': { $in: ids } } },
-      { $group: { _id: '$sl.productId', onHand: { $sum: '$onHand' }, reserved: { $sum: '$reserved' } } },
+    // Starts from store_listings (filtered by productId — small, indexed) and looks up into
+    // store_listing_stock_balances from there, instead of the other way around: a $lookup
+    // rooted in the balances collection would join every balance document before filtering,
+    // scanning the whole collection on every paginated search request.
+    const rows = await this.storeListingModel.aggregate([
+      { $match: { productId: { $in: ids } } },
+      { $lookup: { from: 'store_listing_stock_balances', localField: '_id', foreignField: 'storeListingId', as: 'balances' } },
+      { $unwind: '$balances' },
+      {
+        $group: {
+          _id: '$productId',
+          onHand: { $sum: '$balances.onHand' },
+          reserved: { $sum: '$balances.reserved' },
+        },
+      },
     ]);
     for (const r of rows) map.set(String(r._id), r.onHand - r.reserved);
     return map;

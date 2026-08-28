@@ -13,6 +13,7 @@ import { StockController } from './stock.controller';
 import { STOCK_QUERY_PORT } from './ports/stock-query.port';
 import { STOCK_LEDGER_PORT } from '../order/ports/stock-ledger.port';
 import { StoreListingModule } from '../store-listing/store-listing.module';
+import { StoreListingModel, StoreListingSchema } from '../store-listing/schemas/store-listing.schema';
 import { StoreListingStockBalanceModel, StoreListingStockBalanceSchema } from '../store-listing/schemas/store-listing-stock-balance.schema';
 import { StoreListingStockMovementModel, StoreListingStockMovementSchema } from '../store-listing/schemas/store-listing-stock-movement.schema';
 import { AuthModule } from '../auth/auth.module';
@@ -53,6 +54,7 @@ import { AuthModule } from '../auth/auth.module';
       { name: StockMovementModel.name, schema: StockMovementSchema },
       { name: StockLotModel.name, schema: StockLotSchema },
       { name: StockBalanceModel.name, schema: StockBalanceSchema },
+      { name: StoreListingModel.name, schema: StoreListingSchema },
       { name: StoreListingStockBalanceModel.name, schema: StoreListingStockBalanceSchema },
       { name: StoreListingStockMovementModel.name, schema: StoreListingStockMovementSchema },
     ]),
