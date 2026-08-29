@@ -18,7 +18,7 @@ import { ProductTitle } from './schemas/product.schema';
 import { ProductTitleService } from './services/product-title.service';
 import { ProductDiscoveryService } from './services/product-discovery.service';
 import { SourceRefreshService } from './services/source-refresh.service';
-import { parseSourceName } from './dto/source-refresh.dto';
+import { parseSourceName, DiscoverySourcesToggleSchema, DiscoverySourcesToggle } from './dto/source-refresh.dto';
 import { ZodError } from 'zod';
 import { CategorySnapshotService } from './services/category-snapshot.service';
 import { CreateFromDiscoveryDto } from './dto/create-from-discovery.dto';
@@ -65,7 +65,7 @@ export class ProductController {
   @Post('pre-register')
   @ApiOperation({ summary: 'Pré-cadastro: cria produto draft e dispara discovery' })
   async preRegister(
-    @Body() body: { partNumber: string; brandId: string },
+    @Body() body: { partNumber: string; brandId: string; sources?: DiscoverySourcesToggle },
     @Req() req: any,
   ): Promise<{ productId: string; status: string; jobId: string | null }> {
     if (!body.partNumber?.trim()) throw new BadRequestException('partNumber is required');
@@ -83,6 +83,7 @@ export class ProductController {
     );
 
     const productId = String((product as any).id ?? (product as any)._id);
+    const sources = DiscoverySourcesToggleSchema.parse(body.sources);
 
     let jobId: string | null = null;
     try {
@@ -90,6 +91,7 @@ export class ProductController {
         partNumber: body.partNumber.trim(),
         brand: (brand as any).name,
         productId,
+        sources,
       });
     } catch (e: any) {
       this.logger.warn(`[PreRegister] Discovery failed to start: ${e.message}`);
@@ -108,12 +110,14 @@ export class ProductController {
       productId?: string;
       brandId?: string;
       force?: boolean;
+      sources?: DiscoverySourcesToggle;
     },
   ) {
     const jobId = await this.discoveryService.startDiscovery({
       partNumber: body.partNumber,
       brand: body.brand,
-      productId: body.productId
+      productId: body.productId,
+      sources: DiscoverySourcesToggleSchema.parse(body.sources),
     });
 
     return { jobId };
@@ -126,12 +130,14 @@ export class ProductController {
       partNumber: string;
       brand?: string;
       productId?: string;
+      sources?: DiscoverySourcesToggle;
     },
   ) {
     const jobId = await this.discoveryService.startDiscovery({
       partNumber: body.partNumber,
       brand: body.brand,
       productId: body.productId,
+      sources: DiscoverySourcesToggleSchema.parse(body.sources),
     });
 
     return { jobId };

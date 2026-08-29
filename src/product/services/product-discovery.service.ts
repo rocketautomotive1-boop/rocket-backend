@@ -106,8 +106,9 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
         productId?: string;
         barcode?: string;
         domain?: string;
+        sources?: { serp?: boolean; mlScraper?: boolean; menorPreco?: boolean };
     }): Promise<string> {
-        const { brand, productId, barcode, domain } = params;
+        const { brand, productId, barcode, domain, sources } = params;
         const isGeneral = domain === 'general';
         // Itens gerais buscam por barcode (não têm partNumber). Usamos o barcode
         // como "partNumber" interno para reaproveitar dedup/intent/status sem
@@ -191,6 +192,7 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
                     // Roteamento por domínio no microserviço (autoparts/general).
                     domain: domain ?? 'autoparts',
                     barcode: isGeneral ? partNumber : barcode,
+                    sources,
                 });
                 this.logger.log(`Published message to RabbitMQ: ${published ? 'YES' : 'NO'}`);
             } catch (err: any) {
@@ -264,6 +266,7 @@ export class ProductDiscoveryService implements OnApplicationBootstrap {
                 query,
                 partNumber,
                 brand,
+                sources,
             });
             this.logger.log(`Published message to RabbitMQ: ${published ? 'YES' : 'NO'}`);
         } catch (err) {

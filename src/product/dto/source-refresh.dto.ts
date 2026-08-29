@@ -37,3 +37,11 @@ export interface SourceRefreshResponse {
   block: SourceBlock | null;
   error?: string;
 }
+
+/** Opt-out por fonte para o job inicial de discovery. Ausente = todas habilitadas. */
+export const DiscoverySourcesToggleSchema = z.object({
+  serp: z.boolean().optional(),
+  mlScraper: z.boolean().optional(),
+  menorPreco: z.boolean().optional(),
+}).optional();
+export type DiscoverySourcesToggle = z.infer<typeof DiscoverySourcesToggleSchema>;
