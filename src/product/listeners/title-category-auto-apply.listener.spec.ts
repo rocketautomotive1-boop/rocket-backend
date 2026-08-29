@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { TitleCategoryAutoApplyListener } from './title-category-auto-apply.listener';
 import { TitleCategoryHintService } from '../services/title-category-hint.service';
 import { ProductRepository } from '../product.repository';
@@ -10,6 +11,7 @@ describe('TitleCategoryAutoApplyListener', () => {
     let titleCategoryHintService: { suggestCategory: jest.Mock };
     let productRepository: { findByIdClean: jest.Mock };
     let productService: { updateCategory: jest.Mock };
+    let eventEmitter: { emit: jest.Mock };
 
     const productId = 'product-1';
     const titleId = 'title-1';
@@ -18,6 +20,7 @@ describe('TitleCategoryAutoApplyListener', () => {
         titleCategoryHintService = { suggestCategory: jest.fn() };
         productRepository = { findByIdClean: jest.fn() };
         productService = { updateCategory: jest.fn() };
+        eventEmitter = { emit: jest.fn() };
 
         const module = await Test.createTestingModule({
             providers: [
@@ -25,6 +28,7 @@ describe('TitleCategoryAutoApplyListener', () => {
                 { provide: TitleCategoryHintService, useValue: titleCategoryHintService },
                 { provide: ProductRepository, useValue: productRepository },
                 { provide: ProductService, useValue: productService },
+                { provide: EventEmitter2, useValue: eventEmitter },
             ],
         }).compile();
 
@@ -43,6 +47,28 @@ describe('TitleCategoryAutoApplyListener', () => {
 
         expect(titleCategoryHintService.suggestCategory).toHaveBeenCalledWith(titleId);
         expect(productService.updateCategory).toHaveBeenCalledWith(productId, { id: 'cat-1' });
+    });
+
+    it('notifica o frontend via category-snapshot.invalidate depois de aplicar a categoria', async () => {
+        productRepository.findByIdClean.mockResolvedValue({ _id: productId, category: undefined });
+        titleCategoryHintService.suggestCategory.mockResolvedValue({
+            categoryId: 'cat-1',
+            categoryName: 'Air Bags',
+            count: 3,
+        });
+
+        await listener.onTitleIdResolved(new ProductTitleIdResolvedEvent(productId, titleId));
+
+        expect(eventEmitter.emit).toHaveBeenCalledWith('category-snapshot.invalidate', { productId });
+    });
+
+    it('não emite category-snapshot.invalidate quando nenhuma categoria é aplicada', async () => {
+        productRepository.findByIdClean.mockResolvedValue({ _id: productId, category: undefined });
+        titleCategoryHintService.suggestCategory.mockResolvedValue(null);
+
+        await listener.onTitleIdResolved(new ProductTitleIdResolvedEvent(productId, titleId));
+
+        expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
     it('não faz nada quando o produto já tem category (nunca sobrescreve)', async () => {
