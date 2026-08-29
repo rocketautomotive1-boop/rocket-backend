@@ -2,14 +2,14 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ProductModel, ProductDocument } from '../../product/schemas/product.schema';
-import { StockMovementModel, StockMovementDocument } from '../../stock/schemas/stock-movement.schema';
+import { StoreListingStockMovementModel, StoreListingStockMovementDocument } from '../../store-listing/schemas/store-listing-stock-movement.schema';
 import { ListingModel, ListingDocument } from '../../listing/schemas/listing.schema';
 
 @Injectable()
 export class StatsService {
     constructor(
         @InjectModel(ProductModel.name) private productModel: Model<ProductDocument>,
-        @InjectModel(StockMovementModel.name) private stockMovementModel: Model<StockMovementDocument>,
+        @InjectModel(StoreListingStockMovementModel.name) private stockMovementModel: Model<StoreListingStockMovementDocument>,
         @InjectModel(ListingModel.name) private listingModel: Model<ListingDocument>,
         @InjectModel('AllocationModel') private allocationModel: Model<any>,
     ) { }
@@ -20,7 +20,10 @@ export class StatsService {
      * Fluxo:
      *  1. Busca alocações que correspondem aos filtros de metadata
      *  2. Extrai todos os productIds das caixas (boxes) dessas alocações
-     *  3. Agrega movimentações de estoque desses produtos: totalValue = sum(price * quantity)
+     *  3. Agrega movimentações de estoque (store_listing_stock_movements, via lookup em
+     *     store_listings para resolver productId a partir de storeListingId) desses produtos:
+     *     totalValue = sum(metadata.salePrice * quantity) — preço de venda vigente no momento
+     *     do movimento, nunca unitCost (custo do lote).
      */
     async getInventoryValueByAllocation(filters: Record<string, any>) {
         try {
@@ -54,19 +57,19 @@ export class StatsService {
             }
 
             const productIds = Array.from(productIdSet).map(id => new Types.ObjectId(id));
-            console.log(productIds)
 
             if (productIds.length === 0) {
                 return { totalValue: 0, totalQuantity: 0, productCount: 0 };
             }
 
             // --- 3. Agregar movimentações para esses produtos ---
-            // Nota: no banco, o campo é "product" (ObjectId), não "productId"
             const result = await this.stockMovementModel.aggregate([
+                { $lookup: { from: 'store_listings', localField: 'storeListingId', foreignField: '_id', as: 'sl' } },
+                { $unwind: '$sl' },
                 {
                     $match: {
-                        productId: { $in: productIds },
-                        price: { $exists: true },
+                        'sl.productId': { $in: productIds },
+                        'metadata.salePrice': { $exists: true },
                     }
                 },
                 {
@@ -74,11 +77,11 @@ export class StatsService {
                         _id: null,
                         totalValue: {
                             $sum: {
-                                $multiply: ['$quantity', { $toDouble: { $ifNull: ['$price', 0] } }]
+                                $multiply: ['$quantity', { $toDouble: { $ifNull: ['$metadata.salePrice', 0] } }]
                             }
                         },
                         totalQuantity: { $sum: '$quantity' },
-                        products: { $addToSet: '$productId' }
+                        products: { $addToSet: '$sl.productId' }
                     }
                 },
                 {
@@ -251,8 +254,8 @@ export class StatsService {
             }
 
             const matchStage: any = {
-                productId: { $in: productIds },
-                price: { $exists: true },
+                'sl.productId': { $in: productIds },
+                'metadata.salePrice': { $exists: true },
             };
 
             if (dateFilter) {
@@ -260,6 +263,8 @@ export class StatsService {
             }
 
             const result = await this.stockMovementModel.aggregate([
+                { $lookup: { from: 'store_listings', localField: 'storeListingId', foreignField: '_id', as: 'sl' } },
+                { $unwind: '$sl' },
                 { $match: matchStage },
                 {
                     $group: {
@@ -268,8 +273,8 @@ export class StatsService {
                             $sum: {
                                 $cond: [
                                     { $eq: ['$type', 'inbound'] },
-                                    { $multiply: ['$quantity', { $toDouble: '$price' }] },
-                                    { $multiply: [{ $multiply: ['$quantity', -1] }, { $toDouble: '$price' }] }
+                                    { $multiply: ['$quantity', { $toDouble: '$metadata.salePrice' }] },
+                                    { $multiply: [{ $multiply: ['$quantity', -1] }, { $toDouble: '$metadata.salePrice' }] }
                                 ]
                             }
                         },
@@ -282,7 +287,7 @@ export class StatsService {
                                 ]
                             }
                         },
-                        products: { $addToSet: '$productId' }
+                        products: { $addToSet: '$sl.productId' }
                     }
                 },
                 {

@@ -1,56 +1,33 @@
 import { Inject, Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { ClientSession, Types } from 'mongoose';
-import { StockRepository } from './stock.repository';
+import { InjectConnection } from '@nestjs/mongoose';
+import { ClientSession, Connection } from 'mongoose';
 import { StockMoveInput, StockMoveSchema } from './dto/stock-move.dto';
 import { StockMovementType } from './domain/movement-type';
 import { computeBalanceDelta } from './domain/balance.calculator';
 import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
 
 /**
- * The single entry point for ALL stock changes.
- *
- * Contract (sub-projeto 4, escrita — 2026-08-29): store_listing_stock_* é a fonte PRIMÁRIA.
- * move() grava ali dentro de uma transação real (idempotência, resolução/criação de lote,
- * atualização de saldo), e espelha pro legado (stock_balances/stock_lots/stock_movements)
- * DEPOIS, fire-and-log — nunca bloqueia, nunca falha o move(). Inverte a direção da Fase 3/4
- * original (legado primário, StoreListing espelho) — ver
+ * The single entry point for ALL stock changes. store_listing_stock_* (StoreListing) é a única
+ * fonte de verdade — Contract completo (2026-08-29): o legado (stock_balances/stock_lots/
+ * stock_movements) foi removido após validação em produção do dual-write invertido. Ver
+ * docs/superpowers/specs/2026-08-28-stock-contract-legacy-cutover-design.md e
  * docs/superpowers/specs/2026-08-29-stock-write-cutover-design.md.
- *
- * Quando dado um externalSession (o chamador é dono da transação — ex. OrderSyncPipeline via
- * StockLedgerProvider.deductAndLink), a escrita primária (StoreListing) participa dessa mesma
- * transação — não pode ser pulada, é a escrita real. Só o mirror pro legado é pulado nesse caso
- * (espelhar antes do commit real do chamador seria espelhar algo que pode nunca commitar); o
- * chamador é responsável por disparar o mirror ele mesmo pós-commit (mirrorMoveToLegacy).
  */
 @Injectable()
 export class StockService {
   private readonly logger = new Logger(StockService.name);
 
   constructor(
-    private readonly repo: StockRepository,
+    @InjectConnection() private readonly connection: Connection,
     @Inject(STORE_LISTING_PORT)
     private readonly storeListingPort: StoreListingPort,
   ) {}
 
   async move(input: StockMoveInput, externalSession?: ClientSession): Promise<{ movementId: string; lotId: string }> {
-    let result: { movementId: string; lotId: string };
-
     if (externalSession) {
-      result = await this.moveOnce(input, externalSession);
-    } else {
-      result = await this.moveWithRetry(input);
+      return this.moveOnce(input, externalSession);
     }
-
-    // Espelha no legado DEPOIS que a escrita primária já terminou (commit incluído) — nunca
-    // antes, nunca dentro da mesma transação (ver mirrorMoveToLegacy). Sentinela {'', ''} =
-    // moveOnce abortou por idempotência (reference duplicada): não houve escrita real, então
-    // não há o que espelhar.
-    if (!externalSession && (result.movementId !== '' || result.lotId !== '')) {
-      const dto = StockMoveSchema.parse(input);
-      await this.mirrorMoveToLegacy(dto);
-    }
-
-    return result;
+    return this.moveWithRetry(input);
   }
 
   private async moveWithRetry(input: StockMoveInput): Promise<{ movementId: string; lotId: string }> {
@@ -67,71 +44,10 @@ export class StockService {
     throw new Error('unreachable');
   }
 
-  /**
-   * Fire-and-log mirror para stock_balances/stock_lots/stock_movements (legado) — NUNCA bloqueia
-   * nem falha move(). Não usa a session da transação primária: se o espelho abortasse depois,
-   * reverteria uma escrita primária que já "aconteceu" do ponto de vista do chamador.
-   */
-  async mirrorMoveToLegacy(dto: StockMoveInput): Promise<void> {
-    try {
-      const productId = new Types.ObjectId(dto.productId);
-      const storeId = new Types.ObjectId(dto.storeId);
-      const unitCost = Types.Decimal128.fromString(String(dto.unitCost ?? 0));
-      const lot = await this.repo.findOrCreateLot(productId, dto.condition, unitCost);
-
-      const appendOne = async (
-        type: StockMovementType,
-        quantity: number,
-        fromBoxId?: string,
-        toBoxId?: string,
-        withReference = true,
-      ) => {
-        await this.repo.appendMovement({
-          lotId: lot._id,
-          productId,
-          storeId,
-          type,
-          quantity,
-          unitCost,
-          condition: dto.condition,
-          fromBoxId: fromBoxId ? new Types.ObjectId(fromBoxId) : undefined,
-          toBoxId: toBoxId ? new Types.ObjectId(toBoxId) : undefined,
-          orderId: dto.orderId ? new Types.ObjectId(dto.orderId) : undefined,
-          reason: dto.reason,
-          origin: dto.origin ? { type: dto.origin.type, location: dto.origin.location } : undefined,
-          metadata:
-            withReference && (dto.reference != null || dto.salePrice != null)
-              ? {
-                  ...(dto.reference != null ? { externalReference: dto.reference } : {}),
-                  ...(dto.salePrice != null ? { salePrice: dto.salePrice } : {}),
-                }
-              : undefined,
-        });
-        const delta = computeBalanceDelta(type, quantity);
-        const boxId = toBoxId ? new Types.ObjectId(toBoxId) : fromBoxId ? new Types.ObjectId(fromBoxId) : null;
-        await this.repo.applyBalanceDelta(lot._id, productId, dto.condition, boxId, delta.onHand, delta.reserved);
-      };
-
-      if (dto.type === StockMovementType.TRANSFER) {
-        // Mesmo tratamento que a escrita primária: TRANSFER vira dois ADJUSTMENT assinados
-        // (débito no fromBoxId, crédito no toBoxId) — ver moveOnce. reference só na segunda
-        // perna: gravar nas duas colidiria no índice único de idempotência (mesma reference
-        // duas vezes para o mesmo produto/tipo).
-        await appendOne(StockMovementType.ADJUSTMENT, -dto.quantity, dto.fromBoxId, undefined, false);
-        await appendOne(StockMovementType.ADJUSTMENT, dto.quantity, undefined, dto.toBoxId, true);
-        return;
-      }
-
-      await appendOne(dto.type, dto.quantity, dto.fromBoxId, dto.toBoxId);
-    } catch (err: any) {
-      this.logger.error(`[mirror-to-legacy] falha ao espelhar movimento do produto ${dto.productId}: ${err?.message}`);
-    }
-  }
-
   private async moveOnce(input: StockMoveInput, externalSession?: ClientSession): Promise<{ movementId: string; lotId: string }> {
     const dto = StockMoveSchema.parse(input);
 
-    const session = externalSession ?? (await this.repo.getConnection().startSession());
+    const session = externalSession ?? (await this.connection.startSession());
     const ownSession = !externalSession;
     if (ownSession) session.startTransaction();
 

@@ -3,16 +3,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { MongooseModule, getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Connection, Types, Model } from 'mongoose';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
-import { StockMovementModel, StockMovementSchema } from './schemas/stock-movement.schema';
-import { StockLotModel, StockLotSchema } from './schemas/stock-lot.schema';
-import { StockBalanceModel, StockBalanceSchema } from './schemas/stock-balance.schema';
-import { StockRepository } from './stock.repository';
 import { StockService } from './stock.service';
-import { StockQueryService } from './stock-query.service';
 import { StoreListingStockQueryService } from './store-listing-stock-query.service';
 import { StockMovementType } from './domain/movement-type';
 import { StoreListingModule } from '../store-listing/store-listing.module';
-import { STORE_LISTING_PORT } from '../store-listing/ports/store-listing.port';
 import { STOCK_QUERY_PORT } from './ports/stock-query.port';
 import { PRICING_PORT } from '../pricing/ports/pricing.port';
 import { StoreListingStockMovementModel, StoreListingStockMovementSchema } from '../store-listing/schemas/store-listing-stock-movement.schema';
@@ -39,18 +33,14 @@ import { MarketplaceListingModel } from '../store-listing/schemas/marketplace-li
 class MockStockPricingModule {}
 
 /**
- * Contract (2026-08-29): StoreListing é a fonte PRIMÁRIA de escrita — move()/adjust()/
- * reverseMovement()/editMovementViaAdjustment() gravam primeiro em store_listing_stock_* (dentro
- * da transação real), e espelham pro legado (stock_balances/stock_lots/stock_movements)
- * pós-commit, fire-and-log. Testes abaixo invertem a direção dos asserts em relação à versão
- * anterior (que testava o legado como primário e o StoreListing como espelho).
+ * Contract completo (2026-08-29): store_listing_stock_* é a única fonte de verdade — o legado
+ * (stock_balances/stock_lots/stock_movements) foi removido após validação em produção.
  */
-describe('StockService (integration) — StoreListing como fonte primária, legado como mirror', () => {
+describe('StockService (integration)', () => {
   let mongo: MongoMemoryReplSet;
   let mod: TestingModule;
   let svc: StockService;
   let query: StoreListingStockQueryService;
-  let repo: StockRepository;
   let storeListingModel: Model<any>;
   let marketplaceListingModel: Model<any>;
   let slMovementModel: Model<any>;
@@ -65,9 +55,6 @@ describe('StockService (integration) — StoreListing como fonte primária, lega
       imports: [
         MongooseModule.forRoot(mongo.getUri()),
         MongooseModule.forFeature([
-          { name: StockMovementModel.name, schema: StockMovementSchema },
-          { name: StockLotModel.name, schema: StockLotSchema },
-          { name: StockBalanceModel.name, schema: StockBalanceSchema },
           { name: StoreListingStockMovementModel.name, schema: StoreListingStockMovementSchema },
           { name: StoreListingStockBalanceModel.name, schema: StoreListingStockBalanceSchema },
           { name: StoreListingStockLotModel.name, schema: StoreListingStockLotSchema },
@@ -76,11 +63,10 @@ describe('StockService (integration) — StoreListing como fonte primária, lega
         MockStockPricingModule,
         StoreListingModule,
       ],
-      providers: [StockService, StockQueryService, StoreListingStockQueryService, StockRepository],
+      providers: [StockService, StoreListingStockQueryService],
     }).compile();
     svc = mod.get(StockService);
     query = mod.get(StoreListingStockQueryService);
-    repo = mod.get(StockRepository);
     storeListingModel = mod.get(getModelToken(StoreListingModel.name));
     marketplaceListingModel = mod.get(getModelToken(MarketplaceListingModel.name));
     slMovementModel = mod.get(getModelToken(StoreListingStockMovementModel.name));
@@ -88,11 +74,7 @@ describe('StockService (integration) — StoreListing como fonte primária, lega
     slLotModel = mod.get(getModelToken(StoreListingStockLotModel.name));
 
     // Pre-create collections + indexes. MongoDB cannot create a collection inside a
-    // multi-document transaction, so creating them lazily during the first move() would
-    // fail. In prod the migration/backfill creates them before any transactional write.
-    await repo.lotModel.createCollection();
-    await repo.balanceModel.createCollection();
-    await repo.movementModel.createCollection();
+    // multi-document transaction, so creating them lazily during the first move() would fail.
     await storeListingModel.createCollection();
     await marketplaceListingModel.createCollection();
     await slMovementModel.createCollection();
@@ -224,7 +206,7 @@ describe('StockService (integration) — StoreListing como fonte primária, lega
     expect(unlocatedRow).toBeUndefined();
   });
 
-  it('reverseMovement reads storeId from the original StoreListing movement — no fallback needed when it is present', async () => {
+  it('reverseMovement reads storeId from the original movement — no fallback needed when it is present', async () => {
     const P4B = '650000000000000000000cdf';
     const created = await svc.move({
       productId: P4B, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 3, condition: 'new', reference: 'box-delete-seed-2',
@@ -234,7 +216,7 @@ describe('StockService (integration) — StoreListing como fonte primária, lega
     await expect(svc.reverseMovement(created.movementId)).resolves.toBeDefined();
   });
 
-  it('reverseMovement throws when the movement id does not resolve to any StoreListing movement and no fallback is given', async () => {
+  it('reverseMovement throws when the movement id does not resolve to any movement and no fallback is given', async () => {
     await expect(svc.reverseMovement(new Types.ObjectId().toHexString())).rejects.toThrow(/não tem loja associada|not found/i);
   });
 
@@ -300,8 +282,8 @@ describe('StockService (integration) — StoreListing como fonte primária, lega
     ).resolves.toBeDefined();
   });
 
-  describe('move — mirror pós-commit pro legado (Contract: StoreListing é o primário agora)', () => {
-    it('writes a successful INBOUND move into store_listing_stock_* as the PRIMARY write, under the storeId passed by the caller', async () => {
+  describe('move — writes and transactions', () => {
+    it('writes a successful INBOUND move into store_listing_stock_*, under the storeId passed by the caller', async () => {
       const P = '650000000000000000010001';
       const result = await svc.move({ productId: P, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'dw-1' });
       expect(result.movementId).toBeTruthy();
@@ -316,27 +298,6 @@ describe('StockService (integration) — StoreListing como fonte primária, lega
 
       const stock = await query.getProductStock(P);
       expect(stock.onHand).toBe(5);
-    });
-
-    it('mirrors the same movement into the legacy collections (stock_balances/stock_lots/stock_movements)', async () => {
-      const P = '650000000000000000010012';
-      await svc.move({ productId: P, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'dw-legacy-1' });
-
-      const rows = await repo.balanceModel.find({ productId: new Types.ObjectId(P) });
-      expect(rows.reduce((s, r) => s + r.onHand, 0)).toBe(5);
-      const legacyCount = await repo.movementModel.countDocuments({ productId: new Types.ObjectId(P) });
-      expect(legacyCount).toBe(1);
-    });
-
-    it('does not fail move() when the legacy mirror side throws', async () => {
-      const P = '650000000000000000010002';
-      const spy = jest.spyOn(repo, 'findOrCreateLot').mockRejectedValueOnce(new Error('boom'));
-
-      await expect(
-        svc.move({ productId: P, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 3, condition: 'new', reference: 'dw-2' }),
-      ).resolves.toBeDefined();
-
-      spy.mockRestore();
     });
 
     it('two stores writing the same product get independent StoreListings/balances — no cross-store leakage', async () => {
@@ -358,7 +319,7 @@ describe('StockService (integration) — StoreListing como fonte primária, lega
       expect(balancesB.reduce((s: number, r: any) => s + r.onHand, 0)).toBe(9);
     });
 
-    it('mirrors a TRANSFER as two separate signed movements (debit + credit), not a zero-effect no-op', async () => {
+    it('writes a TRANSFER as two separate signed movements (debit + credit), not a zero-effect no-op', async () => {
       const P = '650000000000000000010004';
       const BOX_A = '650000000000000000030001';
       const BOX_B = '650000000000000000030002';
@@ -377,7 +338,7 @@ describe('StockService (integration) — StoreListing como fonte primária, lega
       expect(boxBRow?.onHand).toBe(6);
     });
 
-    it('does not create a second movement/mirror on duplicate reference (idempotency now checked against StoreListing)', async () => {
+    it('does not create a second movement on duplicate reference', async () => {
       const P = '650000000000000000010005';
       await svc.move({ productId: P, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'dw-5-dup' });
       await svc.move({ productId: P, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'dw-5-dup' });
@@ -387,9 +348,9 @@ describe('StockService (integration) — StoreListing como fonte primária, lega
       expect(movements.length).toBe(1);
     });
 
-    it('writes into StoreListing even when move() runs inside an externally-owned session (caller commits later) — this is the primary write, it cannot be skipped', async () => {
+    it('writes inside an externally-owned session (caller commits later) — this is the primary write, it cannot be skipped', async () => {
       const P = '650000000000000000010006';
-      const session = await repo.getConnection().startSession();
+      const session = await mod.get<Connection>(getConnectionToken()).startSession();
       session.startTransaction();
       try {
         const result = await svc.move(
@@ -405,15 +366,8 @@ describe('StockService (integration) — StoreListing como fonte primária, lega
         await session.endSession();
       }
 
-      // Primary write (StoreListing) succeeded inside the external transaction.
       const stock = await query.getProductStock(P);
       expect(stock.onHand).toBe(7);
-
-      // Legacy mirror is skipped when the session is externally owned — the caller
-      // (e.g. StockLedgerProvider) is responsible for calling mirrorMoveToLegacy itself
-      // post-commit (see stock-ledger.provider.spec.ts).
-      const legacyRows = await repo.balanceModel.find({ productId: new Types.ObjectId(P) });
-      expect(legacyRows.reduce((s, r) => s + r.onHand, 0)).toBe(0);
     });
   });
 });

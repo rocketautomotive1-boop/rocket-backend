@@ -208,7 +208,10 @@ export class OrderModel {
     @Prop({ type: [SchemaFactory.createForClass(OrderItemSnapshot)] })
     items: OrderItemSnapshot[];
 
-    @Prop({ type: [{ type: Types.ObjectId, ref: 'StockMovementModel' }] })
+    // ref aponta para store_listing_stock_movements (Contract, 2026-08-29) — o legado
+    // (stock_movements) foi removido. Nunca populado via Mongoose (só os ids são lidos), então
+    // essa troca é só documental, sem efeito em runtime.
+    @Prop({ type: [{ type: Types.ObjectId, ref: 'StoreListingStockMovementModel' }] })
     stockMovementIds: Types.ObjectId[];
 
     @Prop({ type: [SchemaFactory.createForClass(OrderLogSnapshot)] })

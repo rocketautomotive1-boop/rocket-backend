@@ -1,6 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
 import { StockController } from './stock.controller';
-import { StockReconcilerService } from './stock-reconciler.service';
 import { StockService } from './stock.service';
 import { StoreAwareStockQueryPort } from './ports/stock-query.port';
 
@@ -24,7 +23,6 @@ describe('StockController', () => {
       getStoreStockByLocation: jest.fn(),
     };
     controller = new StockController(
-      {} as StockReconcilerService,
       stock as unknown as StockService,
       stockQuery as unknown as StoreAwareStockQueryPort,
     );

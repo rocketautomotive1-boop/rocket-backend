@@ -59,11 +59,11 @@ export const STORE_AWARE_STOCK_QUERY_PORT = Symbol('STORE_AWARE_STOCK_QUERY_PORT
  * bare productId reads on StockQueryPort (which resolve "the owning store" internally) — a
  * user's own store isn't necessarily the product's only StoreListing.
  *
- * Separate from StockQueryPort (not just extra methods on it) because StockQueryPort has two
- * implementations — StoreListingStockQueryService (store-aware) and the legacy StockQueryService
- * (stock_balances/stock_lots, no notion of store) — and the legacy one has no way to implement
- * these. Only StoreAwareStockQueryPort-typed consumers (StockController,
- * ProductMovementController) need to know this variant exists.
+ * Separate from StockQueryPort (not just extra methods on it): StockQueryPort resolves "the
+ * owning store" internally for callers with no store in context; this variant is explicit about
+ * storeId because the caller's own store isn't necessarily the product's only StoreListing. Only
+ * StoreAwareStockQueryPort-typed consumers (StockController, ProductMovementController) need to
+ * know this variant exists.
  */
 export interface StoreAwareStockQueryPort {
   getStoreStockSummary(

@@ -8,8 +8,9 @@ import { StoreListingStockMovementModel, StoreListingStockMovementDocument } fro
 import { StockQueryPort, StoreAwareStockQueryPort, ProductStockSummary, ConditionBalance, LocationBalance } from './ports/stock-query.port';
 
 /**
- * StockQueryPort implementation reading store-aware stock (StoreListing), replacing the legacy
- * aggregate-by-productId implementation (StockQueryService — stock_balances/stock_lots).
+ * StockQueryPort implementation reading store-aware stock (StoreListing) — the only stock store
+ * since the legacy aggregate-by-productId collections (stock_balances/stock_lots/
+ * stock_movements) were removed (Contract complete, 2026-08-29).
  *
  * These consumers have no storeId in their calling context (public search, checkout, bot, AI,
  * orchestrator — no authenticated user). Store is resolved as "the owning store of the product's

@@ -9,7 +9,7 @@ import { OrderMapperService } from './order-mapper.service';
 import { ORDER_EVENTS, OrderProcessedEvent, OrderCancelledEvent, OrderShippingUpdatedEvent, SHIPPING_MILESTONES } from '../events/order.events';
 import { decideIngestAction, CONFIRMED_STATUSES, IngestSource } from './order-ingest.decision';
 import { MARKETPLACE_ORDER_GATEWAY, MarketplaceOrderGateway } from '../ports/marketplace-order.gateway';
-import { STOCK_LEDGER_PORT, StockLedgerPort, StockItem } from '../ports/stock-ledger.port';
+import { STOCK_LEDGER_PORT, StockLedgerPort } from '../ports/stock-ledger.port';
 import { OrchestratorPublisherService } from '../../marketplace-orchestrator/orchestrator-publisher.service';
 
 @Injectable()
@@ -196,7 +196,6 @@ export class OrderSyncPipeline {
         let txAttempt = 0;
         let savedOrder: OrderDocument;
         let movementIds: string[] = [];
-        let deductedItems: StockItem[] = [];
 
         while (txAttempt < MAX_TX_RETRIES) {
             const session: ClientSession = await this.orderRepository.getConnection().startSession();
@@ -239,7 +238,6 @@ export class OrderSyncPipeline {
                             session,
                         );
                         movementIds = result.movementIds;
-                        deductedItems = result.items;
                     }
 
                     // 2c. Final logistics status
@@ -304,13 +302,6 @@ export class OrderSyncPipeline {
 
             if (txSucceeded) break;
             txAttempt++;
-        }
-
-        // Espelho store-aware (Fase 4) — só depois que a transação acima já comitou de
-        // verdade. Nunca antes: espelhar durante a transação arriscaria linha órfã se o
-        // retry loop reexecutasse por WriteConflict (ver StockLedgerPort.deductAndLink).
-        if (deductedItems.length > 0) {
-            await this.stock.mirrorAfterCommit(savedOrder!._id.toString(), deductedItems);
         }
 
         // ── PASSO 3: PUBLISH (pós-commit) ─────────────────────────────────────

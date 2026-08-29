@@ -1,13 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { StockMovementModel, StockMovementSchema } from './schemas/stock-movement.schema';
-import { StockLotModel, StockLotSchema } from './schemas/stock-lot.schema';
-import { StockBalanceModel, StockBalanceSchema } from './schemas/stock-balance.schema';
-import { StockRepository } from './stock.repository';
 import { StockService } from './stock.service';
-import { StockQueryService } from './stock-query.service';
 import { StoreListingStockQueryService } from './store-listing-stock-query.service';
-import { StockReconcilerService } from './stock-reconciler.service';
 import { StockLedgerProvider } from './stock-ledger.provider';
 import { StockController } from './stock.controller';
 import { STOCK_QUERY_PORT, STORE_AWARE_STOCK_QUERY_PORT } from './ports/stock-query.port';
@@ -19,49 +13,38 @@ import { StoreListingStockMovementModel, StoreListingStockMovementSchema } from 
 import { AuthModule } from '../auth/auth.module';
 
 /**
- * Single owner of stock: stock_movements (immutable ledger), stock_lots (cost per condition),
- * stock_balances (materialized projection). Leaf module — imports no domain module; receives
- * productId as data. Exposes only ports (STOCK_LEDGER_PORT, STOCK_QUERY_PORT) to consumers.
+ * Single owner of stock: store_listing_stock_movements (immutable ledger),
+ * store_listing_stock_lots (cost per condition), store_listing_stock_balances (materialized
+ * projection) — owned by StoreListingModule, StockModule writes/reads them via
+ * STORE_LISTING_PORT/StoreListingStockQueryService. Leaf module — imports no domain module;
+ * receives productId as data. Exposes only ports (STOCK_LEDGER_PORT, STOCK_QUERY_PORT,
+ * STORE_AWARE_STOCK_QUERY_PORT) to consumers.
  *
- * Fase 3 (dual-write): importa StoreListingModule pra injetar STORE_LISTING_PORT — StockService
- * espelha todo move() bem-sucedido em store_listing_stock_* sem nunca bloquear/falhar o legado
- * (fire-and-log). STORE_PORT vem de StoreModule, que é @Global (não precisa de import aqui).
+ * Contract complete (2026-08-29): the legacy aggregate-by-productId store
+ * (stock_balances/stock_lots/stock_movements, StockRepository/StockQueryService/
+ * StockReconcilerService) was removed after the dual-write inversion was validated in
+ * production. See docs/superpowers/specs/2026-08-28-stock-contract-legacy-cutover-design.md
+ * and docs/superpowers/specs/2026-08-29-stock-write-cutover-design.md.
  *
- * Fase 4 (leitura/escrita store-aware): importa AuthModule pra JwtAuthGuard (StockController
- * ganhou endpoints autenticados) — JwtAuthGuard depende de JwtService, que só existe no
- * contexto de um módulo que importe AuthModule.
+ * Imports AuthModule for JwtAuthGuard (StockController's authenticated endpoints).
  *
  * @Global (mesmo padrão de StoreModule/MarketplaceConfigCacheModule): StoreListingModule
  * precisa de STOCK_QUERY_PORT/PRICING_PORT pra getAllocationProducts (join de estoque/preço),
- * mas já é importado por StockModule (dual-write acima) — um import de volta criaria ciclo
- * real. @Global evita isso sem forwardRef: StoreListingModule injeta o port sem importar o
- * módulo.
- *
- * Contract (sub-projeto 4, 2026-08-28): STOCK_QUERY_PORT aponta para
- * StoreListingStockQueryService (lê StoreListing, resolvendo a loja dona do produto via
- * STORE_OWNER_LOOKUP_PORT — mesma regra que o pipeline de pedidos já usa), não mais para
- * StockQueryService (legado, stock_balances). StockQueryService continua registrado até a
- * remoção completa do legado (schemas/repository/reconciler) — ver
- * docs/superpowers/specs/2026-08-28-stock-contract-legacy-cutover-design.md. Os schemas de
- * StoreListing precisam de forFeature próprio aqui: Mongoose exige registro por módulo mesmo
- * quando a collection já está registrada em outro (StoreListingModule só exporta o port, não os
- * models).
+ * mas já é importado por StockModule — um import de volta criaria ciclo real. @Global evita
+ * isso sem forwardRef: StoreListingModule injeta o port sem importar o módulo.
  *
  * DI cycle fix (2026-08-29): StoreListingStockQueryService (o que STOCK_QUERY_PORT resolve) e
  * StockLedgerProvider injetam STORE_OWNER_LOOKUP_PORT (port folha, só findStoreIdByProduct), não
  * STORE_LISTING_PORT — usar o port completo aqui criava um ciclo real de instanciação com
  * StoreListingService (que injeta STOCK_QUERY_PORT para getAllocationProducts), travando o boot
- * silenciosamente em produção. StockService (dual-write, fase 3 acima) continua injetando
- * STORE_LISTING_PORT completo — não participa desse ciclo porque nada em StoreListingService
- * depende de StockService de volta. Ver docs/superpowers/specs/2026-08-29-stock-store-listing-di-cycle-fix-design.md.
+ * silenciosamente em produção. StockService injeta STORE_LISTING_PORT completo (createOrGetStoreListing,
+ * recordStockMovement, etc.) — não participa desse ciclo porque nada em StoreListingService
+ * depende de StockService de volta.
  */
 @Global()
 @Module({
   imports: [
     MongooseModule.forFeature([
-      { name: StockMovementModel.name, schema: StockMovementSchema },
-      { name: StockLotModel.name, schema: StockLotSchema },
-      { name: StockBalanceModel.name, schema: StockBalanceSchema },
       { name: StoreListingModel.name, schema: StoreListingSchema },
       { name: StoreListingStockBalanceModel.name, schema: StoreListingStockBalanceSchema },
       { name: StoreListingStockMovementModel.name, schema: StoreListingStockMovementSchema },
@@ -71,16 +54,13 @@ import { AuthModule } from '../auth/auth.module';
   ],
   controllers: [StockController],
   providers: [
-    StockRepository,
     StockService,
-    StockQueryService,
     StoreListingStockQueryService,
-    StockReconcilerService,
     StockLedgerProvider,
     { provide: STOCK_QUERY_PORT, useExisting: StoreListingStockQueryService },
     { provide: STORE_AWARE_STOCK_QUERY_PORT, useExisting: StoreListingStockQueryService },
     { provide: STOCK_LEDGER_PORT, useExisting: StockLedgerProvider },
   ],
-  exports: [STOCK_QUERY_PORT, STORE_AWARE_STOCK_QUERY_PORT, STOCK_LEDGER_PORT, StockService, StockQueryService],
+  exports: [STOCK_QUERY_PORT, STORE_AWARE_STOCK_QUERY_PORT, STOCK_LEDGER_PORT, StockService],
 })
 export class StockModule {}

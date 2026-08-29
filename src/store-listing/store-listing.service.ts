@@ -38,7 +38,7 @@ import { BoxModel } from '../product/schemas/box.schema';
 import { ProductModel, ProductDocument } from '../product/schemas/product.schema';
 import { StoreListingPort } from './ports/store-listing.port';
 import { StockMovementType } from '../stock/domain/movement-type';
-import { StockCondition } from '../stock/schemas/stock-lot.schema';
+import { StockCondition } from '../stock/domain/movement-type';
 import { computeBalanceDelta } from '../stock/domain/balance.calculator';
 import { weightedAverageCost } from '../stock/domain/average-cost';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';

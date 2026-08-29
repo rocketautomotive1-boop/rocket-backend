@@ -75,7 +75,6 @@ import { MarketplaceModel, MarketplaceSchema } from './schemas/marketplace.schem
 import { IgnoredOrderModel, IgnoredOrderSchema } from './schemas/ignored-order.schema';
 import { MarketplaceCategoryModel, MarketplaceCategorySchema } from './schemas/marketplace-category.schema';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
-import { StockMovementModel, StockMovementSchema } from '../stock/schemas/stock-movement.schema';
 import { MarketplaceRegistryModule } from './marketplace-registry.module';
 import { MarketplaceAuthModule } from './auth/marketplace-auth.module';
 import { SearchModule } from '../search/search.module';
@@ -129,7 +128,6 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
       { name: IgnoredOrderModel.name, schema: IgnoredOrderSchema },
       { name: MarketplaceCategoryModel.name, schema: MarketplaceCategorySchema },
       { name: ProductModel.name, schema: ProductSchema },
-      { name: StockMovementModel.name, schema: StockMovementSchema },
       { name: QueueRecordModel.name, schema: QueueRecordSchema },
       { name: require('../order/schemas/order.schema').OrderModel.name, schema: require('../order/schemas/order.schema').OrderSchema },
       {

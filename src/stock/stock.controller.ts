@@ -1,5 +1,4 @@
 import { Controller, Get, Post, Param, Body, Req, UseGuards, Inject, BadRequestException } from '@nestjs/common';
-import { StockReconcilerService } from './stock-reconciler.service';
 import { StockService } from './stock.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from './ports/stock-query.port';
@@ -7,7 +6,6 @@ import { STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from './ports/
 @Controller('stock')
 export class StockController {
   constructor(
-    private readonly reconciler: StockReconcilerService,
     private readonly stock: StockService,
     @Inject(STORE_AWARE_STOCK_QUERY_PORT) private readonly stockQuery: StoreAwareStockQueryPort,
   ) {}
@@ -18,16 +16,6 @@ export class StockController {
       throw new BadRequestException('Usuário sem loja configurada — não é possível consultar estoque.');
     }
     return storeId;
-  }
-
-  @Get('reconcile/health')
-  health() {
-    return this.reconciler.getHealth();
-  }
-
-  @Post('reconcile/run')
-  run() {
-    return this.reconciler.reconcileAll();
   }
 
   @Get(':productId/balance')

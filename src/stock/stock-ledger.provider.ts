@@ -71,32 +71,6 @@ export class StockLedgerProvider implements StockLedgerPort {
     return { movementIds, items: deducted };
   }
 
-  /**
-   * Espelha os itens deduzidos por deductAndLink pro legado (stock_balances/stock_lots/
-   * stock_movements) — chamar SÓ depois que a transação do chamador (a session passada pra
-   * deductAndLink) já comitou. Fire-and-log, nunca lança. A escrita PRIMÁRIA (StoreListing) já
-   * aconteceu dentro de deductAndLink, na mesma transação do pedido — isso é só o mirror
-   * (Contract, 2026-08-29: inverteu a direção da Fase 3/4 original).
-   */
-  async mirrorAfterCommit(orderId: string, items: StockItem[]): Promise<void> {
-    for (const it of items) {
-      try {
-        const storeId = await this.resolveStoreId(it.productId);
-        if (!storeId) continue;
-        await this.stock.mirrorMoveToLegacy({
-          productId: it.productId,
-          storeId,
-          type: StockMovementType.OUTBOUND,
-          quantity: it.quantity,
-          condition: 'new',
-          orderId,
-        } as any);
-      } catch (err: any) {
-        this.logger.error(`[Stock] falha ao espelhar item do pedido ${orderId} (produto ${it.productId}) pós-commit: ${err?.message}`);
-      }
-    }
-  }
-
   async revert(
     orderId: string,
     items: Array<StockItem & { unitPrice: number }>,

@@ -6,14 +6,14 @@ import { StockMovementType } from './domain/movement-type';
 
 describe('StockLedgerProvider', () => {
   let provider: StockLedgerProvider;
-  let stock: { move: jest.Mock; mirrorMoveToLegacy: jest.Mock };
+  let stock: { move: jest.Mock };
   let storeOwnerLookup: { findStoreIdByProduct: jest.Mock };
 
   const P1 = 'product-1';
   const STORE_A = 'store-a';
 
   beforeEach(async () => {
-    stock = { move: jest.fn(), mirrorMoveToLegacy: jest.fn() };
+    stock = { move: jest.fn() };
     storeOwnerLookup = { findStoreIdByProduct: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -51,21 +51,6 @@ describe('StockLedgerProvider', () => {
       expect(stock.move).not.toHaveBeenCalled();
       expect(result.movementIds).toEqual([]);
       expect(result.items).toEqual([]);
-    });
-  });
-
-  describe('mirrorAfterCommit', () => {
-    it('mirrors each deducted item using the resolved storeId, never throws on failure', async () => {
-      storeOwnerLookup.findStoreIdByProduct.mockResolvedValue(STORE_A);
-      stock.mirrorMoveToLegacy.mockRejectedValueOnce(new Error('boom'));
-
-      await expect(
-        provider.mirrorAfterCommit('order-1', [{ productId: P1, quantity: 2 }]),
-      ).resolves.toBeUndefined();
-
-      expect(stock.mirrorMoveToLegacy).toHaveBeenCalledWith(
-        expect.objectContaining({ productId: P1, storeId: STORE_A, type: StockMovementType.OUTBOUND, quantity: 2 }),
-      );
     });
   });
 

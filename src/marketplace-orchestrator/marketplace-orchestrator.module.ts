@@ -15,7 +15,6 @@ import { CategoryModel, CategorySchema } from '../product/schemas/category.schem
 import { MarketplaceModel, MarketplaceSchema } from '../marketplace/schemas/marketplace.schema';
 import { ListingModel, ListingSchema } from '../listing/schemas/listing.schema';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
-import { StockMovementModel, StockMovementSchema } from '../stock/schemas/stock-movement.schema';
 
 import { MarketplaceOrchestratorController } from './marketplace-orchestrator.controller';
 import { PublicationLogService } from '../marketplace/services/publication-log.service';
@@ -61,7 +60,6 @@ import { ListingModule } from '../listing/listing.module';
             { name: CategoryModel.name, schema: CategorySchema },
             { name: ProductCompatibilityModel.name, schema: ProductCompatibilitySchema },
             { name: ProductModel.name, schema: ProductSchema },
-            { name: StockMovementModel.name, schema: StockMovementSchema },
         ]),
         UserProductivityModule,
         GatewaysModule,
