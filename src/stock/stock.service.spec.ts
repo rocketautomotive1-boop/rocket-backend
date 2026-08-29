@@ -9,14 +9,16 @@ import { StockBalanceModel, StockBalanceSchema } from './schemas/stock-balance.s
 import { StockRepository } from './stock.repository';
 import { StockService } from './stock.service';
 import { StockQueryService } from './stock-query.service';
+import { StoreListingStockQueryService } from './store-listing-stock-query.service';
 import { StockMovementType } from './domain/movement-type';
 import { StoreListingModule } from '../store-listing/store-listing.module';
 import { STORE_LISTING_PORT } from '../store-listing/ports/store-listing.port';
 import { STOCK_QUERY_PORT } from './ports/stock-query.port';
 import { PRICING_PORT } from '../pricing/ports/pricing.port';
-import { StoreListingStockMovementModel } from '../store-listing/schemas/store-listing-stock-movement.schema';
-import { StoreListingStockBalanceModel } from '../store-listing/schemas/store-listing-stock-balance.schema';
-import { StoreListingModel } from '../store-listing/schemas/store-listing.schema';
+import { StoreListingStockMovementModel, StoreListingStockMovementSchema } from '../store-listing/schemas/store-listing-stock-movement.schema';
+import { StoreListingStockBalanceModel, StoreListingStockBalanceSchema } from '../store-listing/schemas/store-listing-stock-balance.schema';
+import { StoreListingStockLotModel, StoreListingStockLotSchema } from '../store-listing/schemas/store-listing-stock-lot.schema';
+import { StoreListingModel, StoreListingSchema } from '../store-listing/schemas/store-listing.schema';
 import { MarketplaceListingModel } from '../store-listing/schemas/marketplace-listing.schema';
 
 /**
@@ -36,16 +38,24 @@ import { MarketplaceListingModel } from '../store-listing/schemas/marketplace-li
 })
 class MockStockPricingModule {}
 
-describe('StockService (integration)', () => {
+/**
+ * Contract (2026-08-29): StoreListing é a fonte PRIMÁRIA de escrita — move()/adjust()/
+ * reverseMovement()/editMovementViaAdjustment() gravam primeiro em store_listing_stock_* (dentro
+ * da transação real), e espelham pro legado (stock_balances/stock_lots/stock_movements)
+ * pós-commit, fire-and-log. Testes abaixo invertem a direção dos asserts em relação à versão
+ * anterior (que testava o legado como primário e o StoreListing como espelho).
+ */
+describe('StockService (integration) — StoreListing como fonte primária, legado como mirror', () => {
   let mongo: MongoMemoryReplSet;
   let mod: TestingModule;
   let svc: StockService;
-  let query: StockQueryService;
+  let query: StoreListingStockQueryService;
   let repo: StockRepository;
   let storeListingModel: Model<any>;
   let marketplaceListingModel: Model<any>;
   let slMovementModel: Model<any>;
   let slBalanceModel: Model<any>;
+  let slLotModel: Model<any>;
   const PID = '650000000000000000000001';
   const STORE_A = '650000000000000000040001';
 
@@ -58,19 +68,24 @@ describe('StockService (integration)', () => {
           { name: StockMovementModel.name, schema: StockMovementSchema },
           { name: StockLotModel.name, schema: StockLotSchema },
           { name: StockBalanceModel.name, schema: StockBalanceSchema },
+          { name: StoreListingStockMovementModel.name, schema: StoreListingStockMovementSchema },
+          { name: StoreListingStockBalanceModel.name, schema: StoreListingStockBalanceSchema },
+          { name: StoreListingStockLotModel.name, schema: StoreListingStockLotSchema },
+          { name: StoreListingModel.name, schema: StoreListingSchema },
         ]),
         MockStockPricingModule,
         StoreListingModule,
       ],
-      providers: [StockService, StockQueryService, StockRepository],
+      providers: [StockService, StockQueryService, StoreListingStockQueryService, StockRepository],
     }).compile();
     svc = mod.get(StockService);
-    query = mod.get(StockQueryService);
+    query = mod.get(StoreListingStockQueryService);
     repo = mod.get(StockRepository);
     storeListingModel = mod.get(getModelToken(StoreListingModel.name));
     marketplaceListingModel = mod.get(getModelToken(MarketplaceListingModel.name));
     slMovementModel = mod.get(getModelToken(StoreListingStockMovementModel.name));
     slBalanceModel = mod.get(getModelToken(StoreListingStockBalanceModel.name));
+    slLotModel = mod.get(getModelToken(StoreListingStockLotModel.name));
 
     // Pre-create collections + indexes. MongoDB cannot create a collection inside a
     // multi-document transaction, so creating them lazily during the first move() would
@@ -78,10 +93,14 @@ describe('StockService (integration)', () => {
     await repo.lotModel.createCollection();
     await repo.balanceModel.createCollection();
     await repo.movementModel.createCollection();
-    await repo.movementModel.syncIndexes();
-    await repo.balanceModel.syncIndexes();
     await storeListingModel.createCollection();
     await marketplaceListingModel.createCollection();
+    await slMovementModel.createCollection();
+    await slBalanceModel.createCollection();
+    await slLotModel.createCollection();
+    await slMovementModel.syncIndexes();
+    await slBalanceModel.syncIndexes();
+    await slLotModel.syncIndexes();
   });
 
   afterAll(async () => {
@@ -94,37 +113,34 @@ describe('StockService (integration)', () => {
   it('inbound then outbound nets correct onHand', async () => {
     await svc.move({ productId: PID, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 10, condition: 'new', unitCost: 2, reference: 'in-1' });
     await svc.move({ productId: PID, storeId: STORE_A, type: StockMovementType.OUTBOUND, quantity: 3, condition: 'new', reference: 'out-1' });
-    const rows = await repo.balanceModel.find({ productId: new Types.ObjectId(PID) });
-    const onHand = rows.reduce((s, r) => s + r.onHand, 0);
-    expect(onHand).toBe(7);
+    const stock = await query.getProductStock(PID);
+    expect(stock.onHand).toBe(7);
   });
 
   it('duplicate reference is idempotent', async () => {
     await svc.move({ productId: PID, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'dup' });
     await svc.move({ productId: PID, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'dup' });
-    const count = await repo.movementModel.countDocuments({ 'metadata.externalReference': 'dup' });
+    const count = await slMovementModel.countDocuments({ 'metadata.externalReference': 'dup' });
     expect(count).toBe(1);
   });
 
   it('reservation increments reserved without touching onHand', async () => {
-    const onHandBefore = (await repo.balanceModel.find({ productId: new Types.ObjectId(PID) }))
-      .reduce((s, r) => s + r.onHand, 0);
+    const onHandBefore = (await query.getProductStock(PID)).onHand;
     await svc.move({ productId: PID, storeId: STORE_A, type: StockMovementType.RESERVATION, quantity: 2, condition: 'new', reference: 'res-1' });
-    const rows = await repo.balanceModel.find({ productId: new Types.ObjectId(PID) });
-    const reserved = rows.reduce((s, r) => s + r.reserved, 0);
-    const onHandAfter = rows.reduce((s, r) => s + r.onHand, 0);
-    expect(reserved).toBe(2);
-    expect(onHandAfter).toBe(onHandBefore); // reservation doesn't change physical stock
+    const stock = await query.getProductStock(PID);
+    expect(stock.reserved).toBe(2);
+    expect(stock.onHand).toBe(onHandBefore); // reservation doesn't change physical stock
   });
 
   it('adjust applies a signed correction to onHand (append-only)', async () => {
     const PID2 = '650000000000000000000777';
     await svc.move({ productId: PID2, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 10, condition: 'new', reference: 'adj-seed' });
     await svc.adjust({ productId: PID2, storeId: STORE_A, quantity: -2, condition: 'new', reason: 'inventory count', reference: 'adj-1' });
-    const rows = await repo.balanceModel.find({ productId: new Types.ObjectId(PID2) });
-    expect(rows.reduce((s, r) => s + r.onHand, 0)).toBe(8);
+    const stock = await query.getProductStock(PID2);
+    expect(stock.onHand).toBe(8);
     // ledger is append-only: 2 movements, none deleted
-    const count = await repo.movementModel.countDocuments({ productId: new Types.ObjectId(PID2) });
+    const storeListing = await storeListingModel.findOne({ productId: PID2, storeId: STORE_A }).exec();
+    const count = await slMovementModel.countDocuments({ storeListingId: storeListing!._id });
     expect(count).toBe(2);
   });
 
@@ -155,7 +171,7 @@ describe('StockService (integration)', () => {
     expect(found.unitCost).toBe(9);
   });
 
-  it('getProductCost returns the weighted-average lot cost (surfaced as balance.avgCost)', async () => {
+  it('getProductCost returns the weighted-average lot cost', async () => {
     const P2 = '650000000000000000000abc';
     // Two distinct lots (different conditions) with unequal quantities:
     //   30 @ 2 (new) + 10 @ 6 (used) → weighted avg = (30*2 + 10*6) / 40 = 120/40 = 3.0
@@ -164,6 +180,16 @@ describe('StockService (integration)', () => {
     await svc.move({ productId: P2, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 10, condition: 'used', unitCost: 6, reference: 'ac-2' });
     const cost = await query.getProductCost(P2);
     expect(cost).toBeCloseTo(3, 2);
+  });
+
+  it('weighted-average cost is also correct across TWO inbound movements in the SAME lot/condition', async () => {
+    const P2B = '650000000000000000000abd';
+    // 10 units @ 2, then 10 units @ 6 in the SAME condition (single lot):
+    // weighted avg = (10*2 + 10*6) / 20 = 4.0
+    await svc.move({ productId: P2B, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 10, condition: 'new', unitCost: 2, reference: 'ac2-1' });
+    await svc.move({ productId: P2B, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 10, condition: 'new', unitCost: 6, reference: 'ac2-2' });
+    const cost = await query.getProductCost(P2B);
+    expect(cost).toBeCloseTo(4, 2);
   });
 
   it('editMovementViaAdjustment on a boxed movement corrects that box balance, not a phantom unlocated one', async () => {
@@ -198,25 +224,18 @@ describe('StockService (integration)', () => {
     expect(unlocatedRow).toBeUndefined();
   });
 
-  it('reverseMovement reads storeId from the original movement — no fallback needed when it is present', async () => {
+  it('reverseMovement reads storeId from the original StoreListing movement — no fallback needed when it is present', async () => {
     const P4B = '650000000000000000000cdf';
     const created = await svc.move({
       productId: P4B, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 3, condition: 'new', reference: 'box-delete-seed-2',
     });
 
-    // No fallbackStoreId passed — must resolve storeId from the original movement's own field.
+    // No fallbackStoreId passed — must resolve storeId from the original movement's own StoreListing.
     await expect(svc.reverseMovement(created.movementId)).resolves.toBeDefined();
   });
 
-  it('reverseMovement throws when the original movement predates Fase 4 (no storeId) and no fallback is given', async () => {
-    const P4C = '650000000000000000000ce0';
-    const created = await svc.move({
-      productId: P4C, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 3, condition: 'new', reference: 'legacy-no-store',
-    });
-    // Simulate a pre-Fase-4 movement: strip storeId directly in the collection.
-    await repo.movementModel.updateOne({ _id: created.movementId }, { $unset: { storeId: 1 } });
-
-    await expect(svc.reverseMovement(created.movementId)).rejects.toThrow(/não tem loja associada/);
+  it('reverseMovement throws when the movement id does not resolve to any StoreListing movement and no fallback is given', async () => {
+    await expect(svc.reverseMovement(new Types.ObjectId().toHexString())).rejects.toThrow(/não tem loja associada|not found/i);
   });
 
   it('correctTo brings onHand to the target quantity regardless of current value', async () => {
@@ -235,10 +254,11 @@ describe('StockService (integration)', () => {
   it('correctTo is a no-op when target equals current (no movement created)', async () => {
     const P8 = '650000000000000000002222';
     await svc.move({ productId: P8, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 7, condition: 'new', reference: 'ct-noop-seed' });
-    const before = await repo.movementModel.countDocuments({ productId: new Types.ObjectId(P8) });
+    const storeListing = await storeListingModel.findOne({ productId: P8, storeId: STORE_A }).exec();
+    const before = await slMovementModel.countDocuments({ storeListingId: storeListing!._id });
 
     const result = await svc.correctTo({ productId: P8, storeId: STORE_A, condition: 'new', targetQuantity: 7 });
-    const after = await repo.movementModel.countDocuments({ productId: new Types.ObjectId(P8) });
+    const after = await slMovementModel.countDocuments({ storeListingId: storeListing!._id });
 
     expect(result).toBeNull();
     expect(after).toBe(before);
@@ -280,8 +300,8 @@ describe('StockService (integration)', () => {
     ).resolves.toBeDefined();
   });
 
-  describe('move — dual-write (Fase 3+4: storeId real, sem fallback automático)', () => {
-    it('mirrors a successful INBOUND move into the store_listing_stock_* collections, under the storeId passed by the caller', async () => {
+  describe('move — mirror pós-commit pro legado (Contract: StoreListing é o primário agora)', () => {
+    it('writes a successful INBOUND move into store_listing_stock_* as the PRIMARY write, under the storeId passed by the caller', async () => {
       const P = '650000000000000000010001';
       const result = await svc.move({ productId: P, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'dw-1' });
       expect(result.movementId).toBeTruthy();
@@ -294,15 +314,23 @@ describe('StockService (integration)', () => {
       expect(movements[0].type).toBe(StockMovementType.INBOUND);
       expect(movements[0].quantity).toBe(5);
 
-      const balances = await slBalanceModel.find({ storeListingId: String(storeListing!._id) }).exec();
-      const onHand = balances.reduce((s: number, r: any) => s + r.onHand, 0);
-      expect(onHand).toBe(5);
+      const stock = await query.getProductStock(P);
+      expect(stock.onHand).toBe(5);
     });
 
-    it('does not fail move() when the dual-write side throws', async () => {
+    it('mirrors the same movement into the legacy collections (stock_balances/stock_lots/stock_movements)', async () => {
+      const P = '650000000000000000010012';
+      await svc.move({ productId: P, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'dw-legacy-1' });
+
+      const rows = await repo.balanceModel.find({ productId: new Types.ObjectId(P) });
+      expect(rows.reduce((s, r) => s + r.onHand, 0)).toBe(5);
+      const legacyCount = await repo.movementModel.countDocuments({ productId: new Types.ObjectId(P) });
+      expect(legacyCount).toBe(1);
+    });
+
+    it('does not fail move() when the legacy mirror side throws', async () => {
       const P = '650000000000000000010002';
-      const badPort = mod.get(STORE_LISTING_PORT);
-      const spy = jest.spyOn(badPort, 'createOrGetStoreListing').mockRejectedValueOnce(new Error('boom'));
+      const spy = jest.spyOn(repo, 'findOrCreateLot').mockRejectedValueOnce(new Error('boom'));
 
       await expect(
         svc.move({ productId: P, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 3, condition: 'new', reference: 'dw-2' }),
@@ -338,30 +366,28 @@ describe('StockService (integration)', () => {
       await svc.move({ productId: P, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 10, condition: 'new', toBoxId: BOX_A, reference: 'dw-4-seed' });
       await svc.move({ productId: P, storeId: STORE_A, type: StockMovementType.TRANSFER, quantity: 6, condition: 'new', fromBoxId: BOX_A, toBoxId: BOX_B, reference: 'dw-4-transfer' });
 
-      const storeListing = await storeListingModel.findOne({ productId: P, storeId: STORE_A }).exec();
-      const balances = await slBalanceModel.find({ storeListingId: String(storeListing!._id) }).exec();
-      const totalOnHand = balances.reduce((s: number, r: any) => s + r.onHand, 0);
+      const byLocation = await query.getByLocation(P);
+      const totalOnHand = byLocation.reduce((s: number, r: any) => s + r.onHand, 0);
       // Net onHand across boxes must stay 10 (transfer only moves location, no net change).
       expect(totalOnHand).toBe(10);
 
-      const boxARow = balances.find((r: any) => String(r.boxId) === BOX_A);
-      const boxBRow = balances.find((r: any) => String(r.boxId) === BOX_B);
+      const boxARow = byLocation.find((r: any) => String(r.boxId) === BOX_A);
+      const boxBRow = byLocation.find((r: any) => String(r.boxId) === BOX_B);
       expect(boxARow?.onHand).toBe(4);
       expect(boxBRow?.onHand).toBe(6);
     });
 
-    it('does not mirror a movement skipped by legacy idempotency (duplicate reference)', async () => {
+    it('does not create a second movement/mirror on duplicate reference (idempotency now checked against StoreListing)', async () => {
       const P = '650000000000000000010005';
       await svc.move({ productId: P, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'dw-5-dup' });
       await svc.move({ productId: P, storeId: STORE_A, type: StockMovementType.INBOUND, quantity: 5, condition: 'new', reference: 'dw-5-dup' });
 
       const storeListing = await storeListingModel.findOne({ productId: P, storeId: STORE_A }).exec();
       const movements = await slMovementModel.find({ storeListingId: String(storeListing!._id) }).exec();
-      // Only the first (non-duplicate) call should have been mirrored.
       expect(movements.length).toBe(1);
     });
 
-    it('does not mirror when move() runs inside an externally-owned session (caller commits later)', async () => {
+    it('writes into StoreListing even when move() runs inside an externally-owned session (caller commits later) — this is the primary write, it cannot be skipped', async () => {
       const P = '650000000000000000010006';
       const session = await repo.getConnection().startSession();
       session.startTransaction();
@@ -379,16 +405,15 @@ describe('StockService (integration)', () => {
         await session.endSession();
       }
 
-      // Legacy movement/balance succeeded normally.
-      const rows = await repo.balanceModel.find({ productId: new Types.ObjectId(P) });
-      expect(rows.reduce((s, r) => s + r.onHand, 0)).toBe(7);
+      // Primary write (StoreListing) succeeded inside the external transaction.
+      const stock = await query.getProductStock(P);
+      expect(stock.onHand).toBe(7);
 
-      // But no StoreListing/mirror was created for this product — dual-write was skipped
-      // entirely because the session was externally owned. The caller (e.g. StockLedgerProvider)
-      // is responsible for calling mirrorMoveToStoreListing itself post-commit (see
-      // stock-ledger.provider.spec.ts).
-      const storeListing = await storeListingModel.findOne({ productId: P }).exec();
-      expect(storeListing).toBeNull();
+      // Legacy mirror is skipped when the session is externally owned — the caller
+      // (e.g. StockLedgerProvider) is responsible for calling mirrorMoveToLegacy itself
+      // post-commit (see stock-ledger.provider.spec.ts).
+      const legacyRows = await repo.balanceModel.find({ productId: new Types.ObjectId(P) });
+      expect(legacyRows.reduce((s, r) => s + r.onHand, 0)).toBe(0);
     });
   });
 });

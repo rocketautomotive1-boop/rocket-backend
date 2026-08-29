@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { ClientSession, Model, Types } from 'mongoose';
 import { StoreListingModel, StoreListingDocument } from './schemas/store-listing.schema';
 import {
   MarketplaceListingModel,
@@ -40,6 +40,7 @@ import { StoreListingPort } from './ports/store-listing.port';
 import { StockMovementType } from '../stock/domain/movement-type';
 import { StockCondition } from '../stock/schemas/stock-lot.schema';
 import { computeBalanceDelta } from '../stock/domain/balance.calculator';
+import { weightedAverageCost } from '../stock/domain/average-cost';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 
@@ -246,18 +247,31 @@ export class StoreListingService implements StoreListingPort {
     return { ...doc.toObject(), id: String(doc._id) };
   }
 
-  async recordStockMovement(params: {
-    storeListingId: string;
-    type: StockMovementType;
-    quantity: number;
-    condition?: StockCondition;
-    unitCost?: string;
-    lotId?: string;
-    orderId?: string;
-    fromBoxId?: string;
-    toBoxId?: string;
-    reason?: string;
-  }): Promise<{ lotId: string; movementId: string }> {
+  /**
+   * session opcional: quando informada, todas as operações Mongo (lote, saldo, movimento)
+   * participam da transação do chamador — usado por StockService.moveOnce (Contract, escrita
+   * primária). Sem session (chamadas fora de uma transação, ex. mirror antigo pós-commit),
+   * comportamento igual a antes.
+   */
+  async recordStockMovement(
+    params: {
+      storeListingId: string;
+      type: StockMovementType;
+      quantity: number;
+      condition?: StockCondition;
+      unitCost?: string;
+      lotId?: string;
+      orderId?: string;
+      fromBoxId?: string;
+      toBoxId?: string;
+      reason?: string;
+      /** Idempotency key — grava em metadata.externalReference (lido por referenceExists/findExistingReferences). */
+      reference?: string;
+      /** Preço de venda vigente (nunca no unitCost, que é custo do lote). */
+      salePrice?: number;
+    },
+    session?: ClientSession,
+  ): Promise<{ lotId: string; movementId: string }> {
     const condition: StockCondition = params.condition ?? 'new';
     // updateOne com upsert NÃO aplica cast de schema no valor do filtro pro documento novo —
     // sem isso, storeListingId ficaria salvo como string em vez de ObjectId, quebrando
@@ -269,7 +283,7 @@ export class StoreListingService implements StoreListingPort {
     // de inserir, em vez de cada uma criar o seu (era exatamente essa race, num find-then-create
     // de duas etapas, que produziu lotes duplicados em produção — ver stock-lot dedupe script).
     const resolvedLot = params.lotId
-      ? await this.storeListingStockLotModel.findById(params.lotId).exec()
+      ? await this.storeListingStockLotModel.findById(params.lotId).session(session ?? null).exec()
       : await this.storeListingStockLotModel
           .findOneAndUpdate(
             { storeListingId, condition },
@@ -281,7 +295,7 @@ export class StoreListingService implements StoreListingPort {
                 // originalLotId deliberately omitted — this is a net-new lot, not migrated.
               },
             },
-            { upsert: true, new: true },
+            { upsert: true, new: true, session },
           )
           .exec();
 
@@ -289,6 +303,24 @@ export class StoreListingService implements StoreListingPort {
     const boxIdRaw = params.toBoxId ?? params.fromBoxId ?? null;
     const boxId = boxIdRaw ? new Types.ObjectId(boxIdRaw) : null;
     const delta = computeBalanceDelta(params.type, params.quantity);
+    const unitCostNumber = params.unitCost != null ? Number(params.unitCost) : 0;
+
+    // Weighted-average cost on inbound with a positive cost — fecha o gap: antes desta mudança,
+    // unitCost só era gravado na CRIAÇÃO do lote ($setOnInsert), nunca recalculado em entradas
+    // subsequentes, divergindo silenciosamente do legado (que já recalculava corretamente).
+    if (params.type === StockMovementType.INBOUND && unitCostNumber > 0) {
+      const totals = await this.storeListingStockBalanceModel
+        .aggregate([{ $match: { lotId } }, { $group: { _id: '$lotId', onHand: { $sum: '$onHand' } } }])
+        .session(session ?? null);
+      const existingQty = totals[0]?.onHand ?? 0;
+      const existingAvg = Number((resolvedLot as any).unitCost?.toString() ?? 0);
+      const newAvg = weightedAverageCost(existingQty, existingAvg, params.quantity, unitCostNumber);
+      await this.storeListingStockLotModel.updateOne(
+        { _id: lotId },
+        { $set: { unitCost: String(newAvg) } },
+        { session },
+      );
+    }
 
     // Atomic upsert mirroring StockRepository.applyBalanceDelta: keyed by
     // {storeListingId, lotId, boxId} (condition only set on insert), no
@@ -296,25 +328,97 @@ export class StoreListingService implements StoreListingPort {
     await this.storeListingStockBalanceModel.updateOne(
       { storeListingId, lotId, boxId },
       { $inc: { onHand: delta.onHand, reserved: delta.reserved }, $setOnInsert: { condition } },
-      { upsert: true },
+      { upsert: true, session },
     );
 
-    const movement = await this.storeListingStockMovementModel.create({
-      storeListingId,
-      lotId,
-      orderId: params.orderId,
-      type: params.type,
-      quantity: params.quantity,
-      date: new Date(),
-      unitCost: params.unitCost,
-      fromBoxId: params.fromBoxId,
-      toBoxId: params.toBoxId,
-      condition,
-      reason: params.reason,
-      // originalMovementId deliberately omitted — this is a net-new movement, not migrated.
-    });
+    const [movement] = await this.storeListingStockMovementModel.create(
+      [
+        {
+          storeListingId,
+          lotId,
+          orderId: params.orderId,
+          type: params.type,
+          quantity: params.quantity,
+          date: new Date(),
+          unitCost: params.unitCost,
+          fromBoxId: params.fromBoxId,
+          toBoxId: params.toBoxId,
+          condition,
+          reason: params.reason,
+          metadata:
+            params.reference != null || params.salePrice != null
+              ? {
+                  ...(params.reference != null ? { externalReference: params.reference } : {}),
+                  ...(params.salePrice != null ? { salePrice: params.salePrice } : {}),
+                }
+              : undefined,
+          // originalMovementId deliberately omitted — this is a net-new movement, not migrated.
+        },
+      ],
+      { session },
+    );
 
     return { lotId: String(lotId), movementId: String((movement as any)._id) };
+  }
+
+  /**
+   * onHand somado de um (productId, storeId, condition) — usado por StockService.correctTo
+   * (Contract) para calcular o diff contra o alvo. Sem StoreListing para o par → 0.
+   */
+  async getConditionOnHand(productId: string, storeId: string, condition: StockCondition): Promise<number> {
+    const storeListing = await this.findByProductAndStore(productId, storeId);
+    if (!storeListing) return 0;
+    const rows = await this.storeListingStockBalanceModel.aggregate([
+      { $match: { storeListingId: new Types.ObjectId(storeListing.id), condition } },
+      { $group: { _id: null, onHand: { $sum: '$onHand' } } },
+    ]);
+    return rows[0]?.onHand ?? 0;
+  }
+
+  /**
+   * True se já existe um movimento com esse metadata.externalReference — usado por
+   * StockService.moveOnce (Contract) para checar idempotência antes de gravar.
+   */
+  async referenceExists(reference: string, session?: ClientSession): Promise<boolean> {
+    const c = await this.storeListingStockMovementModel
+      .countDocuments({ 'metadata.externalReference': reference })
+      .session(session ?? null);
+    return c > 0;
+  }
+
+  /**
+   * Usado por StockService.reverseMovement/editMovementViaAdjustment (Contract): busca um
+   * movimento pelo seu próprio _id e resolve o storeId da loja dona via o StoreListing
+   * associado — StockService precisa desses dois campos (type/quantity para calcular o delta
+   * de compensação, storeId para chamar adjust()) e não deve acessar os models diretamente.
+   */
+  async findMovementById(
+    movementId: string,
+  ): Promise<
+    | {
+        type: StockMovementType;
+        quantity: number;
+        condition: StockCondition;
+        productId: string;
+        storeId: string;
+        toBoxId?: string;
+        fromBoxId?: string;
+      }
+    | null
+  > {
+    const movement = await this.storeListingStockMovementModel.findById(movementId).lean().exec();
+    if (!movement) return null;
+    const storeListing = await this.storeListingModel.findById((movement as any).storeListingId).lean().exec();
+    if (!storeListing) return null;
+    return {
+      type: (movement as any).type,
+      quantity: (movement as any).quantity,
+      condition: (movement as any).condition,
+      productId: String((storeListing as any).productId),
+      storeId: String((storeListing as any).storeId),
+      toBoxId: (movement as any).toBoxId ? String((movement as any).toBoxId) : undefined,
+      fromBoxId: (movement as any).fromBoxId ? String((movement as any).fromBoxId) : undefined,
+    };
   }
 
   async createWarehouse(

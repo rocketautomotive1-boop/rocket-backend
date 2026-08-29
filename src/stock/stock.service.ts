@@ -4,13 +4,23 @@ import { StockRepository } from './stock.repository';
 import { StockMoveInput, StockMoveSchema } from './dto/stock-move.dto';
 import { StockMovementType } from './domain/movement-type';
 import { computeBalanceDelta } from './domain/balance.calculator';
-import { weightedAverageCost } from './domain/average-cost';
 import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
 
 /**
- * The single entry point for ALL stock changes. Appends to the immutable ledger AND updates
- * the materialized balance in the same transaction — never one without the other. When given an
- * external session (e.g. OrderSyncPipeline) it joins that transaction → atomicity with the order.
+ * The single entry point for ALL stock changes.
+ *
+ * Contract (sub-projeto 4, escrita — 2026-08-29): store_listing_stock_* é a fonte PRIMÁRIA.
+ * move() grava ali dentro de uma transação real (idempotência, resolução/criação de lote,
+ * atualização de saldo), e espelha pro legado (stock_balances/stock_lots/stock_movements)
+ * DEPOIS, fire-and-log — nunca bloqueia, nunca falha o move(). Inverte a direção da Fase 3/4
+ * original (legado primário, StoreListing espelho) — ver
+ * docs/superpowers/specs/2026-08-29-stock-write-cutover-design.md.
+ *
+ * Quando dado um externalSession (o chamador é dono da transação — ex. OrderSyncPipeline via
+ * StockLedgerProvider.deductAndLink), a escrita primária (StoreListing) participa dessa mesma
+ * transação — não pode ser pulada, é a escrita real. Só o mirror pro legado é pulado nesse caso
+ * (espelhar antes do commit real do chamador seria espelhar algo que pode nunca commitar); o
+ * chamador é responsável por disparar o mirror ele mesmo pós-commit (mirrorMoveToLegacy).
  */
 @Injectable()
 export class StockService {
@@ -31,20 +41,13 @@ export class StockService {
       result = await this.moveWithRetry(input);
     }
 
-    // Espelha em store_listing_stock_* DEPOIS que o legado já terminou (commit incluído)
-    // — nunca antes, nunca dentro da mesma transação (ver mirrorMoveToStoreListing).
-    // Sentinela {'', ''} = moveOnce abortou por idempotência (reference duplicada): não
-    // houve escrita real, então não há o que espelhar.
-    //
-    // Quando há externalSession (chamador é dono da transação — ex.: OrderSyncPipeline via
-    // StockLedgerProvider.deductAndLink), moveOnce() escreve DENTRO dessa transação mas NÃO
-    // a comita — quem comita é o chamador, bem depois deste ponto. Espelhar aqui seria
-    // espelhar ANTES do commit real, então é pulado por completo aqui (Fase 4 fecha esse
-    // gap: o dono da transação chama mirrorMoveToStoreListing ele mesmo, pós-commit — ver
-    // StockLedgerProvider.mirrorAfterCommit).
+    // Espelha no legado DEPOIS que a escrita primária já terminou (commit incluído) — nunca
+    // antes, nunca dentro da mesma transação (ver mirrorMoveToLegacy). Sentinela {'', ''} =
+    // moveOnce abortou por idempotência (reference duplicada): não houve escrita real, então
+    // não há o que espelhar.
     if (!externalSession && (result.movementId !== '' || result.lotId !== '')) {
       const dto = StockMoveSchema.parse(input);
-      await this.mirrorMoveToStoreListing(dto);
+      await this.mirrorMoveToLegacy(dto);
     }
 
     return result;
@@ -65,142 +68,137 @@ export class StockService {
   }
 
   /**
-   * Fire-and-log mirror do movimento pra store_listing_stock_* — NUNCA bloqueia
-   * nem falha o move() legado (por isso não propaga a session da transação
-   * legada: se o espelho abortasse depois, reverteria uma escrita legada que já
-   * "aconteceu" do ponto de vista do chamador).
-   *
-   * Fase 4: storeId vem do chamador (usuário autenticado ou processo que resolveu
-   * a loja dona da operação) — não há mais fallback pra loja padrão. Isso é o que
-   * torna o espelho correto por loja (sem o que, MAXESHOP acabaria gravando/lendo
-   * o saldo da Rocket Automotive).
+   * Fire-and-log mirror para stock_balances/stock_lots/stock_movements (legado) — NUNCA bloqueia
+   * nem falha move(). Não usa a session da transação primária: se o espelho abortasse depois,
+   * reverteria uma escrita primária que já "aconteceu" do ponto de vista do chamador.
    */
-  async mirrorMoveToStoreListing(dto: StockMoveInput): Promise<void> {
+  async mirrorMoveToLegacy(dto: StockMoveInput): Promise<void> {
     try {
-      const storeListing = await this.storeListingPort.createOrGetStoreListing(dto.productId, dto.storeId);
+      const productId = new Types.ObjectId(dto.productId);
+      const storeId = new Types.ObjectId(dto.storeId);
+      const unitCost = Types.Decimal128.fromString(String(dto.unitCost ?? 0));
+      const lot = await this.repo.findOrCreateLot(productId, dto.condition, unitCost);
 
-      const unitCost = dto.unitCost != null ? String(dto.unitCost) : undefined;
+      const appendOne = async (
+        type: StockMovementType,
+        quantity: number,
+        fromBoxId?: string,
+        toBoxId?: string,
+        withReference = true,
+      ) => {
+        await this.repo.appendMovement({
+          lotId: lot._id,
+          productId,
+          storeId,
+          type,
+          quantity,
+          unitCost,
+          condition: dto.condition,
+          fromBoxId: fromBoxId ? new Types.ObjectId(fromBoxId) : undefined,
+          toBoxId: toBoxId ? new Types.ObjectId(toBoxId) : undefined,
+          orderId: dto.orderId ? new Types.ObjectId(dto.orderId) : undefined,
+          reason: dto.reason,
+          origin: dto.origin ? { type: dto.origin.type, location: dto.origin.location } : undefined,
+          metadata:
+            withReference && (dto.reference != null || dto.salePrice != null)
+              ? {
+                  ...(dto.reference != null ? { externalReference: dto.reference } : {}),
+                  ...(dto.salePrice != null ? { salePrice: dto.salePrice } : {}),
+                }
+              : undefined,
+        });
+        const delta = computeBalanceDelta(type, quantity);
+        const boxId = toBoxId ? new Types.ObjectId(toBoxId) : fromBoxId ? new Types.ObjectId(fromBoxId) : null;
+        await this.repo.applyBalanceDelta(lot._id, productId, dto.condition, boxId, delta.onHand, delta.reserved);
+      };
 
       if (dto.type === StockMovementType.TRANSFER) {
-        // TRANSFER nets to {onHand:0, reserved:0} on both sides (legacy `computeBalanceDelta`
-        // and the store-listing repo's internal recompute agree on that) — mirroring it as a
-        // single TRANSFER call would silently record a zero-effect no-op movement and lose the
-        // box-to-box change entirely. Mirror it as the same two signed writes moveOnce() itself
-        // performs against StockRepository.applyBalanceDelta: a debit at fromBoxId and a credit
-        // at toBoxId. ADJUSTMENT has effect {onHand: 1 * quantity} — a raw signed delta — so
-        // using it for both legs reproduces the exact same balance math as the legacy transfer.
-        await this.storeListingPort.recordStockMovement({
-          storeListingId: storeListing.id,
-          type: StockMovementType.ADJUSTMENT,
-          quantity: -dto.quantity,
-          condition: dto.condition,
-          unitCost,
-          fromBoxId: dto.fromBoxId,
-          reason: dto.reason,
-        });
-        await this.storeListingPort.recordStockMovement({
-          storeListingId: storeListing.id,
-          type: StockMovementType.ADJUSTMENT,
-          quantity: dto.quantity,
-          condition: dto.condition,
-          unitCost,
-          toBoxId: dto.toBoxId,
-          reason: dto.reason,
-        });
+        // Mesmo tratamento que a escrita primária: TRANSFER vira dois ADJUSTMENT assinados
+        // (débito no fromBoxId, crédito no toBoxId) — ver moveOnce. reference só na segunda
+        // perna: gravar nas duas colidiria no índice único de idempotência (mesma reference
+        // duas vezes para o mesmo produto/tipo).
+        await appendOne(StockMovementType.ADJUSTMENT, -dto.quantity, dto.fromBoxId, undefined, false);
+        await appendOne(StockMovementType.ADJUSTMENT, dto.quantity, undefined, dto.toBoxId, true);
         return;
       }
 
-      await this.storeListingPort.recordStockMovement({
-        storeListingId: storeListing.id,
-        type: dto.type,
-        quantity: dto.quantity,
-        condition: dto.condition,
-        unitCost,
-        fromBoxId: dto.fromBoxId,
-        toBoxId: dto.toBoxId,
-        reason: dto.reason,
-      });
+      await appendOne(dto.type, dto.quantity, dto.fromBoxId, dto.toBoxId);
     } catch (err: any) {
-      this.logger.error(`[dual-write] falha ao espelhar movimento do produto ${dto.productId}: ${err?.message}`);
+      this.logger.error(`[mirror-to-legacy] falha ao espelhar movimento do produto ${dto.productId}: ${err?.message}`);
     }
   }
 
-
   private async moveOnce(input: StockMoveInput, externalSession?: ClientSession): Promise<{ movementId: string; lotId: string }> {
     const dto = StockMoveSchema.parse(input);
-    const productId = new Types.ObjectId(dto.productId);
 
     const session = externalSession ?? (await this.repo.getConnection().startSession());
     const ownSession = !externalSession;
     if (ownSession) session.startTransaction();
 
     try {
-      // Idempotency: a reference is processed at most once.
-      if (dto.reference && (await this.repo.referenceExists(dto.reference, session))) {
+      // Idempotency: a reference is processed at most once. Checked against the PRIMARY store
+      // (store_listing_stock_movements), not the legacy mirror.
+      if (dto.reference && (await this.storeListingPort.referenceExists(dto.reference, session))) {
         this.logger.warn(`[Stock] ref ${dto.reference} already processed — skipping`);
         if (ownSession) await session.abortTransaction();
         return { movementId: '', lotId: '' };
       }
 
-      const unitCost = Types.Decimal128.fromString(String(dto.unitCost ?? 0));
-      const lot = await this.repo.findOrCreateLot(productId, dto.condition, unitCost, session);
+      const storeListing = await this.storeListingPort.createOrGetStoreListing(dto.productId, dto.storeId);
+      const unitCostStr = dto.unitCost != null ? String(dto.unitCost) : undefined;
 
-      // Weighted-average cost on inbound with a positive cost.
-      if (dto.type === StockMovementType.INBOUND && (dto.unitCost ?? 0) > 0) {
-        const totals = await this.repo.balanceModel
-          .aggregate([{ $match: { lotId: lot._id } }, { $group: { _id: '$lotId', onHand: { $sum: '$onHand' } } }])
-          .session(session);
-        const existingQty = totals[0]?.onHand ?? 0;
-        const existingAvg = Number(lot.unitCost?.toString() ?? 0);
-        const newAvg = weightedAverageCost(existingQty, existingAvg, dto.quantity, dto.unitCost!);
-        lot.unitCost = Types.Decimal128.fromString(String(newAvg));
-        await lot.save({ session });
-      }
-
-      const movement = await this.repo.appendMovement(
-        {
-          lotId: lot._id,
-          productId,
-          storeId: new Types.ObjectId(dto.storeId),
-          type: dto.type,
-          quantity: dto.quantity,
-          unitCost,
-          condition: dto.condition,
-          fromBoxId: dto.fromBoxId ? new Types.ObjectId(dto.fromBoxId) : undefined,
-          toBoxId: dto.toBoxId ? new Types.ObjectId(dto.toBoxId) : undefined,
-          orderId: dto.orderId ? new Types.ObjectId(dto.orderId) : undefined,
-          reason: dto.reason,
-          origin: dto.origin ? { type: dto.origin.type, location: dto.origin.location } : undefined,
-          // Snapshot do preço de venda vigente (NUNCA no unitCost — que é custo do lote).
-          metadata:
-            dto.reference != null || dto.salePrice != null
-              ? {
-                  ...(dto.reference != null ? { externalReference: dto.reference } : {}),
-                  ...(dto.salePrice != null ? { salePrice: dto.salePrice } : {}),
-                }
-              : undefined,
-        },
-        session,
-      );
-
-      const delta = computeBalanceDelta(dto.type, dto.quantity);
+      let result: { lotId: string; movementId: string };
       if (dto.type === StockMovementType.TRANSFER) {
-        const from = dto.fromBoxId ? new Types.ObjectId(dto.fromBoxId) : null;
-        const to = dto.toBoxId ? new Types.ObjectId(dto.toBoxId) : null;
-        if (!from || !to) throw new BadRequestException('transfer exige fromBoxId e toBoxId');
-        await this.repo.applyBalanceDelta(lot._id, productId, dto.condition, from, -dto.quantity, 0, session);
-        await this.repo.applyBalanceDelta(lot._id, productId, dto.condition, to, dto.quantity, 0, session);
+        if (!dto.fromBoxId || !dto.toBoxId) throw new BadRequestException('transfer exige fromBoxId e toBoxId');
+        // TRANSFER nets to {onHand:0, reserved:0} — mirror it as two signed ADJUSTMENT writes
+        // (debit at fromBoxId, credit at toBoxId), same math as computeBalanceDelta expects.
+        await this.storeListingPort.recordStockMovement(
+          {
+            storeListingId: storeListing.id,
+            type: StockMovementType.ADJUSTMENT,
+            quantity: -dto.quantity,
+            condition: dto.condition,
+            unitCost: unitCostStr,
+            fromBoxId: dto.fromBoxId,
+            reason: dto.reason,
+          },
+          session,
+        );
+        result = await this.storeListingPort.recordStockMovement(
+          {
+            storeListingId: storeListing.id,
+            type: StockMovementType.ADJUSTMENT,
+            quantity: dto.quantity,
+            condition: dto.condition,
+            unitCost: unitCostStr,
+            toBoxId: dto.toBoxId,
+            reason: dto.reason,
+            reference: dto.reference,
+            salePrice: dto.salePrice,
+          },
+          session,
+        );
       } else {
-        const boxId = dto.toBoxId
-          ? new Types.ObjectId(dto.toBoxId)
-          : dto.fromBoxId
-            ? new Types.ObjectId(dto.fromBoxId)
-            : null;
-        await this.repo.applyBalanceDelta(lot._id, productId, dto.condition, boxId, delta.onHand, delta.reserved, session);
+        result = await this.storeListingPort.recordStockMovement(
+          {
+            storeListingId: storeListing.id,
+            type: dto.type,
+            quantity: dto.quantity,
+            condition: dto.condition,
+            unitCost: unitCostStr,
+            fromBoxId: dto.fromBoxId,
+            toBoxId: dto.toBoxId,
+            orderId: dto.orderId,
+            reason: dto.reason,
+            reference: dto.reference,
+            salePrice: dto.salePrice,
+          },
+          session,
+        );
       }
 
       if (ownSession) await session.commitTransaction();
-      return { movementId: movement._id.toString(), lotId: lot._id.toString() };
+      return result;
     } catch (err) {
       if (ownSession && session.inTransaction()) await session.abortTransaction();
       throw err;
@@ -244,29 +242,29 @@ export class StockService {
    * "Delete" a movement → append a compensating adjustment that cancels its balance effect.
    * The ledger stays append-only (audit/fiscal correctness). Returns the compensating movement id.
    *
-   * storeId: o movimento original grava a loja dona (Fase 4). Ausente só em movimentos
-   * anteriores a esta fase — nesse caso, exige que o chamador informe explicitamente
-   * (não há fallback silencioso pra loja padrão).
+   * movementId agora é o _id de um documento em store_listing_stock_movements (Contract):
+   * StoreListing é a fonte primária, então "o movimento original" vive lá — ver
+   * StoreListingPort.findMovementById.
    */
   async reverseMovement(movementId: string, fallbackStoreId?: string): Promise<{ movementId: string; lotId: string }> {
-    const original = await this.repo.movementModel.findById(movementId).lean().exec();
+    const original = await this.storeListingPort.findMovementById(movementId);
     if (!original) throw new BadRequestException(`Movement ${movementId} not found`);
-    const storeId = (original as any).storeId ? String((original as any).storeId) : fallbackStoreId;
+    const storeId = original.storeId ?? fallbackStoreId;
     if (!storeId) {
       throw new BadRequestException(
-        `Movimento ${movementId} não tem loja associada (anterior à Fase 4) e nenhum storeId foi informado para o estorno.`,
+        `Movimento ${movementId} não tem loja associada e nenhum storeId foi informado para o estorno.`,
       );
     }
-    const delta = computeBalanceDelta((original as any).type, (original as any).quantity);
-    const originalBoxId = (original as any).toBoxId ?? (original as any).fromBoxId;
+    const delta = computeBalanceDelta(original.type, original.quantity);
+    const originalBoxId = original.toBoxId ?? original.fromBoxId;
     // Compensate the net onHand effect with an adjustment of the opposite sign, in the same box.
     return this.adjust({
-      productId: String((original as any).productId),
+      productId: original.productId,
       storeId,
       quantity: -delta.onHand,
-      condition: (original as any).condition ?? 'new',
+      condition: original.condition ?? 'new',
       reason: `Estorno do movimento ${movementId}`,
-      toBoxId: originalBoxId ? String(originalBoxId) : undefined,
+      toBoxId: originalBoxId,
     });
   }
 
@@ -282,8 +280,7 @@ export class StockService {
     condition?: 'new' | 'damaged' | 'used' | 'refurbished';
   }): Promise<{ movementId: string; lotId: string } | null> {
     const condition = input.condition ?? 'new';
-    const productId = new Types.ObjectId(input.productId);
-    const current = await this.repo.getConditionOnHand(productId, condition);
+    const current = await this.storeListingPort.getConditionOnHand(input.productId, input.storeId, condition);
     const diff = input.targetQuantity - current;
     if (diff === 0) return null;
     return this.adjust({
@@ -300,25 +297,25 @@ export class StockService {
    * `newQuantity` is the intended absolute quantity of the original movement.
    */
   async editMovementViaAdjustment(movementId: string, newQuantity: number, fallbackStoreId?: string): Promise<{ movementId: string; lotId: string }> {
-    const original = await this.repo.movementModel.findById(movementId).lean().exec();
+    const original = await this.storeListingPort.findMovementById(movementId);
     if (!original) throw new BadRequestException(`Movement ${movementId} not found`);
-    const storeId = (original as any).storeId ? String((original as any).storeId) : fallbackStoreId;
+    const storeId = original.storeId ?? fallbackStoreId;
     if (!storeId) {
       throw new BadRequestException(
-        `Movimento ${movementId} não tem loja associada (anterior à Fase 4) e nenhum storeId foi informado para a correção.`,
+        `Movimento ${movementId} não tem loja associada e nenhum storeId foi informado para a correção.`,
       );
     }
-    const oldDelta = computeBalanceDelta((original as any).type, (original as any).quantity);
-    const newDelta = computeBalanceDelta((original as any).type, newQuantity);
+    const oldDelta = computeBalanceDelta(original.type, original.quantity);
+    const newDelta = computeBalanceDelta(original.type, newQuantity);
     const diff = newDelta.onHand - oldDelta.onHand;
-    const originalBoxId = (original as any).toBoxId ?? (original as any).fromBoxId;
+    const originalBoxId = original.toBoxId ?? original.fromBoxId;
     return this.adjust({
-      productId: String((original as any).productId),
+      productId: original.productId,
       storeId,
       quantity: diff,
-      condition: (original as any).condition ?? 'new',
-      reason: `Correção do movimento ${movementId} (qtd ${(original as any).quantity} → ${newQuantity})`,
-      toBoxId: originalBoxId ? String(originalBoxId) : undefined,
+      condition: original.condition ?? 'new',
+      reason: `Correção do movimento ${movementId} (qtd ${original.quantity} → ${newQuantity})`,
+      toBoxId: originalBoxId,
     });
   }
 }

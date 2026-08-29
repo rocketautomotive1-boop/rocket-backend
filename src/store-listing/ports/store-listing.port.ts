@@ -9,6 +9,7 @@ import {
 import { StoreListingDamagedAllocationModel } from '../schemas/store-listing-damaged-allocation.schema';
 import { AllocationModel } from '../../product/schemas/allocation.schema';
 import { BoxModel } from '../../product/schemas/box.schema';
+import { ClientSession } from 'mongoose';
 import { StockMovementType } from '../../stock/domain/movement-type';
 import { StockCondition } from '../../stock/schemas/stock-lot.schema';
 
@@ -38,18 +39,53 @@ export interface StoreListingPort {
     accountId: string,
     options?: { externalId?: string | null; status?: MarketplaceListingStatus },
   ): Promise<MarketplaceListingModel & { id: string }>;
-  recordStockMovement(params: {
-    storeListingId: string;
-    type: StockMovementType;
-    quantity: number;
-    condition?: StockCondition;
-    unitCost?: string;
-    lotId?: string;
-    orderId?: string;
-    fromBoxId?: string;
-    toBoxId?: string;
-    reason?: string;
-  }): Promise<{ lotId: string; movementId: string }>;
+  recordStockMovement(
+    params: {
+      storeListingId: string;
+      type: StockMovementType;
+      quantity: number;
+      condition?: StockCondition;
+      unitCost?: string;
+      lotId?: string;
+      orderId?: string;
+      fromBoxId?: string;
+      toBoxId?: string;
+      reason?: string;
+      /** Idempotency key — grava em metadata.externalReference (lido por referenceExists/findExistingReferences). */
+      reference?: string;
+      /** Preço de venda vigente (nunca no unitCost, que é custo do lote). */
+      salePrice?: number;
+    },
+    session?: ClientSession,
+  ): Promise<{ lotId: string; movementId: string }>;
+  /**
+   * True se já existe um movimento com esse metadata.externalReference (idempotência) —
+   * usado por StockService.moveOnce (Contract) antes de gravar. session opcional: participa da
+   * transação real quando informada.
+   */
+  referenceExists(reference: string, session?: ClientSession): Promise<boolean>;
+  /**
+   * onHand somado de um (productId, storeId, condition) — usado por StockService.correctTo
+   * (Contract) para calcular o diff contra o alvo. Sem StoreListing para o par → 0.
+   */
+  getConditionOnHand(productId: string, storeId: string, condition: StockCondition): Promise<number>;
+  /**
+   * Busca um movimento pelo seu _id, resolvendo o storeId da loja dona via o StoreListing
+   * associado. Usado por StockService.reverseMovement/editMovementViaAdjustment (Contract) —
+   * essas operações precisam do type/quantity original para calcular o delta de compensação.
+   */
+  findMovementById(movementId: string): Promise<
+    | {
+        type: StockMovementType;
+        quantity: number;
+        condition: StockCondition;
+        productId: string;
+        storeId: string;
+        toBoxId?: string;
+        fromBoxId?: string;
+      }
+    | null
+  >;
 
   createWarehouse(
     storeId: string,
