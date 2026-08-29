@@ -84,6 +84,13 @@ export class StoreListingStockQueryService implements StockQueryPort, StoreAware
     return map;
   }
 
+  /**
+   * Full scan de store_listing_stock_balances (sem $match de entrada) — estrutural, não um bug:
+   * "todos os produtos que satisfazem X" não tem como filtrar antes do $group. Índice de
+   * auditoria (2026-08-29, produção): 2.648 docs em store_listing_stock_balances, scan completo
+   * é da ordem de poucos ms nesse volume. Reavaliar (paginação, ou materializar um agregado por
+   * produto) se a coleção crescer pra ordem de centenas de milhares — hoje é prematuro.
+   */
   async getProductIdsWithMinStock(min: number): Promise<string[]> {
     const rows = await this.balanceModel.aggregate([
       { $lookup: { from: 'store_listings', localField: 'storeListingId', foreignField: '_id', as: 'sl' } },
@@ -95,6 +102,7 @@ export class StoreListingStockQueryService implements StockQueryPort, StoreAware
     return rows.map((r) => String(r._id));
   }
 
+  /** Ver comentário de getProductIdsWithMinStock — mesmo padrão estrutural de full scan. */
   async getProductIdsWithMaxStock(max: number): Promise<string[]> {
     const rows = await this.balanceModel.aggregate([
       { $lookup: { from: 'store_listings', localField: 'storeListingId', foreignField: '_id', as: 'sl' } },

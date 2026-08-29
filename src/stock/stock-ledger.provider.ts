@@ -71,6 +71,14 @@ export class StockLedgerProvider implements StockLedgerPort {
     return { movementIds, items: deducted };
   }
 
+  /**
+   * Sem externalSession, diferente de deductAndLink — de propósito: revert() roda no
+   * cancelamento de um pedido JÁ persistido em uma transação anterior (própria, já commitada),
+   * seja via OrderCancellationService (webhook de cancelamento) seja via
+   * OrderSyncPipeline.handleCancellation (divergência detectada no sync). Não há uma transação
+   * de pedido "em andamento" para esta chamada se juntar — cada call site abre a sua própria
+   * (move() sem session cria uma nova, com retry em write conflict).
+   */
   async revert(
     orderId: string,
     items: Array<StockItem & { unitPrice: number }>,
@@ -95,6 +103,12 @@ export class StockLedgerProvider implements StockLedgerPort {
     }
   }
 
+  /**
+   * Sem externalSession, diferente de deductAndLink — de propósito: usado por
+   * OrderEventsListener reagindo a ORDER_PROCESSED depois que o pedido já foi persistido
+   * (evento emitido pós-commit da própria transação de ingest). Não há transação de pedido em
+   * andamento aqui para se juntar; cada item some sua própria (move() sem session).
+   */
   async deductStandalone(
     orderId: string,
     items: StockItem[],
