@@ -11,6 +11,32 @@ interface ShortTitleSearchHit {
     score: number;
 }
 
+// Conectivos comuns em títulos de marketplace pt-BR — não carregam sinal de
+// categoria, então não devem ocupar posição no boost por palavra-núcleo.
+const STOPWORDS = new Set(['de', 'do', 'da', 'dos', 'das', 'e', 'para', 'com', 'em', 'a', 'o']);
+
+// Boost decrescente por posição: a primeira palavra relevante do título costuma
+// carregar o sinal mais forte sobre a peça (ex: "Airbag" em "Airbag de Volante
+// Toro 2016-2021"), enquanto qualificadores mais tarde no texto (posição, lado,
+// aplicação) não devem competir de igual pra igual no score do Atlas Search.
+const POSITIONAL_BOOSTS = [3, 2];
+const MAX_BOOSTED_WORDS = POSITIONAL_BOOSTS.length;
+
+export function buildPositionalBoostClauses(titleText: string): Array<{ text: { query: string; path: string[]; score: { boost: { value: number } } } }> {
+    const words = titleText
+        .trim()
+        .split(/\s+/)
+        .filter((w) => w && !STOPWORDS.has(w.toLowerCase()));
+
+    return words.slice(0, MAX_BOOSTED_WORDS).map((word, i) => ({
+        text: {
+            query: word,
+            path: ['text', 'synonyms'],
+            score: { boost: { value: POSITIONAL_BOOSTS[i] } },
+        },
+    }));
+}
+
 /**
  * Resolve automaticamente Product.titleId a partir do texto de um título de
  * marketplace (ex: "Kit Pastilha Freio Dianteiro Civic 2016-2021"), usando
@@ -100,6 +126,7 @@ export class ShortTitleDiscoveryService {
                                     fuzzy: { maxEdits: 1 },
                                 },
                             },
+                            ...buildPositionalBoostClauses(titleText),
                         ],
                     },
                 },

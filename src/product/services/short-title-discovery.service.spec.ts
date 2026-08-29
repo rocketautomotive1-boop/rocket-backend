@@ -1,9 +1,22 @@
 import { Test } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
-import { ShortTitleDiscoveryService } from './short-title-discovery.service';
+import { ShortTitleDiscoveryService, buildPositionalBoostClauses } from './short-title-discovery.service';
 import { ProductShortTitleModel } from '../schemas/product-short-title.schema';
 import { ProductModel } from '../schemas/product.schema';
+
+describe('buildPositionalBoostClauses', () => {
+    it('dá boost decrescente às primeiras palavras do título, ignorando stopwords', () => {
+        const clauses = buildPositionalBoostClauses('Airbag de Volante Toro 2016-2021');
+
+        expect(clauses[0]).toMatchObject({ text: { query: 'Airbag', score: { boost: { value: 3 } } } });
+        expect(clauses[1]).toMatchObject({ text: { query: 'Volante', score: { boost: { value: 2 } } } });
+    });
+
+    it('não gera clause para título vazio', () => {
+        expect(buildPositionalBoostClauses('   ')).toEqual([]);
+    });
+});
 
 describe('ShortTitleDiscoveryService', () => {
     let service: ShortTitleDiscoveryService;
