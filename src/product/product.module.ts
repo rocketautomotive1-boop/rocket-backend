@@ -110,6 +110,7 @@ import { PublicationTriggerListener } from './listeners/publication-trigger.list
 import { ContentResyncListener } from './listeners/content-resync.listener';
 import { ShortTitleDiscoveryService } from './services/short-title-discovery.service';
 import { ShortTitleDiscoveryListener } from './listeners/short-title-discovery.listener';
+import { TitleCategoryAutoApplyListener } from './listeners/title-category-auto-apply.listener';
 import { ReadinessRecoveryJob } from './jobs/readiness-recovery.job';
 import { CategorySnapshotService } from './services/category-snapshot.service';
 
@@ -233,6 +234,7 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
     ContentResyncListener,
     ShortTitleDiscoveryService,
     ShortTitleDiscoveryListener,
+    TitleCategoryAutoApplyListener,
     ReadinessRecoveryJob,
     CategorySnapshotService,
     // Hexagonal port implementations consumed by OrderModule

@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Model, Types } from 'mongoose';
 import { ProductShortTitleModel, ProductShortTitleDocument } from '../schemas/product-short-title.schema';
 import { ProductModel, ProductDocument } from '../schemas/product.schema';
+import { PRODUCT_SECTION_EVENTS, ProductTitleIdResolvedEvent } from '../events/product-section-saved.event';
 
 interface ShortTitleSearchHit {
     _id: Types.ObjectId;
@@ -64,6 +66,7 @@ export class ShortTitleDiscoveryService {
         private readonly titleModel: Model<ProductShortTitleDocument>,
         @InjectModel(ProductModel.name)
         private readonly productModel: Model<ProductDocument>,
+        private readonly eventEmitter: EventEmitter2,
     ) { }
 
     /**
@@ -98,6 +101,13 @@ export class ShortTitleDiscoveryService {
             this.logger.log(
                 `Product ${productId}: titleId resolvido via discovery (shortTitle="${match.text}", score=${match.score.toFixed(2)})`,
             );
+
+            try {
+                this.eventEmitter.emit(
+                    PRODUCT_SECTION_EVENTS.TITLE_ID_RESOLVED,
+                    new ProductTitleIdResolvedEvent(productId, match._id.toHexString()),
+                );
+            } catch { }
         } catch (err) {
             this.logger.error(
                 `resolveForProduct falhou (productId=${productId}): ${(err as Error).message}`,

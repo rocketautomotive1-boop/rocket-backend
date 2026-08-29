@@ -2,6 +2,7 @@ export const PRODUCT_SECTION_EVENTS = {
   DIMENSIONS_SAVED: 'product.dimensions.saved',
   IMAGES_SAVED: 'product.images.saved',
   TITLES_SAVED: 'product.titles.saved',
+  TITLE_ID_RESOLVED: 'product.titleId.resolved',
   CATEGORY_SAVED: 'product.category.saved',
   INVENTORY_SAVED: 'product.inventory.saved',
   DATA_SAVED: 'product.data.saved',
@@ -18,6 +19,14 @@ export class ProductImagesSavedEvent {
 
 export class ProductTitlesSavedEvent {
   constructor(public readonly productId: string, public readonly at: Date = new Date()) {}
+}
+
+export class ProductTitleIdResolvedEvent {
+  constructor(
+    public readonly productId: string,
+    public readonly titleId: string,
+    public readonly at: Date = new Date(),
+  ) {}
 }
 
 export class ProductCategorySavedEvent {

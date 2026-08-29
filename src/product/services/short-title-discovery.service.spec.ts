@@ -1,9 +1,11 @@
 import { Test } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Types } from 'mongoose';
 import { ShortTitleDiscoveryService, buildPositionalBoostClauses } from './short-title-discovery.service';
 import { ProductShortTitleModel } from '../schemas/product-short-title.schema';
 import { ProductModel } from '../schemas/product.schema';
+import { PRODUCT_SECTION_EVENTS, ProductTitleIdResolvedEvent } from '../events/product-section-saved.event';
 
 describe('buildPositionalBoostClauses', () => {
     it('dá boost decrescente às primeiras palavras do título, ignorando stopwords', () => {
@@ -22,6 +24,7 @@ describe('ShortTitleDiscoveryService', () => {
     let service: ShortTitleDiscoveryService;
     let titleModel: { aggregate: jest.Mock };
     let productModel: { findById: jest.Mock; updateOne: jest.Mock };
+    let eventEmitter: { emit: jest.Mock };
 
     const productId = new Types.ObjectId().toHexString();
     const shortTitleId = new Types.ObjectId();
@@ -36,12 +39,14 @@ describe('ShortTitleDiscoveryService', () => {
             }),
             updateOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({}) }),
         };
+        eventEmitter = { emit: jest.fn() };
 
         const module = await Test.createTestingModule({
             providers: [
                 ShortTitleDiscoveryService,
                 { provide: getModelToken(ProductShortTitleModel.name), useValue: titleModel },
                 { provide: getModelToken(ProductModel.name), useValue: productModel },
+                { provide: EventEmitter2, useValue: eventEmitter },
             ],
         }).compile();
 
@@ -95,6 +100,43 @@ describe('ShortTitleDiscoveryService', () => {
                 },
             },
         );
+    });
+
+    it('emite TITLE_ID_RESOLVED quando titleId é aplicado com sucesso', async () => {
+        mockAggregate([
+            { _id: shortTitleId, text: 'Kit Pastilha de Freio', synonyms: [], score: 5 },
+            { _id: new Types.ObjectId(), text: 'Kit Pastilha de Embreagem', synonyms: [], score: 2 },
+        ]);
+
+        await service.resolveForProduct(productId, 'Kit Pastilha Freio Dianteiro Civic 2016-2021');
+
+        expect(eventEmitter.emit).toHaveBeenCalledWith(
+            PRODUCT_SECTION_EVENTS.TITLE_ID_RESOLVED,
+            expect.any(ProductTitleIdResolvedEvent),
+        );
+        const event = eventEmitter.emit.mock.calls[0][1] as ProductTitleIdResolvedEvent;
+        expect(event.productId).toBe(productId);
+        expect(event.titleId).toBe(shortTitleId.toHexString());
+    });
+
+    it('não emite TITLE_ID_RESOLVED quando titleId já existia', async () => {
+        productModel.findById.mockReturnValue({
+            select: jest.fn().mockReturnThis(),
+            lean: jest.fn().mockReturnThis(),
+            exec: jest.fn().mockResolvedValue({ titleId: new Types.ObjectId() }),
+        });
+
+        await service.resolveForProduct(productId, 'Kit Pastilha de Freio');
+
+        expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('não emite TITLE_ID_RESOLVED quando nenhum match é aplicado', async () => {
+        mockAggregate([]);
+
+        await service.resolveForProduct(productId, 'Peça nunca vista');
+
+        expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
     it('não aplica quando os dois melhores resultados estão empatados/próximos', async () => {
