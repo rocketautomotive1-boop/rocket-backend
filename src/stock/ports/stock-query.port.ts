@@ -49,3 +49,36 @@ export interface StockQueryPort {
   /** Subset of the given references that already have at least one movement. */
   findExistingReferences(references: string[]): Promise<string[]>;
 }
+
+export const STORE_AWARE_STOCK_QUERY_PORT = Symbol('STORE_AWARE_STOCK_QUERY_PORT');
+
+/**
+ * Store-aware reads (Fase 4, sub-projeto 3) — used only by the authenticated inventory screen,
+ * which has the real storeId of the logged-in user. No StoreListing for (productId, storeId) →
+ * zeroed/empty (never inherits another store's stock). storeId is explicit here, unlike the
+ * bare productId reads on StockQueryPort (which resolve "the owning store" internally) — a
+ * user's own store isn't necessarily the product's only StoreListing.
+ *
+ * Separate from StockQueryPort (not just extra methods on it) because StockQueryPort has two
+ * implementations — StoreListingStockQueryService (store-aware) and the legacy StockQueryService
+ * (stock_balances/stock_lots, no notion of store) — and the legacy one has no way to implement
+ * these. Only StoreAwareStockQueryPort-typed consumers (StockController,
+ * ProductMovementController) need to know this variant exists.
+ */
+export interface StoreAwareStockQueryPort {
+  getStoreStockSummary(
+    productId: string,
+    storeId: string,
+  ): Promise<{ onHand: number; reserved: number; available: number; avgCost: number }>;
+  getStoreStockByCondition(productId: string, storeId: string): Promise<ConditionBalance[]>;
+  getStoreStockByLocation(productId: string, storeId: string): Promise<LocationBalance[]>;
+  listStoreStockMovements(
+    productId: string,
+    storeId: string,
+    limit?: number,
+  ): Promise<Array<{ id: string; type: string; quantity: number; date: Date; unitCost?: number; condition: string; reason?: string }>>;
+  getStoreStockMovementStatistics(
+    productId: string,
+    storeId: string,
+  ): Promise<Record<string, { count: number; quantity: number }>>;
+}

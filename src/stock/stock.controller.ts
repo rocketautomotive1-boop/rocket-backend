@@ -2,14 +2,14 @@ import { Controller, Get, Post, Param, Body, Req, UseGuards, Inject, BadRequestE
 import { StockReconcilerService } from './stock-reconciler.service';
 import { StockService } from './stock.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
+import { STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from './ports/stock-query.port';
 
 @Controller('stock')
 export class StockController {
   constructor(
     private readonly reconciler: StockReconcilerService,
     private readonly stock: StockService,
-    @Inject(STORE_LISTING_PORT) private readonly storeListingPort: StoreListingPort,
+    @Inject(STORE_AWARE_STOCK_QUERY_PORT) private readonly stockQuery: StoreAwareStockQueryPort,
   ) {}
 
   private requireStoreId(req: any): string {
@@ -34,20 +34,20 @@ export class StockController {
   @UseGuards(JwtAuthGuard)
   async balance(@Param('productId') productId: string, @Req() req: any) {
     const storeId = this.requireStoreId(req);
-    const summary = await this.storeListingPort.getStockSummary(productId, storeId);
+    const summary = await this.stockQuery.getStoreStockSummary(productId, storeId);
     return { productId, ...summary };
   }
 
   @Get(':productId/balance/by-condition')
   @UseGuards(JwtAuthGuard)
   byCondition(@Param('productId') productId: string, @Req() req: any) {
-    return this.storeListingPort.getStockByCondition(productId, this.requireStoreId(req));
+    return this.stockQuery.getStoreStockByCondition(productId, this.requireStoreId(req));
   }
 
   @Get(':productId/balance/by-location')
   @UseGuards(JwtAuthGuard)
   byLocation(@Param('productId') productId: string, @Req() req: any) {
-    return this.storeListingPort.getStockByLocation(productId, this.requireStoreId(req));
+    return this.stockQuery.getStoreStockByLocation(productId, this.requireStoreId(req));
   }
 
   @Post(':productId/correct-to')

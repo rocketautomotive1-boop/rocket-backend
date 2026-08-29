@@ -9,13 +9,12 @@ import { ListingModel } from '../listing/schemas/listing.schema';
 import { UserModel } from '../auth/schemas/user.schema';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 import { MarketplaceConfigCacheService } from '../marketplace/services/marketplace-config-cache.service';
-import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
+import { STOCK_QUERY_PORT, StockQueryPort, STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from '../stock/ports/stock-query.port';
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { CategorySnapshotService } from '../product/services/category-snapshot.service';
 import { ProductService } from '../product/product.service';
 import { ProductCompatibilityPositionService } from '../product/services/product-compatibility-position.service';
 import { StoreService } from '../store/services/store.service';
-import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
 
 // Piloto Fase 2 (catalog listing): só category_id do ML já validados ao vivo como
 // portadores de POSITION/SIDE_POSITION no catálogo de peças (GET /categories/{id}/attributes).
@@ -36,12 +35,12 @@ export class InternalProductController {
         private readonly configCache: MarketplaceConfigCacheService,
         private readonly descriptionService: MarketplaceDescriptionService,
         @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
+        @Inject(STORE_AWARE_STOCK_QUERY_PORT) private readonly storeAwareStockQuery: StoreAwareStockQueryPort,
         @Inject(PRICING_PORT) private readonly pricing: PricingPort,
         private readonly categorySnapshot: CategorySnapshotService,
         @Inject(forwardRef(() => ProductService)) private readonly productService: ProductService,
         private readonly compatibilityPosition: ProductCompatibilityPositionService,
         private readonly storeService: StoreService,
-        @Inject(STORE_LISTING_PORT) private readonly storeListing: StoreListingPort,
     ) {}
 
     @Get(':id')
@@ -97,7 +96,7 @@ export class InternalProductController {
         // (null → no price).
         const [stockOnHand, basePrice, effectivePrice] = await Promise.all([
             storeId
-                ? this.storeListing.getStockSummary(id, storeId).then((s) => s.onHand)
+                ? this.storeAwareStockQuery.getStoreStockSummary(id, storeId).then((s) => s.onHand)
                 : this.stockQuery.getProductStock(id).then((s) => s.onHand),
             this.pricing.getBasePrice(id),
             this.pricing.getEffectivePrice(id, marketplaceId),

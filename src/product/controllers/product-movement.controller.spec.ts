@@ -1,22 +1,22 @@
 import { BadRequestException } from '@nestjs/common';
 import { ProductMovementController } from './product-movement.controller';
 import { StockService } from '../../stock/stock.service';
-import { StoreListingPort } from '../../store-listing/ports/store-listing.port';
+import { StoreAwareStockQueryPort } from '../../stock/ports/stock-query.port';
 
 describe('ProductMovementController', () => {
   let controller: ProductMovementController;
   let stock: { move: jest.Mock; editMovementViaAdjustment: jest.Mock; reverseMovement: jest.Mock };
-  let storeListingPort: { listStockMovements: jest.Mock; getStockMovementStatistics: jest.Mock };
+  let stockQuery: { listStoreStockMovements: jest.Mock; getStoreStockMovementStatistics: jest.Mock };
 
   const reqWithStore = { user: { id: 'u1', storeId: 'store-maxeshop' } };
   const reqWithoutStore = { user: { id: 'u1', storeId: null } };
 
   beforeEach(() => {
     stock = { move: jest.fn(), editMovementViaAdjustment: jest.fn(), reverseMovement: jest.fn() };
-    storeListingPort = { listStockMovements: jest.fn(), getStockMovementStatistics: jest.fn() };
+    stockQuery = { listStoreStockMovements: jest.fn(), getStoreStockMovementStatistics: jest.fn() };
     controller = new ProductMovementController(
       stock as unknown as StockService,
-      storeListingPort as unknown as StoreListingPort,
+      stockQuery as unknown as StoreAwareStockQueryPort,
     );
   });
 
@@ -70,47 +70,47 @@ describe('ProductMovementController', () => {
   });
 
   describe('findAll / findByProduct / getStatistics (leitura store-aware)', () => {
-    it('findAll resolve via STORE_LISTING_PORT usando o storeId do usuário logado', async () => {
-      storeListingPort.listStockMovements.mockResolvedValue([{ id: 'm1' }]);
+    it('findAll resolve via STORE_AWARE_STOCK_QUERY_PORT usando o storeId do usuário logado', async () => {
+      stockQuery.listStoreStockMovements.mockResolvedValue([{ id: 'm1' }]);
 
       const result = await controller.findAll('p1', reqWithStore);
 
-      expect(storeListingPort.listStockMovements).toHaveBeenCalledWith('p1', 'store-maxeshop', 200);
+      expect(stockQuery.listStoreStockMovements).toHaveBeenCalledWith('p1', 'store-maxeshop', 200);
       expect(result).toEqual([{ id: 'm1' }]);
     });
 
     it('findAll retorna [] sem consultar quando productId não é informado', async () => {
       const result = await controller.findAll(undefined, reqWithStore);
       expect(result).toEqual([]);
-      expect(storeListingPort.listStockMovements).not.toHaveBeenCalled();
+      expect(stockQuery.listStoreStockMovements).not.toHaveBeenCalled();
     });
 
-    it('findByProduct resolve via STORE_LISTING_PORT usando o storeId do usuário logado', async () => {
-      storeListingPort.listStockMovements.mockResolvedValue([{ id: 'm2' }]);
+    it('findByProduct resolve via STORE_AWARE_STOCK_QUERY_PORT usando o storeId do usuário logado', async () => {
+      stockQuery.listStoreStockMovements.mockResolvedValue([{ id: 'm2' }]);
 
       await controller.findByProduct('p1', reqWithStore);
 
-      expect(storeListingPort.listStockMovements).toHaveBeenCalledWith('p1', 'store-maxeshop', 200);
+      expect(stockQuery.listStoreStockMovements).toHaveBeenCalledWith('p1', 'store-maxeshop', 200);
     });
 
     it('findByProduct rejeita com 400 sem storeId', async () => {
       await expect(controller.findByProduct('p1', reqWithoutStore)).rejects.toThrow(BadRequestException);
-      expect(storeListingPort.listStockMovements).not.toHaveBeenCalled();
+      expect(stockQuery.listStoreStockMovements).not.toHaveBeenCalled();
     });
 
-    it('getStatistics resolve via STORE_LISTING_PORT usando o storeId do usuário logado', async () => {
-      storeListingPort.getStockMovementStatistics.mockResolvedValue({ inbound: { count: 1, quantity: 5 } });
+    it('getStatistics resolve via STORE_AWARE_STOCK_QUERY_PORT usando o storeId do usuário logado', async () => {
+      stockQuery.getStoreStockMovementStatistics.mockResolvedValue({ inbound: { count: 1, quantity: 5 } });
 
       const result = await controller.getStatistics('p1', reqWithStore);
 
-      expect(storeListingPort.getStockMovementStatistics).toHaveBeenCalledWith('p1', 'store-maxeshop');
+      expect(stockQuery.getStoreStockMovementStatistics).toHaveBeenCalledWith('p1', 'store-maxeshop');
       expect(result).toEqual({ inbound: { count: 1, quantity: 5 } });
     });
 
     it('getStatistics retorna {} sem consultar quando productId não é informado', async () => {
       const result = await controller.getStatistics(undefined, reqWithStore);
       expect(result).toEqual({});
-      expect(storeListingPort.getStockMovementStatistics).not.toHaveBeenCalled();
+      expect(stockQuery.getStoreStockMovementStatistics).not.toHaveBeenCalled();
     });
   });
 });

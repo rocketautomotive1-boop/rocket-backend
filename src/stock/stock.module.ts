@@ -10,7 +10,7 @@ import { StoreListingStockQueryService } from './store-listing-stock-query.servi
 import { StockReconcilerService } from './stock-reconciler.service';
 import { StockLedgerProvider } from './stock-ledger.provider';
 import { StockController } from './stock.controller';
-import { STOCK_QUERY_PORT } from './ports/stock-query.port';
+import { STOCK_QUERY_PORT, STORE_AWARE_STOCK_QUERY_PORT } from './ports/stock-query.port';
 import { STOCK_LEDGER_PORT } from '../order/ports/stock-ledger.port';
 import { StoreListingModule } from '../store-listing/store-listing.module';
 import { StoreListingModel, StoreListingSchema } from '../store-listing/schemas/store-listing.schema';
@@ -39,13 +39,21 @@ import { AuthModule } from '../auth/auth.module';
  *
  * Contract (sub-projeto 4, 2026-08-28): STOCK_QUERY_PORT aponta para
  * StoreListingStockQueryService (lê StoreListing, resolvendo a loja dona do produto via
- * STORE_LISTING_PORT.findAnyByProduct — mesma regra que o pipeline de pedidos já usa), não mais
- * para StockQueryService (legado, stock_balances). StockQueryService continua registrado até a
+ * STORE_OWNER_LOOKUP_PORT — mesma regra que o pipeline de pedidos já usa), não mais para
+ * StockQueryService (legado, stock_balances). StockQueryService continua registrado até a
  * remoção completa do legado (schemas/repository/reconciler) — ver
  * docs/superpowers/specs/2026-08-28-stock-contract-legacy-cutover-design.md. Os schemas de
  * StoreListing precisam de forFeature próprio aqui: Mongoose exige registro por módulo mesmo
  * quando a collection já está registrada em outro (StoreListingModule só exporta o port, não os
  * models).
+ *
+ * DI cycle fix (2026-08-29): StoreListingStockQueryService (o que STOCK_QUERY_PORT resolve) e
+ * StockLedgerProvider injetam STORE_OWNER_LOOKUP_PORT (port folha, só findStoreIdByProduct), não
+ * STORE_LISTING_PORT — usar o port completo aqui criava um ciclo real de instanciação com
+ * StoreListingService (que injeta STOCK_QUERY_PORT para getAllocationProducts), travando o boot
+ * silenciosamente em produção. StockService (dual-write, fase 3 acima) continua injetando
+ * STORE_LISTING_PORT completo — não participa desse ciclo porque nada em StoreListingService
+ * depende de StockService de volta. Ver docs/superpowers/specs/2026-08-29-stock-store-listing-di-cycle-fix-design.md.
  */
 @Global()
 @Module({
@@ -70,8 +78,9 @@ import { AuthModule } from '../auth/auth.module';
     StockReconcilerService,
     StockLedgerProvider,
     { provide: STOCK_QUERY_PORT, useExisting: StoreListingStockQueryService },
+    { provide: STORE_AWARE_STOCK_QUERY_PORT, useExisting: StoreListingStockQueryService },
     { provide: STOCK_LEDGER_PORT, useExisting: StockLedgerProvider },
   ],
-  exports: [STOCK_QUERY_PORT, STOCK_LEDGER_PORT, StockService, StockQueryService],
+  exports: [STOCK_QUERY_PORT, STORE_AWARE_STOCK_QUERY_PORT, STOCK_LEDGER_PORT, StockService, StockQueryService],
 })
 export class StockModule {}

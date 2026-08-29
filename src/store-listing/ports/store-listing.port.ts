@@ -51,48 +51,6 @@ export interface StoreListingPort {
     reason?: string;
   }): Promise<{ lotId: string; movementId: string }>;
 
-  /**
-   * Leitura store-aware do saldo (Fase 4, sub-projeto 3) — usada só pela tela de inventário,
-   * que tem storeId real do usuário autenticado. Sem StoreListing para (productId, storeId) →
-   * zero, sem fallback pra outra loja (decisão explícita: uma loja sem estoque próprio nunca
-   * herda o saldo de outra).
-   */
-  getStockSummary(
-    productId: string,
-    storeId: string,
-  ): Promise<{ onHand: number; reserved: number; available: number; avgCost: number }>;
-  getStockByCondition(
-    productId: string,
-    storeId: string,
-  ): Promise<Array<{ condition: StockCondition; onHand: number; reserved: number }>>;
-  getStockByLocation(
-    productId: string,
-    storeId: string,
-  ): Promise<Array<{ boxId: string | null; onHand: number; reserved: number }>>;
-
-  /** Histórico de movimentações store-aware, mais recente primeiro. Sem StoreListing → []. */
-  listStockMovements(
-    productId: string,
-    storeId: string,
-    limit?: number,
-  ): Promise<
-    Array<{
-      id: string;
-      type: StockMovementType;
-      quantity: number;
-      date: Date;
-      unitCost?: number;
-      salePrice?: number;
-      condition: StockCondition;
-      reason?: string;
-    }>
-  >;
-  /** Estatísticas por tipo de movimento, store-aware. Sem StoreListing → {}. */
-  getStockMovementStatistics(
-    productId: string,
-    storeId: string,
-  ): Promise<Record<string, { count: number; quantity: number }>>;
-
   createWarehouse(
     storeId: string,
     name: string,

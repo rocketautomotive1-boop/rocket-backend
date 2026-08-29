@@ -1,26 +1,26 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { StockLedgerProvider } from './stock-ledger.provider';
 import { StockService } from './stock.service';
-import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
+import { STORE_OWNER_LOOKUP_PORT } from '../store-listing/ports/store-owner-lookup.port';
 import { StockMovementType } from './domain/movement-type';
 
 describe('StockLedgerProvider', () => {
   let provider: StockLedgerProvider;
   let stock: { move: jest.Mock; mirrorMoveToStoreListing: jest.Mock };
-  let storeListingPort: { findAnyByProduct: jest.Mock };
+  let storeOwnerLookup: { findStoreIdByProduct: jest.Mock };
 
   const P1 = 'product-1';
   const STORE_A = 'store-a';
 
   beforeEach(async () => {
     stock = { move: jest.fn(), mirrorMoveToStoreListing: jest.fn() };
-    storeListingPort = { findAnyByProduct: jest.fn() };
+    storeOwnerLookup = { findStoreIdByProduct: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         StockLedgerProvider,
         { provide: StockService, useValue: stock },
-        { provide: STORE_LISTING_PORT, useValue: storeListingPort },
+        { provide: STORE_OWNER_LOOKUP_PORT, useValue: storeOwnerLookup },
       ],
     }).compile();
 
@@ -29,7 +29,7 @@ describe('StockLedgerProvider', () => {
 
   describe('deductAndLink', () => {
     it('resolves storeId from the product\'s existing StoreListing and passes it to move()', async () => {
-      storeListingPort.findAnyByProduct.mockResolvedValue({ storeId: STORE_A });
+      storeOwnerLookup.findStoreIdByProduct.mockResolvedValue(STORE_A);
       stock.move.mockResolvedValue({ movementId: 'm1', lotId: 'l1' });
 
       const session: any = {};
@@ -44,7 +44,7 @@ describe('StockLedgerProvider', () => {
     });
 
     it('skips an item (without throwing, without a default-store fallback) when the product has no StoreListing', async () => {
-      storeListingPort.findAnyByProduct.mockResolvedValue(null);
+      storeOwnerLookup.findStoreIdByProduct.mockResolvedValue(null);
 
       const result = await provider.deductAndLink('order-1', [{ productId: P1, quantity: 2 }], 'ref-1', 'ML', {} as any);
 
@@ -56,7 +56,7 @@ describe('StockLedgerProvider', () => {
 
   describe('mirrorAfterCommit', () => {
     it('mirrors each deducted item using the resolved storeId, never throws on failure', async () => {
-      storeListingPort.findAnyByProduct.mockResolvedValue({ storeId: STORE_A });
+      storeOwnerLookup.findStoreIdByProduct.mockResolvedValue(STORE_A);
       stock.mirrorMoveToStoreListing.mockRejectedValueOnce(new Error('boom'));
 
       await expect(
@@ -71,7 +71,7 @@ describe('StockLedgerProvider', () => {
 
   describe('revert', () => {
     it('resolves storeId per item before calling move()', async () => {
-      storeListingPort.findAnyByProduct.mockResolvedValue({ storeId: STORE_A });
+      storeOwnerLookup.findStoreIdByProduct.mockResolvedValue(STORE_A);
       stock.move.mockResolvedValue({ movementId: 'm2', lotId: 'l2' });
 
       await provider.revert('order-1', [{ productId: P1, quantity: 1, unitPrice: 10 }], 'cancel:order-1');
@@ -84,7 +84,7 @@ describe('StockLedgerProvider', () => {
 
   describe('deductStandalone', () => {
     it('resolves storeId per item before calling move()', async () => {
-      storeListingPort.findAnyByProduct.mockResolvedValue({ storeId: STORE_A });
+      storeOwnerLookup.findStoreIdByProduct.mockResolvedValue(STORE_A);
       stock.move.mockResolvedValue({ movementId: 'm3', lotId: 'l3' });
 
       const result = await provider.deductStandalone('order-1', [{ productId: P1, quantity: 3 }], 'ref-2', 'Shopee');

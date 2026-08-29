@@ -11,8 +11,10 @@ import { StoreListingDamagedAllocationModel, StoreListingDamagedAllocationSchema
 import { AllocationModel, AllocationSchema } from '../product/schemas/allocation.schema';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
 import { StoreListingService } from './store-listing.service';
+import { StoreOwnerLookupService } from './store-owner-lookup.service';
 import { StoreListingController } from './store-listing.controller';
 import { STORE_LISTING_PORT } from './ports/store-listing.port';
+import { STORE_OWNER_LOOKUP_PORT } from './ports/store-owner-lookup.port';
 import { AuthModule } from '../auth/auth.module';
 import { PricingModule } from '../pricing/pricing.module';
 
@@ -38,6 +40,17 @@ import { PricingModule } from '../pricing/pricing.module';
  * ciclo, então StockModule é @Global (mesmo padrão de StoreModule) e o port é
  * injetado aqui sem import direto. PRICING_PORT vem de PricingModule, folha
  * (sem import de domínio), sem risco de ciclo.
+ *
+ * STORE_OWNER_LOOKUP_PORT (StoreOwnerLookupService): port folha só com
+ * findStoreIdByProduct — existe para que consumidores que só precisam da loja
+ * dona de um produto (StockLedgerProvider, StoreListingStockQueryService) não
+ * injetem STORE_LISTING_PORT inteiro. Extraído em 2026-08-29 depois de um
+ * ciclo real de instanciação: StoreListingService injeta STOCK_QUERY_PORT
+ * (getAllocationProducts) e, quando STOCK_QUERY_PORT passou a apontar para um
+ * provider que injetava STORE_LISTING_PORT de volta, o boot travava
+ * silenciosamente (sem erro, sem log) — Nest nunca detectou/reportou o ciclo,
+ * só parou de progredir. Nenhum consumidor deve voltar a injetar
+ * STORE_LISTING_PORT só para resolver a loja de um produto.
  */
 @Module({
   imports: [
@@ -57,7 +70,12 @@ import { PricingModule } from '../pricing/pricing.module';
     PricingModule,
   ],
   controllers: [StoreListingController],
-  providers: [StoreListingService, { provide: STORE_LISTING_PORT, useExisting: StoreListingService }],
-  exports: [STORE_LISTING_PORT],
+  providers: [
+    StoreListingService,
+    StoreOwnerLookupService,
+    { provide: STORE_LISTING_PORT, useExisting: StoreListingService },
+    { provide: STORE_OWNER_LOOKUP_PORT, useExisting: StoreOwnerLookupService },
+  ],
+  exports: [STORE_LISTING_PORT, STORE_OWNER_LOOKUP_PORT],
 })
 export class StoreListingModule {}

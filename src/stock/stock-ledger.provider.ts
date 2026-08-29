@@ -3,7 +3,7 @@ import { ClientSession } from 'mongoose';
 import { StockLedgerPort, StockItem } from '../order/ports/stock-ledger.port';
 import { StockService } from './stock.service';
 import { StockMovementType } from './domain/movement-type';
-import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
+import { STORE_OWNER_LOOKUP_PORT, StoreOwnerLookupPort } from '../store-listing/ports/store-owner-lookup.port';
 
 /**
  * The canonical implementation of the order's StockLedgerPort, now living in the StockModule.
@@ -13,7 +13,10 @@ import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/sto
  * Fase 4/Contract: Order não tem noção de loja própria ainda (fica pra quando
  * Order.items[].storeListingId for preenchido, fora de escopo aqui) — resolve a loja dona de cada
  * item via o StoreListing já existente do produto (hoje um produto tem no máximo um StoreListing,
- * então isso é inequívoco). SEM fallback pra loja padrão (removido em 2026-08-28, ver
+ * então isso é inequívoco), via STORE_OWNER_LOOKUP_PORT — port folha, não STORE_LISTING_PORT
+ * inteiro (ver store-owner-lookup.port.ts pro motivo: injetar STORE_LISTING_PORT aqui, junto com
+ * StoreListingService dependendo de STOCK_QUERY_PORT, criava um ciclo real de instanciação). SEM
+ * fallback pra loja padrão (removido em 2026-08-28, ver
  * docs/superpowers/specs/2026-08-28-stock-contract-legacy-cutover-design.md): produto sem NENHUM
  * StoreListing bloqueia a dedução daquele item explicitamente, mesmo princípio já aplicado ao
  * roteamento de publish (accountId ausente bloqueia, nunca adivinha a loja).
@@ -24,12 +27,11 @@ export class StockLedgerProvider implements StockLedgerPort {
 
   constructor(
     private readonly stock: StockService,
-    @Inject(STORE_LISTING_PORT) private readonly storeListingPort: StoreListingPort,
+    @Inject(STORE_OWNER_LOOKUP_PORT) private readonly storeOwnerLookup: StoreOwnerLookupPort,
   ) {}
 
   private async resolveStoreId(productId: string): Promise<string | null> {
-    const existing = await this.storeListingPort.findAnyByProduct(productId);
-    return existing ? existing.storeId.toString() : null;
+    return this.storeOwnerLookup.findStoreIdByProduct(productId);
   }
 
   async deductAndLink(

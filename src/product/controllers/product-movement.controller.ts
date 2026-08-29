@@ -24,7 +24,7 @@ import { UpdateProductMovementDto } from '../dto/update-product-movement.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { StockService } from '../../stock/stock.service';
 import { StockMovementType } from '../../stock/domain/movement-type';
-import { STORE_LISTING_PORT, StoreListingPort } from '../../store-listing/ports/store-listing.port';
+import { STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from '../../stock/ports/stock-query.port';
 
 /**
  * Movement API over the StockModule (single write path). The ledger is append-only:
@@ -32,7 +32,7 @@ import { STORE_LISTING_PORT, StoreListingPort } from '../../store-listing/ports/
  * The HTTP contract is preserved so the inventory UI keeps working.
  *
  * Leitura (findAll/findByProduct/getStatistics) é store-aware (Fase 4): lê via
- * STORE_LISTING_PORT com o storeId do usuário autenticado — sem StoreListing próprio
+ * STORE_AWARE_STOCK_QUERY_PORT com o storeId do usuário autenticado — sem StoreListing próprio
  * pra loja, retorna vazio, nunca mostra o histórico de outra loja.
  */
 @ApiTags('Product Movement')
@@ -42,7 +42,7 @@ import { STORE_LISTING_PORT, StoreListingPort } from '../../store-listing/ports/
 export class ProductMovementController {
   constructor(
     private readonly stock: StockService,
-    @Inject(STORE_LISTING_PORT) private readonly storeListingPort: StoreListingPort,
+    @Inject(STORE_AWARE_STOCK_QUERY_PORT) private readonly stockQuery: StoreAwareStockQueryPort,
   ) {}
 
   private requireStoreId(req: any): string {
@@ -79,13 +79,13 @@ export class ProductMovementController {
   @ApiQuery({ name: 'productId', required: false })
   async findAll(@Query('productId') productId: string | undefined, @Req() req: any): Promise<any[]> {
     if (!productId) return [];
-    return this.storeListingPort.listStockMovements(productId, this.requireStoreId(req), 200);
+    return this.stockQuery.listStoreStockMovements(productId, this.requireStoreId(req), 200);
   }
 
   @Get('product/:productId')
   @ApiOperation({ summary: 'Listar movimentações de um produto' })
   async findByProduct(@Param('productId') productId: string, @Req() req: any): Promise<any[]> {
-    return this.storeListingPort.listStockMovements(productId, this.requireStoreId(req), 200);
+    return this.stockQuery.listStoreStockMovements(productId, this.requireStoreId(req), 200);
   }
 
   @Get('statistics')
@@ -93,7 +93,7 @@ export class ProductMovementController {
   @ApiQuery({ name: 'productId', required: false })
   async getStatistics(@Query('productId') productId: string | undefined, @Req() req: any) {
     if (!productId) return {};
-    return this.storeListingPort.getStockMovementStatistics(productId, this.requireStoreId(req));
+    return this.stockQuery.getStoreStockMovementStatistics(productId, this.requireStoreId(req));
   }
 
   @Post()

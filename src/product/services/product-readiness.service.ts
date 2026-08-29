@@ -4,7 +4,8 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProductRepository } from '../product.repository';
-import { STORE_LISTING_PORT, StoreListingPort } from '../../store-listing/ports/store-listing.port';
+import { STORE_OWNER_LOOKUP_PORT, StoreOwnerLookupPort } from '../../store-listing/ports/store-owner-lookup.port';
+import { STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from '../../stock/ports/stock-query.port';
 import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 import { ProductTitleService } from './product-title.service';
 import { normalizeCompletedAt } from './product-readiness.normalize';
@@ -36,7 +37,8 @@ export class ProductReadinessService {
 
   constructor(
     private readonly productRepository: ProductRepository,
-    @Inject(STORE_LISTING_PORT) private readonly storeListingPort: StoreListingPort,
+    @Inject(STORE_OWNER_LOOKUP_PORT) private readonly storeOwnerLookup: StoreOwnerLookupPort,
+    @Inject(STORE_AWARE_STOCK_QUERY_PORT) private readonly stockQuery: StoreAwareStockQueryPort,
     @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     private readonly productTitleService: ProductTitleService,
     private readonly eventEmitter: EventEmitter2,
@@ -117,9 +119,9 @@ export class ProductReadinessService {
 
     const category = !!(product as any).category;
 
-    const resolvedStoreId = storeId ?? (await this.storeListingPort.findAnyByProduct(productId))?.storeId;
+    const resolvedStoreId = storeId ?? (await this.storeOwnerLookup.findStoreIdByProduct(productId));
     const stockQty = resolvedStoreId
-      ? (await this.storeListingPort.getStockSummary(productId, String(resolvedStoreId))).onHand
+      ? (await this.stockQuery.getStoreStockSummary(productId, String(resolvedStoreId))).onHand
       : 0;
     // Sale price lives in PricingModule (removed from Product in the pricing refactor).
     const priceRaw = await this.pricing.getBasePrice(productId);

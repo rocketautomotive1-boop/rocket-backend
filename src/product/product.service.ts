@@ -13,8 +13,8 @@ import { ProductFilterService } from './services/product-filter.service';
 import { PaginatedResponseDto, ProductFilterDto, ProductStatus } from './dto/product-filter.dto';
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
 import { ProductRepository } from './product.repository';
-import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
-import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
+import { STOCK_QUERY_PORT, StockQueryPort, STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from '../stock/ports/stock-query.port';
+import { STORE_OWNER_LOOKUP_PORT, StoreOwnerLookupPort } from '../store-listing/ports/store-owner-lookup.port';
 import { StockService } from '../stock/stock.service';
 import { resolveMovementCondition, resolveMovementType } from '../stock/domain/movement-type';
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
@@ -67,7 +67,8 @@ export class ProductService {
   constructor(
     private readonly productRepository: ProductRepository,
     @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
-    @Inject(STORE_LISTING_PORT) private readonly storeListingPort: StoreListingPort,
+    @Inject(STORE_AWARE_STOCK_QUERY_PORT) private readonly storeAwareStockQuery: StoreAwareStockQueryPort,
+    @Inject(STORE_OWNER_LOOKUP_PORT) private readonly storeOwnerLookup: StoreOwnerLookupPort,
     @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     private readonly queueService: QueueService,
     private readonly productCompatibilityService: ProductCompatibilityService,
@@ -210,9 +211,9 @@ export class ProductService {
     // Estoque store-aware (mesmo critério de ProductReadinessService.compute): com storeId
     // (usuário logado), lê exatamente essa loja, sem fallback. Sem storeId (chamadores sem
     // usuário), cai na primeira loja com StoreListing — comportamento anterior preservado.
-    const resolvedStoreId = storeId ?? (await this.storeListingPort.findAnyByProduct(id))?.storeId;
+    const resolvedStoreId = storeId ?? (await this.storeOwnerLookup.findStoreIdByProduct(id));
     const stockQty = resolvedStoreId
-      ? (await this.storeListingPort.getStockSummary(id, String(resolvedStoreId))).onHand
+      ? (await this.storeAwareStockQuery.getStoreStockSummary(id, String(resolvedStoreId))).onHand
       : 0;
     const priceRaw = await this.pricing.getBasePrice(id);
     const inventory = stockQty > 0 && priceRaw > 0;

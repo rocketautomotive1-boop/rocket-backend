@@ -7,13 +7,12 @@ import { ListingModel } from '../listing/schemas/listing.schema';
 import { UserModel } from '../auth/schemas/user.schema';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 import { MarketplaceConfigCacheService } from '../marketplace/services/marketplace-config-cache.service';
-import { STOCK_QUERY_PORT } from '../stock/ports/stock-query.port';
+import { STOCK_QUERY_PORT, STORE_AWARE_STOCK_QUERY_PORT } from '../stock/ports/stock-query.port';
 import { PRICING_PORT } from '../pricing/ports/pricing.port';
 import { CategorySnapshotService } from '../product/services/category-snapshot.service';
 import { ProductService } from '../product/product.service';
 import { ProductCompatibilityPositionService } from '../product/services/product-compatibility-position.service';
 import { StoreService } from '../store/services/store.service';
-import { STORE_LISTING_PORT } from '../store-listing/ports/store-listing.port';
 import { InternalKeyGuard } from './internal-key.guard';
 
 describe('InternalProductController — getListings (catalog listing Fase 2)', () => {
@@ -61,12 +60,12 @@ describe('InternalProductController — getListings (catalog listing Fase 2)', (
         { provide: MarketplaceConfigCacheService, useValue: configCache },
         { provide: MarketplaceDescriptionService, useValue: {} },
         { provide: STOCK_QUERY_PORT, useValue: {} },
+        { provide: STORE_AWARE_STOCK_QUERY_PORT, useValue: {} },
         { provide: PRICING_PORT, useValue: {} },
         { provide: CategorySnapshotService, useValue: {} },
         { provide: ProductService, useValue: {} },
         { provide: ProductCompatibilityPositionService, useValue: compatibilityPosition },
         { provide: StoreService, useValue: storeService },
-        { provide: STORE_LISTING_PORT, useValue: {} },
       ],
     })
       .overrideGuard(InternalKeyGuard)
@@ -207,7 +206,7 @@ describe('InternalProductController — getProduct (gate de readiness por loja)'
   let productService: { getProductCompletion: jest.Mock };
   let stockQuery: { getProductStock: jest.Mock };
   let pricing: { getBasePrice: jest.Mock; getEffectivePrice: jest.Mock };
-  let storeListingPort: { getStockSummary: jest.Mock };
+  let storeAwareStockQuery: { getStoreStockSummary: jest.Mock };
 
   const productId = new Types.ObjectId().toHexString();
 
@@ -223,8 +222,8 @@ describe('InternalProductController — getProduct (gate de readiness por loja)'
       getBasePrice: jest.fn().mockResolvedValue(10),
       getEffectivePrice: jest.fn().mockResolvedValue(10),
     };
-    storeListingPort = {
-      getStockSummary: jest.fn().mockResolvedValue({ onHand: 1, reserved: 0, available: 1, avgCost: 0 }),
+    storeAwareStockQuery = {
+      getStoreStockSummary: jest.fn().mockResolvedValue({ onHand: 1, reserved: 0, available: 1, avgCost: 0 }),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -236,12 +235,12 @@ describe('InternalProductController — getProduct (gate de readiness por loja)'
         { provide: MarketplaceConfigCacheService, useValue: { resolveId: jest.fn().mockResolvedValue(null) } },
         { provide: MarketplaceDescriptionService, useValue: {} },
         { provide: STOCK_QUERY_PORT, useValue: stockQuery },
+        { provide: STORE_AWARE_STOCK_QUERY_PORT, useValue: storeAwareStockQuery },
         { provide: PRICING_PORT, useValue: pricing },
         { provide: CategorySnapshotService, useValue: {} },
         { provide: ProductService, useValue: productService },
         { provide: ProductCompatibilityPositionService, useValue: {} },
         { provide: StoreService, useValue: {} },
-        { provide: STORE_LISTING_PORT, useValue: storeListingPort },
       ],
     })
       .overrideGuard(InternalKeyGuard)
@@ -334,11 +333,11 @@ describe('InternalProductController — getProduct (gate de readiness por loja)'
       // Agregado legado somaria 2 (1 unidade em cada uma de 2 lojas) — regressão real:
       // item publicado no ML com available_quantity=2 quando cada loja só tinha 1.
       stockQuery.getProductStock.mockResolvedValue({ onHand: 2 });
-      storeListingPort.getStockSummary.mockResolvedValue({ onHand: 1, reserved: 0, available: 1, avgCost: 0 });
+      storeAwareStockQuery.getStoreStockSummary.mockResolvedValue({ onHand: 1, reserved: 0, available: 1, avgCost: 0 });
 
       const result = await controller.getProduct(productId, undefined, storeId);
 
-      expect(storeListingPort.getStockSummary).toHaveBeenCalledWith(productId, storeId);
+      expect(storeAwareStockQuery.getStoreStockSummary).toHaveBeenCalledWith(productId, storeId);
       expect(result.stockQuantity).toBe(1);
     });
 
@@ -347,7 +346,7 @@ describe('InternalProductController — getProduct (gate de readiness por loja)'
 
       const result = await controller.getProduct(productId);
 
-      expect(storeListingPort.getStockSummary).not.toHaveBeenCalled();
+      expect(storeAwareStockQuery.getStoreStockSummary).not.toHaveBeenCalled();
       expect(result.stockQuantity).toBe(2);
     });
   });
