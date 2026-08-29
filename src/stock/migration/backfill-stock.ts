@@ -15,7 +15,7 @@
  */
 import * as dotenv from 'dotenv';
 import { MongoClient, ObjectId, Decimal128 } from 'mongodb';
-import { MOVEMENT_EFFECT, StockMovementType, LEGACY_TYPE_ALIASES } from '../domain/movement-type';
+import { MOVEMENT_EFFECT, StockMovementType, LEGACY_TYPE_ALIASES } from '../../stock-shared/movement-type';
 
 dotenv.config();
 

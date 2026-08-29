@@ -15,8 +15,8 @@ import { MarketplaceRegistryService } from '../marketplace/services/marketplace-
 import { ProductRepository } from './product.repository';
 import { STOCK_QUERY_PORT, StockQueryPort, STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from '../stock/ports/stock-query.port';
 import { STORE_OWNER_LOOKUP_PORT, StoreOwnerLookupPort } from '../store-listing/ports/store-owner-lookup.port';
-import { StockService } from '../stock/stock.service';
-import { resolveMovementCondition, resolveMovementType } from '../stock/domain/movement-type';
+import { STOCK_WRITE_PORT, StockWritePort } from '../stock/ports/stock-write.port';
+import { resolveMovementCondition, resolveMovementType } from '../stock-shared/movement-type';
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 import { MarketplaceDescriptionService } from '../marketplace/services/marketplace-description.service';
 import { MarketplaceDocument } from '../marketplace/schemas/marketplace.schema';
@@ -74,7 +74,7 @@ export class ProductService {
     private readonly productCompatibilityService: ProductCompatibilityService,
     private readonly productFilterService: ProductFilterService,
     private readonly marketplaceRegistry: MarketplaceRegistryService,
-    private readonly stockService: StockService,
+    @Inject(STOCK_WRITE_PORT) private readonly stockService: StockWritePort,
     @Inject(forwardRef(() => MarketplaceDescriptionService))
     private readonly marketplaceDescriptionService: MarketplaceDescriptionService,
     private readonly publicationLogService: PublicationLogService,

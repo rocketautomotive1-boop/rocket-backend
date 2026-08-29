@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { ClientSession } from 'mongoose';
 import { StockLedgerPort, StockItem } from '../order/ports/stock-ledger.port';
 import { StockService } from './stock.service';
-import { StockMovementType } from './domain/movement-type';
+import { StockMovementType } from '../stock-shared/movement-type';
 import { STORE_OWNER_LOOKUP_PORT, StoreOwnerLookupPort } from '../store-listing/ports/store-owner-lookup.port';
 
 /**

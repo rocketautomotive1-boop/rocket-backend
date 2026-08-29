@@ -4,7 +4,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { StoreListingModel } from './schemas/store-listing.schema';
 import { StoreListingService } from './store-listing.service';
-import { StockMovementType } from '../stock/domain/movement-type';
+import { StockMovementType } from '../stock-shared/movement-type';
 import { STOCK_QUERY_PORT } from '../stock/ports/stock-query.port';
 import { PRICING_PORT } from '../pricing/ports/pricing.port';
 

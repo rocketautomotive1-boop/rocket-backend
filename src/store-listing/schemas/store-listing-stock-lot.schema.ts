@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types, Schema as MongooseSchema } from 'mongoose';
-import { StockCondition } from '../../stock/domain/movement-type';
+import { StockCondition } from '../../stock-shared/movement-type';
 
 export type StoreListingStockLotDocument = HydratedDocument<StoreListingStockLotModel>;
 

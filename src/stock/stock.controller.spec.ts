@@ -25,6 +25,7 @@ describe('StockController', () => {
     controller = new StockController(
       stock as unknown as StockService,
       stockQuery as unknown as StoreAwareStockQueryPort,
+      { run: jest.fn() } as any,
     );
   });
 

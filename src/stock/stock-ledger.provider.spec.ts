@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { StockLedgerProvider } from './stock-ledger.provider';
 import { StockService } from './stock.service';
 import { STORE_OWNER_LOOKUP_PORT } from '../store-listing/ports/store-owner-lookup.port';
-import { StockMovementType } from './domain/movement-type';
+import { StockMovementType } from '../stock-shared/movement-type';
 
 describe('StockLedgerProvider', () => {
   let provider: StockLedgerProvider;

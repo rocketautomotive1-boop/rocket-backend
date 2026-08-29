@@ -2,9 +2,10 @@ import { Inject, Injectable, Logger, BadRequestException } from '@nestjs/common'
 import { InjectConnection } from '@nestjs/mongoose';
 import { ClientSession, Connection } from 'mongoose';
 import { StockMoveInput, StockMoveSchema } from './dto/stock-move.dto';
-import { StockMovementType } from './domain/movement-type';
-import { computeBalanceDelta } from './domain/balance.calculator';
+import { StockMovementType } from '../stock-shared/movement-type';
+import { computeBalanceDelta } from '../stock-shared/balance-math';
 import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/store-listing.port';
+import { StockWritePort } from './ports/stock-write.port';
 
 /**
  * The single entry point for ALL stock changes. store_listing_stock_* (StoreListing) é a única
@@ -14,7 +15,7 @@ import { STORE_LISTING_PORT, StoreListingPort } from '../store-listing/ports/sto
  * docs/superpowers/specs/2026-08-29-stock-write-cutover-design.md.
  */
 @Injectable()
-export class StockService {
+export class StockService implements StockWritePort {
   private readonly logger = new Logger(StockService.name);
 
   constructor(

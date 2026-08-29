@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model, Types } from 'mongoose';
 import { StoreListingModel, StoreListingDocument } from './schemas/store-listing.schema';
@@ -37,15 +37,15 @@ import { AllocationModel, AllocationDocument } from '../product/schemas/allocati
 import { BoxModel } from '../product/schemas/box.schema';
 import { ProductModel, ProductDocument } from '../product/schemas/product.schema';
 import { StoreListingPort } from './ports/store-listing.port';
-import { StockMovementType } from '../stock/domain/movement-type';
-import { StockCondition } from '../stock/domain/movement-type';
-import { computeBalanceDelta } from '../stock/domain/balance.calculator';
-import { weightedAverageCost } from '../stock/domain/average-cost';
+import { StockMovementType, StockCondition } from '../stock-shared/movement-type';
+import { computeBalanceDelta, weightedAverageCost } from '../stock-shared/balance-math';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../stock/ports/stock-query.port';
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
 
 @Injectable()
-export class StoreListingService implements StoreListingPort {
+export class StoreListingService implements StoreListingPort, OnModuleInit {
+  private readonly logger = new Logger(StoreListingService.name);
+
   constructor(
     @InjectModel(StoreListingModel.name)
     private readonly storeListingModel: Model<StoreListingDocument>,
@@ -72,6 +72,24 @@ export class StoreListingService implements StoreListingPort {
     @Inject(PRICING_PORT)
     private readonly pricing: PricingPort,
   ) {}
+
+  /**
+   * Garante os índices de store_listing_stock_lots/_balances/_movements em qualquer ambiente que
+   * suba do zero (staging, disaster recovery) — hoje eles só existem em produção porque foram
+   * criados manualmente pelos scripts de backfill, não por autoIndex/migration automatizada.
+   * syncIndexes() (não createIndexes) também remove índices obsoletos do schema anterior.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      await Promise.all([
+        this.storeListingStockLotModel.syncIndexes(),
+        this.storeListingStockBalanceModel.syncIndexes(),
+        this.storeListingStockMovementModel.syncIndexes(),
+      ]);
+    } catch (err) {
+      this.logger.error(`Falha ao sincronizar índices de estoque: ${(err as Error).message}`);
+    }
+  }
 
   async create(productId: string, storeId: string): Promise<StoreListingModel & { id: string }> {
     const existing = await this.storeListingModel.findOne({ productId, storeId }).exec();

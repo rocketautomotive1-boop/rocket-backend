@@ -2,12 +2,14 @@ import { Controller, Get, Post, Param, Body, Req, UseGuards, Inject, BadRequestE
 import { StockService } from './stock.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from './ports/stock-query.port';
+import { StockDivergenceReconcilerService } from './stock-divergence-reconciler.service';
 
 @Controller('stock')
 export class StockController {
   constructor(
     private readonly stock: StockService,
     @Inject(STORE_AWARE_STOCK_QUERY_PORT) private readonly stockQuery: StoreAwareStockQueryPort,
+    private readonly divergenceReconciler: StockDivergenceReconcilerService,
   ) {}
 
   private requireStoreId(req: any): string {
@@ -56,5 +58,12 @@ export class StockController {
       condition: body.condition,
     });
     return result ?? { message: 'Estoque já estava correto, nenhum ajuste necessário.' };
+  }
+
+  @Post('reconcile/run')
+  @UseGuards(JwtAuthGuard)
+  async reconcileRun() {
+    const divergences = await this.divergenceReconciler.run();
+    return { divergenceCount: divergences.length, divergences };
   }
 }

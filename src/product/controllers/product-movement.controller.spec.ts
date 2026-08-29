@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { ProductMovementController } from './product-movement.controller';
-import { StockService } from '../../stock/stock.service';
+import { StockWritePort } from '../../stock/ports/stock-write.port';
 import { StoreAwareStockQueryPort } from '../../stock/ports/stock-query.port';
 
 describe('ProductMovementController', () => {
@@ -15,7 +15,7 @@ describe('ProductMovementController', () => {
     stock = { move: jest.fn(), editMovementViaAdjustment: jest.fn(), reverseMovement: jest.fn() };
     stockQuery = { listStoreStockMovements: jest.fn(), getStoreStockMovementStatistics: jest.fn() };
     controller = new ProductMovementController(
-      stock as unknown as StockService,
+      stock as unknown as StockWritePort,
       stockQuery as unknown as StoreAwareStockQueryPort,
     );
   });

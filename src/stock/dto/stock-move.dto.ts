@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { StockMovementType } from '../domain/movement-type';
+import { StockMovementType } from '../../stock-shared/movement-type';
 
 export const StockMoveSchema = z.object({
   productId: z.string().min(1, 'productId é obrigatório'),

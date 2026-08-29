@@ -3,8 +3,10 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { StockService } from './stock.service';
 import { StoreListingStockQueryService } from './store-listing-stock-query.service';
 import { StockLedgerProvider } from './stock-ledger.provider';
+import { StockDivergenceReconcilerService } from './stock-divergence-reconciler.service';
 import { StockController } from './stock.controller';
 import { STOCK_QUERY_PORT, STORE_AWARE_STOCK_QUERY_PORT } from './ports/stock-query.port';
+import { STOCK_WRITE_PORT } from './ports/stock-write.port';
 import { STOCK_LEDGER_PORT } from '../order/ports/stock-ledger.port';
 import { StoreListingModule } from '../store-listing/store-listing.module';
 import { StoreListingModel, StoreListingSchema } from '../store-listing/schemas/store-listing.schema';
@@ -25,6 +27,10 @@ import { AuthModule } from '../auth/auth.module';
  * StockReconcilerService) was removed after the dual-write inversion was validated in
  * production. See docs/superpowers/specs/2026-08-28-stock-contract-legacy-cutover-design.md
  * and docs/superpowers/specs/2026-08-29-stock-write-cutover-design.md.
+ *
+ * StockDivergenceReconcilerService replaces the safety net the legacy reconciler gave (daily
+ * drift check between ledger and materialized balance) — detect + alert only, never auto-fix.
+ * See docs/superpowers/specs/2026-08-29-stock-divergence-reconciler-design.md.
  *
  * Imports AuthModule for JwtAuthGuard (StockController's authenticated endpoints).
  *
@@ -57,10 +63,12 @@ import { AuthModule } from '../auth/auth.module';
     StockService,
     StoreListingStockQueryService,
     StockLedgerProvider,
+    StockDivergenceReconcilerService,
     { provide: STOCK_QUERY_PORT, useExisting: StoreListingStockQueryService },
     { provide: STORE_AWARE_STOCK_QUERY_PORT, useExisting: StoreListingStockQueryService },
     { provide: STOCK_LEDGER_PORT, useExisting: StockLedgerProvider },
+    { provide: STOCK_WRITE_PORT, useExisting: StockService },
   ],
-  exports: [STOCK_QUERY_PORT, STORE_AWARE_STOCK_QUERY_PORT, STOCK_LEDGER_PORT, StockService],
+  exports: [STOCK_QUERY_PORT, STORE_AWARE_STOCK_QUERY_PORT, STOCK_LEDGER_PORT, STOCK_WRITE_PORT, StockService],
 })
 export class StockModule {}

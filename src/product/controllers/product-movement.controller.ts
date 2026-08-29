@@ -22,8 +22,8 @@ import {
 import { CreateProductMovementDto } from '../dto/create-product-movement.dto';
 import { UpdateProductMovementDto } from '../dto/update-product-movement.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { StockService } from '../../stock/stock.service';
-import { StockMovementType } from '../../stock/domain/movement-type';
+import { STOCK_WRITE_PORT, StockWritePort } from '../../stock/ports/stock-write.port';
+import { StockMovementType } from '../../stock-shared/movement-type';
 import { STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from '../../stock/ports/stock-query.port';
 
 /**
@@ -41,7 +41,7 @@ import { STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from '../../st
 @ApiBearerAuth()
 export class ProductMovementController {
   constructor(
-    private readonly stock: StockService,
+    @Inject(STOCK_WRITE_PORT) private readonly stock: StockWritePort,
     @Inject(STORE_AWARE_STOCK_QUERY_PORT) private readonly stockQuery: StoreAwareStockQueryPort,
   ) {}
 

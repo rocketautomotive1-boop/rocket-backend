@@ -6,8 +6,8 @@ import { FiscalEntryModel } from '../schemas/fiscal-entry.schema';
 import { SupplierMappingModel } from '../schemas/supplier-mapping.schema';
 import { ProductModel } from '../../product/schemas/product.schema';
 import { BrandModel } from '../../product/schemas/brand.schema';
-import { StockService } from '../../stock/stock.service';
-import { StockMovementType } from '../../stock/domain/movement-type';
+import { STOCK_WRITE_PORT, StockWritePort } from '../../stock/ports/stock-write.port';
+import { StockMovementType } from '../../stock-shared/movement-type';
 import { buildUniqueProductSlug } from '../../product/utils/product-slug.util';
 import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 import { ProductService } from '../../product/product.service';
@@ -25,7 +25,7 @@ export class NfeImportService {
         @InjectModel(SupplierMappingModel.name) private supplierMappingModel: Model<SupplierMappingModel>,
         @InjectModel(ProductModel.name) private productModel: Model<ProductModel>,
         @InjectModel(BrandModel.name) private brandModel: Model<BrandModel>,
-        private readonly stockService: StockService,
+        @Inject(STOCK_WRITE_PORT) private readonly stockService: StockWritePort,
         @Inject(PRICING_PORT) private readonly pricing: PricingPort,
         private readonly productService: ProductService,
         private readonly productDraftsService: ProductDraftsService,

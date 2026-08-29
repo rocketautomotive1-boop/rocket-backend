@@ -7,7 +7,7 @@ import { ProductRepository } from '../../product/product.repository';
 import { PRODUCT_RESOLVER_PORT } from '../ports/product-resolver.port';
 import { MARKETPLACE_ORDER_GATEWAY } from '../ports/marketplace-order.gateway';
 import { STOCK_QUERY_PORT } from '../../stock/ports/stock-query.port';
-import { StockService } from '../../stock/stock.service';
+import { STOCK_WRITE_PORT } from '../../stock/ports/stock-write.port';
 import { ORDER_EVENTS } from '../events/order.events';
 
 describe('OrderFulfillmentService.completePicking', () => {
@@ -49,7 +49,7 @@ describe('OrderFulfillmentService.completePicking', () => {
         { provide: PRODUCT_RESOLVER_PORT, useValue: {} },
         { provide: MARKETPLACE_ORDER_GATEWAY, useValue: {} },
         { provide: STOCK_QUERY_PORT, useValue: stockQuery },
-        { provide: StockService, useValue: stockService },
+        { provide: STOCK_WRITE_PORT, useValue: stockService },
         EventEmitter2,
       ],
     }).compile();

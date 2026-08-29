@@ -10,8 +10,7 @@ import { StoreListingDamagedAllocationModel } from '../schemas/store-listing-dam
 import { AllocationModel } from '../../product/schemas/allocation.schema';
 import { BoxModel } from '../../product/schemas/box.schema';
 import { ClientSession } from 'mongoose';
-import { StockMovementType } from '../../stock/domain/movement-type';
-import { StockCondition } from '../../stock/domain/movement-type';
+import { StockMovementType, StockCondition } from '../../stock-shared/movement-type';
 
 export const STORE_LISTING_PORT = Symbol('STORE_LISTING_PORT');
 

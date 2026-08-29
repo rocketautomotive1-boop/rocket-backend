@@ -18,7 +18,7 @@ import { ORDER_EVENTS } from '../events/order.events';
 import { StockService } from '../../stock/stock.service';
 import { StockLedgerProvider } from '../../stock/stock-ledger.provider';
 import { StoreListingStockQueryService } from '../../stock/store-listing-stock-query.service';
-import { StockMovementType } from '../../stock/domain/movement-type';
+import { StockMovementType } from '../../stock-shared/movement-type';
 import { STOCK_QUERY_PORT } from '../../stock/ports/stock-query.port';
 import { PRICING_PORT } from '../../pricing/ports/pricing.port';
 import { StoreListingModule } from '../../store-listing/store-listing.module';

@@ -1,5 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import { MongooseModule, getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Connection, Model } from 'mongoose';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
@@ -8,7 +10,7 @@ import { StockModule } from '../stock/stock.module';
 import { StoreListingModel } from './schemas/store-listing.schema';
 import { MarketplaceListingModel } from './schemas/marketplace-listing.schema';
 import { STORE_LISTING_PORT, StoreListingPort } from './ports/store-listing.port';
-import { StockMovementType } from '../stock/domain/movement-type';
+import { StockMovementType } from '../stock-shared/movement-type';
 import { STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from '../stock/ports/stock-query.port';
 import { PRICING_PORT } from '../pricing/ports/pricing.port';
 import { AuthModule } from '../auth/auth.module';
@@ -44,6 +46,8 @@ describe('StoreListingModule (e2e)', () => {
     moduleRef = await Test.createTestingModule({
       imports: [
         MongooseModule.forRoot(mongo.getUri()),
+        EventEmitterModule.forRoot(),
+        ScheduleModule.forRoot(),
         MockPricingModule,
         AuthModule,
         StockModule,

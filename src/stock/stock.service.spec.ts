@@ -5,7 +5,7 @@ import { Connection, Types, Model } from 'mongoose';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { StockService } from './stock.service';
 import { StoreListingStockQueryService } from './store-listing-stock-query.service';
-import { StockMovementType } from './domain/movement-type';
+import { StockMovementType } from '../stock-shared/movement-type';
 import { StoreListingModule } from '../store-listing/store-listing.module';
 import { STOCK_QUERY_PORT } from './ports/stock-query.port';
 import { PRICING_PORT } from '../pricing/ports/pricing.port';

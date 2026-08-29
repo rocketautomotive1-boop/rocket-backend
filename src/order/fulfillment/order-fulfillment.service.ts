@@ -9,8 +9,8 @@ import { ProductRepository } from '../../product/product.repository';
 import { PRODUCT_RESOLVER_PORT, ProductResolverPort } from '../ports/product-resolver.port';
 import { MARKETPLACE_ORDER_GATEWAY, MarketplaceOrderGateway } from '../ports/marketplace-order.gateway';
 import { STOCK_QUERY_PORT, StockQueryPort } from '../../stock/ports/stock-query.port';
-import { StockService } from '../../stock/stock.service';
-import { StockMovementType } from '../../stock/domain/movement-type';
+import { STOCK_WRITE_PORT, StockWritePort } from '../../stock/ports/stock-write.port';
+import { StockMovementType } from '../../stock-shared/movement-type';
 import { ORDER_EVENTS, OrderSyncedEvent, OrderReadyToShipEvent } from '../events/order.events';
 
 /**
@@ -30,7 +30,7 @@ export class OrderFulfillmentService {
         @Inject(PRODUCT_RESOLVER_PORT) private readonly resolver: ProductResolverPort,
         @Inject(MARKETPLACE_ORDER_GATEWAY) private readonly gateway: MarketplaceOrderGateway,
         @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
-        private readonly stockService: StockService,
+        @Inject(STOCK_WRITE_PORT) private readonly stockService: StockWritePort,
         private readonly eventEmitter: EventEmitter2,
     ) { }
 
