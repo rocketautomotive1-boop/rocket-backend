@@ -6,10 +6,9 @@ describe('ListingRemovalService.removeListing — roteamento de conta por loja',
   let service: ListingRemovalService;
   let listingModel: { findById: jest.Mock; findByIdAndDelete: jest.Mock; findByIdAndUpdate: jest.Mock; findOneAndUpdate: jest.Mock };
   let configCache: { getById: jest.Mock };
-  let amqpConnection: { publish: jest.Mock };
-  let publicationLogService: { createAttempt: jest.Mock };
   let auth: { ensureValidToken: jest.Mock };
   let storeService: { resolveAccountId: jest.Mock };
+  let orchestratorPublisher: { requestSync: jest.Mock };
 
   const listingId = new Types.ObjectId().toString();
   const storeId = new Types.ObjectId();
@@ -37,18 +36,16 @@ describe('ListingRemovalService.removeListing — roteamento de conta por loja',
       findOneAndUpdate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(makeListing()) }),
     };
     configCache = { getById: jest.fn().mockResolvedValue({ _id: marketplaceId, tag: 'mercadolivre', name: 'Mercado Livre', settings: {} }) };
-    amqpConnection = { publish: jest.fn().mockResolvedValue(undefined) };
-    publicationLogService = { createAttempt: jest.fn().mockResolvedValue({ _id: new Types.ObjectId() }) };
     auth = { ensureValidToken: jest.fn().mockResolvedValue({ accessToken: 'OWNER_AT', refreshToken: 'RT', expiresAt: null, additionalData: {} }) };
     storeService = { resolveAccountId: jest.fn().mockResolvedValue(accountId) };
+    orchestratorPublisher = { requestSync: jest.fn().mockResolvedValue(undefined) };
 
     service = new ListingRemovalService(
       listingModel as any,
       configCache as any,
-      amqpConnection as any,
-      publicationLogService as any,
       auth as any,
       storeService as any,
+      orchestratorPublisher as any,
     );
   });
 
@@ -99,21 +96,17 @@ describe('ListingRemovalService.removeListing — roteamento de conta por loja',
     expect(auth.ensureValidToken).not.toHaveBeenCalled();
   });
 
-  it('despacha o job DELETE com o token da conta dona (não de qualquer outra)', async () => {
+  it('despacha o DELETE via OrchestratorPublisherService (fila de sync que o worker realmente consome)', async () => {
     mockFindById(makeListing());
 
     const result = await service.removeListing(listingId, 'user-1');
 
-    expect(amqpConnection.publish).toHaveBeenCalledWith(
-      'rocket.marketplace.sync',
-      'sync.mercadolivre',
+    expect(orchestratorPublisher.requestSync).toHaveBeenCalledWith(
       expect.objectContaining({
+        productId: String(productId),
         action: 'DELETE',
-        externalId: 'MLB123',
-        marketplace: expect.objectContaining({
-          tag: 'mercadolivre',
-          credentials: expect.objectContaining({ accessToken: 'OWNER_AT' }),
-        }),
+        targetMarketplaceIds: [String(marketplaceId)],
+        requesterId: 'user-1',
       }),
     );
     expect(result.queued).toBe(true);
@@ -130,6 +123,6 @@ describe('ListingRemovalService.removeListing — roteamento de conta por loja',
     });
     expect(result.removed).toBe(true);
     expect(result.warning).toMatch(/ACC_OWNER/);
-    expect(amqpConnection.publish).not.toHaveBeenCalled();
+    expect(orchestratorPublisher.requestSync).not.toHaveBeenCalled();
   });
 });

@@ -1,14 +1,11 @@
 import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
-import { randomUUID } from 'crypto';
 import { ListingModel, ListingDocument } from '../../listing/schemas/listing.schema';
-import { PublicationLogService } from '../../marketplace/services/publication-log.service';
 import { MarketplaceConfigCacheService } from '../../marketplace/services/marketplace-config-cache.service';
 import { MarketplaceAuthService } from '../../marketplace/auth/services/marketplace-auth.service';
 import { StoreService } from '../../store/services/store.service';
-import { MarketplaceSyncPayload } from '../dto/marketplace-sync.dto';
+import { OrchestratorPublisherService } from '../orchestrator-publisher.service';
 
 @Injectable()
 export class ListingRemovalService {
@@ -17,10 +14,9 @@ export class ListingRemovalService {
     constructor(
         @InjectModel(ListingModel.name) private readonly listingModel: Model<ListingDocument>,
         private readonly configCache: MarketplaceConfigCacheService,
-        private readonly amqpConnection: AmqpConnection,
-        private readonly publicationLogService: PublicationLogService,
         private readonly auth: MarketplaceAuthService,
         private readonly storeService: StoreService,
+        private readonly orchestratorPublisher: OrchestratorPublisherService,
     ) { }
 
     /**
@@ -100,52 +96,19 @@ export class ListingRemovalService {
             throw new ConflictException(`Listing ${listingId} has an in-flight operation. Try again later.`);
         }
 
-        const jobId = randomUUID();
-
-        // Create publication attempt log
-        const attempt = await this.publicationLogService.createAttempt(
-            listing.productId.toString(),
-            'ListingRemoval',
-            [marketplace._id.toString()],
-            { listingId, jobId, action: 'DELETE' },
-        );
-
-        // Build lightweight DELETE payload
-        const payload: MarketplaceSyncPayload = {
-            jobId,
-            attemptId: attempt._id.toString(),
-            marketplaceId: marketplace._id.toString(),
-            listingId,
-            externalId: listing.externalId,
+        // Enfileira via a mesma fila de sync que CREATE/UPDATE usam (SyncQueueService no
+        // orchestrator) — publicar direto no exchange rocket.marketplace.sync não tem consumer
+        // nenhum inscrito nele; a mensagem se perde silenciosamente (ver
+        // docs/superpowers/specs/2026-08-29-moderation-wrong-category-delete-fix-design.md).
+        await this.orchestratorPublisher.requestSync({
+            productId: listing.productId.toString(),
+            requesterId,
+            reason: 'listing_removal',
             action: 'DELETE',
-            metadata: { userId: requesterId },
-            product: { _id: listing.productId.toString() },
-            marketplace: {
-                tag: marketplace.tag,
-                credentials: {
-                    accessToken: ownerToken.accessToken,
-                    refreshToken: ownerToken.refreshToken,
-                    expiresAt: ownerToken.expiresAt ? new Date(ownerToken.expiresAt).toISOString() : undefined,
-                    ...ownerToken.additionalData,
-                },
-                settings: marketplace.settings,
-            },
-            payload: {
-                title: listing.title || '',
-                description: '',
-                price: 0,
-                stock: 0,
-                attributes: [],
-                images: [],
-                sku: '',
-            },
-        };
+            targetMarketplaceIds: [String(marketplace._id)],
+        });
 
-        // Dispatch to RabbitMQ
-        const routingKey = `sync.${marketplace.tag.toLowerCase()}`;
-        await this.amqpConnection.publish('rocket.marketplace.sync', routingKey, payload);
-
-        this.logger.log(`Dispatched DELETE job ${jobId} for listing ${listingId} (externalId: ${listing.externalId}) to ${routingKey}`);
-        return { queued: true, jobId };
+        this.logger.log(`Enqueued DELETE for listing ${listingId} (externalId: ${listing.externalId}) via sync queue`);
+        return { queued: true };
     }
 }
