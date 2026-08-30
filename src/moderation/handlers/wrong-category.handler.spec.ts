@@ -1,6 +1,7 @@
 import { WrongCategoryHandler } from './wrong-category.handler';
 import { ModerationHandlerContext } from './moderation-handler.interface';
 import { NOTIFICATION_EVENTS } from '../../notifications/events/notification.events';
+import { PRODUCT_SECTION_EVENTS } from '../../product/events/product-section-saved.event';
 
 describe('WrongCategoryHandler', () => {
   let handler: WrongCategoryHandler;
@@ -85,9 +86,12 @@ describe('WrongCategoryHandler', () => {
     // handler no longer takes a publisher; assert via the events-only constructor + no extra calls
     await handler.handle(ctx);
 
-    // The only outward signal is the notification — no sync command is emitted here.
-    expect(events.emit).toHaveBeenCalledTimes(1);
+    // Outward signals: a notification (user-facing) + CATEGORY_SAVED (invalidates the
+    // readyToPublish marker so a later category fix can re-trigger BECAME_READY). Neither
+    // is a sync/publish command — no direct republish happens here.
+    expect(events.emit).toHaveBeenCalledTimes(2);
     expect(events.emit).toHaveBeenCalledWith(NOTIFICATION_EVENTS.REQUESTED, expect.anything());
+    expect(events.emit).toHaveBeenCalledWith(PRODUCT_SECTION_EVENTS.CATEGORY_SAVED, expect.anything());
   });
 
   it('emits a moderation notification', async () => {
@@ -110,6 +114,27 @@ describe('WrongCategoryHandler', () => {
 
     expect(ctx.listing.save).not.toHaveBeenCalled();
     expect(events.emit).not.toHaveBeenCalled();
+  });
+
+  it('regressão: emite CATEGORY_SAVED após dropar a categoria, pra invalidar o readyToPublish obsoleto (senão o produto nunca reenfileira quando o usuário corrigir a categoria — BECAME_READY só dispara na borda false→true, e o campo persistido fica travado em true)', async () => {
+    const ctx = makeCtx();
+    await handler.handle(ctx);
+
+    expect(events.emit).toHaveBeenCalledWith(
+      PRODUCT_SECTION_EVENTS.CATEGORY_SAVED,
+      expect.objectContaining({ productId: 'P1' }),
+    );
+  });
+
+  it('não emite CATEGORY_SAVED quando idempotente (listing já pending_removal — categoria não foi tocada)', async () => {
+    const ctx = makeCtx();
+    ctx.listing.status = 'pending_removal';
+    await handler.handle(ctx);
+
+    expect(events.emit).not.toHaveBeenCalledWith(
+      PRODUCT_SECTION_EVENTS.CATEGORY_SAVED,
+      expect.anything(),
+    );
   });
 
   it('does not duplicate a warning already present for the same externalId', async () => {

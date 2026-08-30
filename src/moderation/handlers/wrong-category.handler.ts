@@ -5,6 +5,7 @@ import { ModerationType } from '../providers/moderation-provider.types';
 import { ProductWarning } from '../../product/schemas/product.schema';
 import { NOTIFICATION_EVENTS, NotificationRequested } from '../../notifications/events/notification.events';
 import { TitleCategoryHintService } from '../../product/services/title-category-hint.service';
+import { PRODUCT_SECTION_EVENTS, ProductCategorySavedEvent } from '../../product/events/product-section-saved.event';
 
 /**
  * Wrong-category moderation (ML DOMAIN). The marketplace finalized the listing because it was in the
@@ -90,6 +91,15 @@ export class WrongCategoryHandler implements ModerationHandler {
           { $unset: { category: '' }, $push: { warnings: warning } },
           { session },
         );
+
+        // O $unset acima é uma escrita direta no Mongo — não passa por
+        // ProductReadinessService, então completion.readyToPublish fica obsoleto (ainda
+        // true, de antes da moderação). Sem isso, quando o usuário corrigir a categoria
+        // depois, refreshAndMaybeEmit vai comparar o recálculo contra esse previousReady
+        // travado em true e NUNCA disparar BECAME_READY (a borda exige false→true) — o
+        // produto nunca reenfileira sozinho. Emitir o mesmo evento que a edição normal de
+        // categoria já usa força o recálculo (e a correção do marcador) agora mesmo.
+        this.events.emit(PRODUCT_SECTION_EVENTS.CATEGORY_SAVED, new ProductCategorySavedEvent(String(product._id)));
       }
     }
 
