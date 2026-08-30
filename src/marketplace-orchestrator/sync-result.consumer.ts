@@ -10,6 +10,7 @@ interface SyncResultMessage {
     productId: string;
     marketplaceId: string;
     marketplaceTag?: string;
+    action?: 'CREATE' | 'UPDATE' | 'DELETE';
     success: boolean;
     externalId?: string;
     errorMessage?: string;
@@ -40,6 +41,48 @@ export class SyncResultConsumer {
         );
 
         const marketplaceTag = msg.marketplaceTag ?? String(msg.marketplaceId);
+
+        if (msg.action === 'DELETE' && msg.success) {
+            const set: Record<string, any> = {
+                status: 'removed',
+                externalId: null,
+                synchronized: false,
+                errorMessage: null,
+                lastSyncAt: new Date(),
+                publishingAt: null,
+                'marketplaceData.syncIssue': null,
+                'marketplaceData.removal_attempts': null,
+                'marketplaceData.removal_last_attempt_at': null,
+            };
+            await this.listingService.update(msg.listingId, set);
+
+            this.syncGateway.emitSyncCompleted({
+                productId: String(msg.productId),
+                listingId: String(msg.listingId),
+                externalId: '',
+                marketplaceTag,
+                success: true,
+            });
+            return;
+        }
+
+        if (msg.action === 'DELETE' && !msg.success) {
+            await this.listingService.update(msg.listingId, {
+                status: 'removal_failed',
+                errorMessage: msg.errorMessage ?? 'DELETE failed',
+                lastSyncAt: new Date(),
+                publishingAt: null,
+            });
+            this.syncGateway.emitSyncFailed({
+                productId: String(msg.productId),
+                listingId: String(msg.listingId),
+                errorMessage: msg.errorMessage ?? 'DELETE failed',
+                errorClassifier: msg.errorClassifier,
+                marketplaceTag,
+                success: false,
+            });
+            return;
+        }
 
         if (msg.success && msg.externalId) {
             const set: Record<string, any> = {

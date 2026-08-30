@@ -89,6 +89,78 @@ describe('SyncResultConsumer', () => {
         );
     });
 
+    it('DELETE com sucesso: marca listing removed, limpa externalId, NÃO resolve moderação', async () => {
+        listingServiceMock.update.mockResolvedValue({} as any);
+
+        await consumer.handle({
+            syncRequestId: 'R4',
+            listingId: 'L4',
+            productId: 'P4',
+            marketplaceId: 'M4',
+            action: 'DELETE',
+            success: true,
+            externalId: 'MLB4',
+        } as any);
+
+        expect(listingServiceMock.update).toHaveBeenCalledWith(
+            'L4',
+            expect.objectContaining({
+                status: 'removed',
+                externalId: null,
+                synchronized: false,
+                publishingAt: null,
+                'marketplaceData.syncIssue': null,
+            }),
+        );
+        expect(moderationRepoMock.markResolvedByListingId).not.toHaveBeenCalled();
+        expect(syncGatewayMock.emitSyncCompleted).toHaveBeenCalledWith(
+            expect.objectContaining({ productId: 'P4', listingId: 'L4', success: true }),
+        );
+    });
+
+    it('DELETE com falha: marca removal_failed, não mexe em moderação nem reativa o listing', async () => {
+        listingServiceMock.update.mockResolvedValue({} as any);
+
+        await consumer.handle({
+            syncRequestId: 'R5',
+            listingId: 'L5',
+            productId: 'P5',
+            marketplaceId: 'M5',
+            action: 'DELETE',
+            success: false,
+            errorMessage: 'ML rejected close',
+        } as any);
+
+        expect(listingServiceMock.update).toHaveBeenCalledWith(
+            'L5',
+            expect.objectContaining({ status: 'removal_failed', errorMessage: 'ML rejected close', publishingAt: null }),
+        );
+        expect(moderationRepoMock.markResolvedByListingId).not.toHaveBeenCalled();
+        expect(syncGatewayMock.emitSyncFailed).toHaveBeenCalledWith(
+            expect.objectContaining({ productId: 'P5', listingId: 'L5', success: false }),
+        );
+    });
+
+    it('CREATE com sucesso continua resolvendo moderação (comportamento existente preservado)', async () => {
+        listingServiceMock.update.mockResolvedValue({} as any);
+
+        await consumer.handle({
+            syncRequestId: 'R6',
+            listingId: 'L6',
+            productId: 'P6',
+            marketplaceId: 'M6',
+            action: 'CREATE',
+            success: true,
+            externalId: 'MLB6',
+        } as any);
+
+        expect(moderationRepoMock.markResolvedByListingId).toHaveBeenCalledWith('L6');
+        expect(listingServiceMock.update).toHaveBeenCalledWith(
+            'L6',
+            expect.objectContaining({ status: 'active', externalId: 'MLB6' }),
+        );
+    });
+
     it('failure: calls ListingService.update with status error and the error message', async () => {
         listingServiceMock.update.mockResolvedValue({} as any);
 
