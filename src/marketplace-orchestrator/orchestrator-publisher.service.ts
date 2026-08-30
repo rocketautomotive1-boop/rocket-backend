@@ -11,6 +11,15 @@ export interface SyncRequestedEvent {
     scheduledAt?: string;
     action?: 'DELETE';
     /**
+     * Listing específico a excluir — sem isso, um produto multi-loja (múltiplos listings no
+     * mesmo marketplace) faz o DELETE resolver TODOS os listings daquele produto+marketplace;
+     * se algum outro nunca foi publicado (sem externalId), PayloadBuilderService lança erro
+     * síncrono pra ele e mascara o resultado do listing certo (o que a moderação queria
+     * excluir). Usado só por action:'DELETE' — publish normal continua resolvendo todos os
+     * listings elegíveis do produto.
+     */
+    listingId?: string;
+    /**
      * DELETE originado de moderação (WrongCategoryHandler) — diferente de exclusão manual pelo
      * usuário. Percorre até SyncResultConsumer, que usa isso pra decidir o status final do
      * listing: 'removed' (manual, nunca reentra sozinho num sync futuro — ver

@@ -112,6 +112,16 @@ describe('ListingRemovalService.removeListing — roteamento de conta por loja',
     expect(result.queued).toBe(true);
   });
 
+  it('regressão: propaga listingId — sem isso, um produto multi-loja (outro listing sem externalId no mesmo marketplace) faz o DELETE do listing certo ser mascarado pelo erro do listing errado', async () => {
+    mockFindById(makeListing());
+
+    await service.removeListing(listingId, 'user-1');
+
+    expect(orchestratorPublisher.requestSync).toHaveBeenCalledWith(
+      expect.objectContaining({ listingId }),
+    );
+  });
+
   it('propaga moderationDelete:true quando informado (exclusão via moderação, elegível a reentrar quando o produto ficar ready)', async () => {
     mockFindById(makeListing());
 

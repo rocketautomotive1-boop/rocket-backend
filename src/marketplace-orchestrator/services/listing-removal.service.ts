@@ -106,6 +106,7 @@ export class ListingRemovalService {
         // docs/superpowers/specs/2026-08-29-moderation-wrong-category-delete-fix-design.md).
         await this.orchestratorPublisher.requestSync({
             productId: listing.productId.toString(),
+            listingId: String(listing._id),
             requesterId,
             reason: 'listing_removal',
             action: 'DELETE',
