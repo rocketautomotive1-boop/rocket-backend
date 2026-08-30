@@ -43,6 +43,10 @@ export class ModerationStateModel {
   @Prop({ type: Types.ObjectId, ref: 'ProductModel', index: true })
   productId?: Types.ObjectId;
 
+  /** Denormalized from listing.storeId at upsert time. Null on legacy rows pending backfill. */
+  @Prop({ type: Types.ObjectId, ref: 'StoreModel', default: null })
+  storeId?: Types.ObjectId | null;
+
   @Prop({ type: String, required: true })
   type: ModerationType;
 
@@ -95,3 +99,5 @@ ModerationStateSchema.index(
 );
 // Reconciler scans open rows per (marketplace, account) to diff against /infractions.
 ModerationStateSchema.index({ marketplaceId: 1, accountId: 1, status: 1 });
+// Direct read-path lookups by store (e.g. store-scoped moderation views).
+ModerationStateSchema.index({ storeId: 1, status: 1 });

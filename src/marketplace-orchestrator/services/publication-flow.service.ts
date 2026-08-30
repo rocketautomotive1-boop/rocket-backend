@@ -43,6 +43,7 @@ export class PublicationFlowService {
 
     async listIssues(params: {
         marketplaceTag?: string;
+        storeId?: string;
         status?: 'blocked' | 'all';
         classifier?: string;
         productId?: string;
@@ -51,6 +52,7 @@ export class PublicationFlowService {
     }) {
         return this.marketplaceIssuesService.listIssues({
             marketplaceTag: params.marketplaceTag,
+            storeId: params.storeId,
             status: params.status,
             classifier: params.classifier,
             productId: params.productId,

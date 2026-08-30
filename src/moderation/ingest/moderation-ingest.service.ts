@@ -68,6 +68,7 @@ export class ModerationIngestService {
       accountId,
       listingId: String(listing._id),
       productId: String(listing.productId),
+      storeId: listing.storeId ? String(listing.storeId) : null,
       blockedCategoryId: blockedCategoryId ?? null,
     });
 

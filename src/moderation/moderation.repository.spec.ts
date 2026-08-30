@@ -112,4 +112,10 @@ describe('ModerationRepository', () => {
     expect(String(doc.listingId)).toBe(listingId);
     expect(String(doc.productId)).toBe(productId);
   });
+
+  it('persists storeId when provided', async () => {
+    const storeId = new Types.ObjectId().toString();
+    const doc = await repo.upsertOpen(canonical(), { marketplaceId, storeId });
+    expect(String(doc.storeId)).toBe(storeId);
+  });
 });

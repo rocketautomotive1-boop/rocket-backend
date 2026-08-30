@@ -53,6 +53,18 @@ describe('ModerationIngestService', () => {
     );
   });
 
+  it('passes the listing storeId through to the upserted links', async () => {
+    const listing = { _id: 'L1', productId: 'P1', storeId: 'ST1' };
+    listingModel.findOne.mockResolvedValue(listing);
+
+    await service.ingest('M1', null, canonical);
+
+    expect(repo.upsertOpen).toHaveBeenCalledWith(
+      canonical,
+      expect.objectContaining({ storeId: 'ST1' }),
+    );
+  });
+
   it('skips when no local listing matches (no_listing)', async () => {
     listingModel.findOne.mockResolvedValue(null);
 

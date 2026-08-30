@@ -12,6 +12,7 @@ export interface ModerationLinks {
   accountId?: string | null;
   listingId?: string;
   productId?: string;
+  storeId?: string | null;
   blockedCategoryId?: string | null;
 }
 
@@ -55,6 +56,7 @@ export class ModerationRepository {
     };
     if (links.listingId) set.listingId = new Types.ObjectId(links.listingId);
     if (links.productId) set.productId = new Types.ObjectId(links.productId);
+    if (links.storeId) set.storeId = new Types.ObjectId(links.storeId);
 
     return this.model
       .findOneAndUpdate(

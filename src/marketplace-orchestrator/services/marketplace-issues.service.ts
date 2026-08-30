@@ -28,6 +28,7 @@ export class MarketplaceIssuesService {
 
     async listIssues(params: {
         marketplaceTag?: string;
+        storeId?: string;
         status?: 'blocked' | 'all';
         classifier?: string;
         productId?: string;
@@ -53,6 +54,13 @@ export class MarketplaceIssuesService {
                 return { items: [], total: 0, paging: { limit, offset } };
             }
             query.productId = new Types.ObjectId(params.productId);
+        }
+
+        if (params.storeId) {
+            if (!Types.ObjectId.isValid(params.storeId)) {
+                return { items: [], total: 0, paging: { limit, offset } };
+            }
+            query.storeId = new Types.ObjectId(params.storeId);
         }
 
         if (params.marketplaceTag) {

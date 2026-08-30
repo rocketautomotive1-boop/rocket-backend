@@ -41,6 +41,7 @@ export class MarketplaceOrchestratorController {
     @Get('issues')
     async listIssues(
         @Query('marketplaceTag') marketplaceTag?: string,
+        @Query('storeId') storeId?: string,
         @Query('status') status?: 'blocked' | 'all',
         @Query('classifier') classifier?: string,
         @Query('productId') productId?: string,
@@ -49,6 +50,7 @@ export class MarketplaceOrchestratorController {
     ) {
         return this.publicationFlowService.listIssues({
             marketplaceTag,
+            storeId,
             status,
             classifier,
             productId,
