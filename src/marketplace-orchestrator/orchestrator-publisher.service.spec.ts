@@ -16,6 +16,16 @@ describe('OrchestratorPublisherService', () => {
     );
   });
 
+  it('propaga action:DELETE no payload do outbox', async () => {
+    const { sut, outbox } = makeSut();
+    await sut.requestSync({ productId: 'p1', action: 'DELETE', targetMarketplaceIds: ['mp1'] });
+
+    expect(outbox.enqueue).toHaveBeenCalledWith(
+      { exchange: 'rocket.orchestrator', routingKey: 'product.sync.requested', payload: expect.objectContaining({ action: 'DELETE', targetMarketplaceIds: ['mp1'] }) },
+      expect.anything(),
+    );
+  });
+
   it('requestSync propaga a session quando fornecida', async () => {
     const { sut, outbox } = makeSut();
     const fakeSession = {} as any;

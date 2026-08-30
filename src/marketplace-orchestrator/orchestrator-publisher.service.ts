@@ -9,6 +9,7 @@ export interface SyncRequestedEvent {
     resolutionSignal?: string;
     targetMarketplaceIds?: string[];
     scheduledAt?: string;
+    action?: 'DELETE';
 }
 
 @Injectable()
