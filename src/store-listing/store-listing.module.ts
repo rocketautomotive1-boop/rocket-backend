@@ -10,8 +10,11 @@ import { StoreListingDamagedUnitModel, StoreListingDamagedUnitSchema } from './s
 import { StoreListingDamagedAllocationModel, StoreListingDamagedAllocationSchema } from './schemas/store-listing-damaged-allocation.schema';
 import { AllocationModel, AllocationSchema } from '../product/schemas/allocation.schema';
 import { ProductModel, ProductSchema } from '../product/schemas/product.schema';
+import { ListingModel, ListingSchema } from '../listing/schemas/listing.schema';
+import { OwnershipTransferLogModel, OwnershipTransferLogSchema } from './schemas/ownership-transfer-log.schema';
 import { StoreListingService } from './store-listing.service';
 import { StoreOwnerLookupService } from './store-owner-lookup.service';
+import { StoreListingOwnershipService } from './ownership-transfer.service';
 import { StoreListingController } from './store-listing.controller';
 import { STORE_LISTING_PORT } from './ports/store-listing.port';
 import { STORE_OWNER_LOOKUP_PORT } from './ports/store-owner-lookup.port';
@@ -65,6 +68,8 @@ import { PricingModule } from '../pricing/pricing.module';
       { name: StoreListingDamagedAllocationModel.name, schema: StoreListingDamagedAllocationSchema },
       { name: AllocationModel.name, schema: AllocationSchema },
       { name: ProductModel.name, schema: ProductSchema },
+      { name: ListingModel.name, schema: ListingSchema },
+      { name: OwnershipTransferLogModel.name, schema: OwnershipTransferLogSchema },
     ]),
     AuthModule,
     PricingModule,
@@ -73,9 +78,10 @@ import { PricingModule } from '../pricing/pricing.module';
   providers: [
     StoreListingService,
     StoreOwnerLookupService,
+    StoreListingOwnershipService,
     { provide: STORE_LISTING_PORT, useExisting: StoreListingService },
     { provide: STORE_OWNER_LOOKUP_PORT, useExisting: StoreOwnerLookupService },
   ],
-  exports: [STORE_LISTING_PORT, STORE_OWNER_LOOKUP_PORT],
+  exports: [STORE_LISTING_PORT, STORE_OWNER_LOOKUP_PORT, StoreListingOwnershipService],
 })
 export class StoreListingModule {}
