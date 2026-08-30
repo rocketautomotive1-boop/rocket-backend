@@ -52,8 +52,10 @@ export class ModerationRemovalWorker {
 
       try {
         // Delegates to the marketplace (DELETE job via RabbitMQ). The result handler clears
-        // externalId when it returns; we only bump bookkeeping here.
-        await this.removal.removeListing(String(listing._id));
+        // externalId when it returns; we only bump bookkeeping here. moderationDelete:true
+        // marks the origin so SyncResultConsumer can leave the listing eligible to re-enter a
+        // future sync once the product is ready again (a MANUAL delete never should).
+        await this.removal.removeListing(String(listing._id), undefined, { moderationDelete: true });
         await this.bump(listing, attempts + 1, false);
         this.logger.log(`[ModerationRemoval] dispatched delete for listing ${listing._id} (${listing.externalId})`);
       } catch (err) {

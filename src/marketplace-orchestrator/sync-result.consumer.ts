@@ -11,6 +11,7 @@ interface SyncResultMessage {
     marketplaceId: string;
     marketplaceTag?: string;
     action?: 'CREATE' | 'UPDATE' | 'DELETE';
+    moderationDelete?: boolean;
     success: boolean;
     externalId?: string;
     errorMessage?: string;
@@ -43,8 +44,13 @@ export class SyncResultConsumer {
         const marketplaceTag = msg.marketplaceTag ?? String(msg.marketplaceId);
 
         if (msg.action === 'DELETE' && msg.success) {
+            // Exclusão manual (usuário) nunca reentra sozinha num sync futuro — 'removed' é
+            // filtrado tanto em SyncQueueTargetResolverService quanto em
+            // PublicationContextService. Exclusão por moderação usa 'removed_by_moderation',
+            // que os dois resolvers tratam como elegível — assim que o produto ficar ready de
+            // novo (categoria corrigida), o CREATE seguinte recria o anúncio automaticamente.
             const set: Record<string, any> = {
-                status: 'removed',
+                status: msg.moderationDelete ? 'removed_by_moderation' : 'removed',
                 externalId: null,
                 synchronized: false,
                 errorMessage: null,

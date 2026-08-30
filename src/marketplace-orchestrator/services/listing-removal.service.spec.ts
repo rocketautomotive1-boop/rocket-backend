@@ -112,6 +112,25 @@ describe('ListingRemovalService.removeListing — roteamento de conta por loja',
     expect(result.queued).toBe(true);
   });
 
+  it('propaga moderationDelete:true quando informado (exclusão via moderação, elegível a reentrar quando o produto ficar ready)', async () => {
+    mockFindById(makeListing());
+
+    await service.removeListing(listingId, 'user-1', { moderationDelete: true });
+
+    expect(orchestratorPublisher.requestSync).toHaveBeenCalledWith(
+      expect.objectContaining({ moderationDelete: true }),
+    );
+  });
+
+  it('exclusão manual (sem moderationDelete) não propaga a flag', async () => {
+    mockFindById(makeListing());
+
+    await service.removeListing(listingId, 'user-1');
+
+    const call = orchestratorPublisher.requestSync.mock.calls[0][0];
+    expect(call.moderationDelete).toBeUndefined();
+  });
+
   it('sem token válido para a conta dona, marca removido localmente com aviso (não usa outra conta como fallback)', async () => {
     mockFindById(makeListing());
     auth.ensureValidToken.mockResolvedValue(null);

@@ -118,6 +118,26 @@ describe('SyncResultConsumer', () => {
         );
     });
 
+    it('regressão: DELETE por moderação (moderationDelete:true) marca removed_by_moderation, não removed — elegível a reentrar num sync futuro (SyncQueueTargetResolverService/PublicationContextService filtram só status:removed)', async () => {
+        listingServiceMock.update.mockResolvedValue({} as any);
+
+        await consumer.handle({
+            syncRequestId: 'R7',
+            listingId: 'L7',
+            productId: 'P7',
+            marketplaceId: 'M7',
+            action: 'DELETE',
+            moderationDelete: true,
+            success: true,
+            externalId: 'MLB7',
+        } as any);
+
+        expect(listingServiceMock.update).toHaveBeenCalledWith(
+            'L7',
+            expect.objectContaining({ status: 'removed_by_moderation', externalId: null }),
+        );
+    });
+
     it('DELETE com falha: marca removal_failed, não mexe em moderação nem reativa o listing', async () => {
         listingServiceMock.update.mockResolvedValue({} as any);
 

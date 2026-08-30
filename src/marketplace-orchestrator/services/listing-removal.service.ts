@@ -24,7 +24,11 @@ export class ListingRemovalService {
      * dispatches an unpublish job to the marketplace via RabbitMQ.
      * Otherwise, deletes it directly from the database.
      */
-    async removeListing(listingId: string, requesterId?: string): Promise<{
+    async removeListing(
+        listingId: string,
+        requesterId?: string,
+        options?: { moderationDelete?: boolean },
+    ): Promise<{
         removed?: boolean;
         queued?: boolean;
         jobId?: string;
@@ -106,6 +110,7 @@ export class ListingRemovalService {
             reason: 'listing_removal',
             action: 'DELETE',
             targetMarketplaceIds: [String(marketplace._id)],
+            ...(options?.moderationDelete ? { moderationDelete: true } : {}),
         });
 
         this.logger.log(`Enqueued DELETE for listing ${listingId} (externalId: ${listing.externalId}) via sync queue`);

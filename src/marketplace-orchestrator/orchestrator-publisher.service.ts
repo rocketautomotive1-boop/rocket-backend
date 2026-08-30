@@ -10,6 +10,14 @@ export interface SyncRequestedEvent {
     targetMarketplaceIds?: string[];
     scheduledAt?: string;
     action?: 'DELETE';
+    /**
+     * DELETE originado de moderação (WrongCategoryHandler) — diferente de exclusão manual pelo
+     * usuário. Percorre até SyncResultConsumer, que usa isso pra decidir o status final do
+     * listing: 'removed' (manual, nunca reentra sozinho num sync futuro — ver
+     * SyncQueueTargetResolverService/PublicationContextService, ambos filtram status:'removed')
+     * vs 'removed_by_moderation' (elegível a reentrar quando o produto ficar ready de novo).
+     */
+    moderationDelete?: boolean;
 }
 
 @Injectable()

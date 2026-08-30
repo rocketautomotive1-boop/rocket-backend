@@ -23,13 +23,20 @@ describe('ModerationRemovalWorker', () => {
 
     await worker.run();
 
-    expect(removal.removeListing).toHaveBeenCalledWith('L1');
     expect(listingModel.updateOne).toHaveBeenCalledWith(
       { _id: 'L1' },
       expect.objectContaining({
         $set: expect.objectContaining({ 'marketplaceData.removal_attempts': 1 }),
       }),
     );
+  });
+
+  it('regressão: marca a exclusão como originada de moderação (moderationDelete:true) — diferente de exclusão manual, deve poder reentrar quando o produto ficar ready de novo', async () => {
+    findReturns([{ _id: 'L1', externalId: 'MLB1', marketplaceData: {} }]);
+
+    await worker.run();
+
+    expect(removal.removeListing).toHaveBeenCalledWith('L1', undefined, { moderationDelete: true });
   });
 
   it('respects exponential backoff (skips a recently-attempted listing)', async () => {
