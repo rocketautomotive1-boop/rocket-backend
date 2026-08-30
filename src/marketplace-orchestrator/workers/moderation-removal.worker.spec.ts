@@ -73,6 +73,18 @@ describe('ModerationRemovalWorker', () => {
     expect(listingModel.find).not.toHaveBeenCalled();
   });
 
+  it('regressão: uma vez que o listing sai de pending_removal (via SyncResultConsumer), o próximo ciclo não o reprocessa', async () => {
+    findReturns([{ _id: 'L1', externalId: 'MLB1', marketplaceData: {} }]);
+    await worker.run();
+    expect(removal.removeListing).toHaveBeenCalledTimes(1);
+
+    // Simula o listing já resolvido (status não é mais pending_removal) — a query real do
+    // Mongo (find({status:'pending_removal'})) não o retornaria mais.
+    findReturns([]);
+    await worker.run();
+    expect(removal.removeListing).toHaveBeenCalledTimes(1); // não subiu
+  });
+
   it('does not re-publish — only dispatches removal', async () => {
     findReturns([{ _id: 'L1', externalId: 'MLB1', marketplaceData: {} }]);
     await worker.run();
