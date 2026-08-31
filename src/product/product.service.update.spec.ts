@@ -53,6 +53,7 @@ describe('ProductService.update — title/subtitle + category hint', () => {
             noop, // STOCK_QUERY_PORT
             noop, // STORE_AWARE_STOCK_QUERY_PORT
             noop, // STORE_OWNER_LOOKUP_PORT
+            noop, // STORE_PORT
             { setBasePrice: jest.fn(), setPricingMeta: jest.fn(), setPromotion: jest.fn(), clearPromotion: jest.fn() } as any, // PRICING_PORT
             noop, // queueService
             noop, // productCompatibilityService

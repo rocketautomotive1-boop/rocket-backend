@@ -103,6 +103,18 @@ describe('MercadoLivreCompatibilityAdapter — sincronização de compatibilidad
     expect(httpGet).not.toHaveBeenCalled();
   });
 
+  it('syncCompatibility roteia pelo accountId dono do item quando informado (não a conta ativa)', async () => {
+    httpPost.mockResolvedValue({ created_compatibilities_count: 1 });
+
+    await adapter.syncCompatibility('MLB123', { vehicle_ids: ['MLB999'] }, 'account-dono-123');
+
+    expect(httpPost).toHaveBeenCalledWith(
+      '/items/MLB123/compatibilities',
+      expect.objectContaining({ accountId: 'account-dono-123' }),
+      expect.anything(),
+    );
+  });
+
   it('syncCompatibility lança erro quando ML aceita mas cria 0 compatibilidades', async () => {
     httpPost.mockResolvedValue({ created_compatibilities_count: 0 });
 
@@ -176,6 +188,22 @@ describe('MercadoLivreCompatibilityAdapter — sincronização de compatibilidad
       expect.objectContaining({ context: expect.any(String) }),
     );
     expect(result).toEqual({ removed: true });
+  });
+
+  it('removeCompatibilityFromMarketplace roteia GET e DELETE pelo accountId dono quando informado', async () => {
+    httpGet.mockResolvedValue({ products: [{ id: '111', catalog_product_id: 'MLB999' }] });
+    httpRequest.mockResolvedValue({ data: {} });
+
+    await adapter.removeCompatibilityFromMarketplace('MLB123', 'MLB999', 'account-dono-123');
+
+    expect(httpGet).toHaveBeenCalledWith(
+      '/items/MLB123/compatibilities',
+      expect.objectContaining({ accountId: 'account-dono-123' }),
+    );
+    expect(httpRequest).toHaveBeenCalledWith(
+      { method: 'DELETE', path: '/items/MLB123/compatibilities/111' },
+      expect.objectContaining({ accountId: 'account-dono-123' }),
+    );
   });
 
   it('removeCompatibilityFromMarketplace é no-op quando o veículo já não está mais compatível no ML', async () => {

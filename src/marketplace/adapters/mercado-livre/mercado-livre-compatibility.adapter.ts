@@ -1,8 +1,14 @@
 import { Injectable, InternalServerErrorException, Logger } from "@nestjs/common";
 import { MlHttpClient } from "./ml-http-client";
 
-/** Compatibilidades ML (conta default). Token/refresh/retry no MlHttpClient. */
-const CTX = (context: string) => ({ context });
+/**
+ * Compatibilidades ML. accountId opcional roteia para a conta DONA do item
+ * (via AuthRetryService/HttpAuthContext) — sem ele, cai na conta ativa do
+ * marketplace, que causa 403 "Unauthorized access to resource" sempre que o
+ * item pertence a uma conta diferente da ativa (mesma causa raiz de
+ * ml-403-owner-account-routing, nunca corrigida neste adapter).
+ */
+const CTX = (context: string, accountId?: string) => ({ context, accountId });
 
 @Injectable()
 export class MercadoLivreCompatibilityAdapter {
@@ -11,8 +17,8 @@ export class MercadoLivreCompatibilityAdapter {
     constructor(private readonly http: MlHttpClient) { }
 
     /** DELETE via MlHttpClient (a base só tem get/post como açúcar). */
-    private async del(path: string, context: string): Promise<any> {
-        const res = await this.http.request<any>({ method: 'DELETE', path }, CTX(context));
+    private async del(path: string, context: string, accountId?: string): Promise<any> {
+        const res = await this.http.request<any>({ method: 'DELETE', path }, CTX(context, accountId));
         return res.data;
     }
 
@@ -220,7 +226,7 @@ export class MercadoLivreCompatibilityAdapter {
        * creation_source obrigatório por produto (contrato oficial ML, doc de
        * compatibilidades entre itens e produtos de autopeças).
        */
-      async syncCompatibility(itemId: string, compatibilityData: any): Promise<any> {
+      async syncCompatibility(itemId: string, compatibilityData: any, accountId?: string): Promise<any> {
         const siteId = compatibilityData?.site_id || 'MLB';
         const domainId = compatibilityData?.domain_id || 'MLB-CARS_AND_VANS';
         const products = Array.isArray(compatibilityData?.products)
@@ -235,7 +241,7 @@ export class MercadoLivreCompatibilityAdapter {
         this.logger.log(`Payload: ${JSON.stringify(body)}`);
 
         try {
-          const result = await this.http.post<any>(`/items/${itemId}/compatibilities`, CTX('syncCompat'), body);
+          const result = await this.http.post<any>(`/items/${itemId}/compatibilities`, CTX('syncCompat', accountId), body);
           if (result?.created_compatibilities_count === 0 && products.length > 0) {
             throw new InternalServerErrorException(
               `ML aceitou a requisição mas não criou nenhuma compatibilidade (item=${itemId}).`,
@@ -247,7 +253,7 @@ export class MercadoLivreCompatibilityAdapter {
 
           if (this.isUserProductCompatibilitiesError(error)) {
             this.logger.warn(`Item ${itemId} é User Product — retentando via /user-products/{id}/compatibilities.`);
-            return this.syncUserProductCompatibilities(itemId, domainId, products);
+            return this.syncUserProductCompatibilities(itemId, domainId, products, accountId);
           }
 
           this.logger.error(`Erro ao sincronizar compatibilidade para o item ${itemId}:`, error.response?.data || error.message);
@@ -266,8 +272,8 @@ export class MercadoLivreCompatibilityAdapter {
        * POST /user-products/{up_id}/compatibilities. creation_source: 'DEFAULT' — nosso
        * fluxo não distingue sugestão de veículo novo, então usa o valor padrão do ML.
        */
-      private async syncUserProductCompatibilities(itemId: string, domainId: string, products: any[]): Promise<any> {
-        const item = await this.http.get<any>(`/items/${itemId}`, CTX('resolveUserProductId'));
+      private async syncUserProductCompatibilities(itemId: string, domainId: string, products: any[], accountId?: string): Promise<any> {
+        const item = await this.http.get<any>(`/items/${itemId}`, CTX('resolveUserProductId', accountId));
         const userProductId = item?.user_product_id;
         if (!userProductId) {
           throw new InternalServerErrorException(
@@ -284,7 +290,7 @@ export class MercadoLivreCompatibilityAdapter {
         this.logger.log(`Payload: ${JSON.stringify(body)}`);
 
         try {
-          const result = await this.http.post<any>(`/user-products/${userProductId}/compatibilities`, CTX('syncCompatUP'), body);
+          const result = await this.http.post<any>(`/user-products/${userProductId}/compatibilities`, CTX('syncCompatUP', accountId), body);
           if (result?.created_compatibilities_count === 0 && products.length > 0) {
             throw new InternalServerErrorException(
               `ML aceitou a requisição mas não criou nenhuma compatibilidade (user_product=${userProductId}).`,
@@ -302,9 +308,9 @@ export class MercadoLivreCompatibilityAdapter {
       }
 
       /** GET /items/{id}/compatibilities — lista atual registrada no ML. */
-      async getCompatibilities(itemId: string): Promise<any[]> {
+      async getCompatibilities(itemId: string, accountId?: string): Promise<any[]> {
         try {
-          const res = await this.http.get<any>(`/items/${itemId}/compatibilities`, CTX('getCompatibilities'));
+          const res = await this.http.get<any>(`/items/${itemId}/compatibilities`, CTX('getCompatibilities', accountId));
           return Array.isArray(res?.products) ? res.products : [];
         } catch (error: any) {
           this.logger.error(`Erro ao buscar compatibilidades do item ${itemId}:`, error.response?.data || error.message);
@@ -319,8 +325,8 @@ export class MercadoLivreCompatibilityAdapter {
        * "MLB22578636") — por isso primeiro busca a lista atual para resolver o id.
        * No-op silencioso se o veículo já não está mais compatível no ML.
        */
-      async removeCompatibilityFromMarketplace(itemId: string, catalogProductId: string): Promise<any> {
-        const current = await this.getCompatibilities(itemId);
+      async removeCompatibilityFromMarketplace(itemId: string, catalogProductId: string, accountId?: string): Promise<any> {
+        const current = await this.getCompatibilities(itemId, accountId);
         const match = current.find((p: any) => p?.catalog_product_id === catalogProductId);
         if (!match?.id) {
           this.logger.warn(`Compatibilidade ${catalogProductId} não encontrada no ML para item ${itemId}; nada a remover.`);
@@ -329,7 +335,7 @@ export class MercadoLivreCompatibilityAdapter {
 
         try {
           this.logger.log(`Removendo compatibilidade ${catalogProductId} (ml id=${match.id}) do item ${itemId}`);
-          await this.del(`/items/${itemId}/compatibilities/${match.id}`, 'removeCompat');
+          await this.del(`/items/${itemId}/compatibilities/${match.id}`, 'removeCompat', accountId);
           return { removed: true };
         } catch (error: any) {
           this.logger.error(`Erro ao remover compatibilidade ${catalogProductId} do item ${itemId}:`, error.response?.data || error.message);

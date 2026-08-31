@@ -57,12 +57,14 @@ describe('ProductService — sync de compatibilidades com Mercado Livre (chunkin
     };
 
     const noop: any = {};
+    const storePort: any = { resolveAccountId: jest.fn().mockResolvedValue(null) };
 
     service = new ProductService(
       productRepository as any,
       noop, // STOCK_QUERY_PORT
       noop, // STORE_AWARE_STOCK_QUERY_PORT
       noop, // STORE_OWNER_LOOKUP_PORT
+      storePort, // STORE_PORT
       noop, // PRICING_PORT
       noop, // queueService
       productCompatibilityService as any,
@@ -201,12 +203,14 @@ describe('ProductService — remoção de compatibilidade propaga pro Mercado Li
     queueService = { addToQueue: jest.fn() };
 
     const noop: any = {};
+    const storePort: any = { resolveAccountId: jest.fn().mockResolvedValue(null) };
 
     service = new ProductService(
       productRepository as any,
       noop, // STOCK_QUERY_PORT
       noop, // STORE_AWARE_STOCK_QUERY_PORT
       noop, // STORE_OWNER_LOOKUP_PORT
+      storePort, // STORE_PORT
       noop, // PRICING_PORT
       queueService as any,
       productCompatibilityService as any,
@@ -232,15 +236,15 @@ describe('ProductService — remoção de compatibilidade propaga pro Mercado Li
   it('removeProductCompatibility chama o adapter direto (sem fila) com o mlVehicleId removido', async () => {
     await service.removeProductCompatibility(String(existingProduct._id), 'compat-id-1');
 
-    expect(mercadoLivreCompatibilityAdapter.removeCompatibilityFromMarketplace).toHaveBeenCalledWith('MLB123', 'MLB999');
+    expect(mercadoLivreCompatibilityAdapter.removeCompatibilityFromMarketplace).toHaveBeenCalledWith('MLB123', 'MLB999', undefined);
     expect(queueService.addToQueue).not.toHaveBeenCalled();
   });
 
   it('removeProductCompatibilities chama o adapter uma vez por veículo removido em lote', async () => {
     await service.removeProductCompatibilities(String(existingProduct._id), ['compat-id-1', 'compat-id-2']);
 
-    expect(mercadoLivreCompatibilityAdapter.removeCompatibilityFromMarketplace).toHaveBeenCalledWith('MLB123', 'MLB999');
-    expect(mercadoLivreCompatibilityAdapter.removeCompatibilityFromMarketplace).toHaveBeenCalledWith('MLB123', 'MLB998');
+    expect(mercadoLivreCompatibilityAdapter.removeCompatibilityFromMarketplace).toHaveBeenCalledWith('MLB123', 'MLB999', undefined);
+    expect(mercadoLivreCompatibilityAdapter.removeCompatibilityFromMarketplace).toHaveBeenCalledWith('MLB123', 'MLB998', undefined);
     expect(queueService.addToQueue).not.toHaveBeenCalled();
   });
 

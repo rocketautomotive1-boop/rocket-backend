@@ -15,6 +15,7 @@ import { MarketplaceRegistryService } from '../marketplace/services/marketplace-
 import { ProductRepository } from './product.repository';
 import { STOCK_QUERY_PORT, StockQueryPort, STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from '../stock/ports/stock-query.port';
 import { STORE_OWNER_LOOKUP_PORT, StoreOwnerLookupPort } from '../store-listing/ports/store-owner-lookup.port';
+import { STORE_PORT, StorePort } from '../store/ports/store.port';
 import { STOCK_WRITE_PORT, StockWritePort } from '../stock/ports/stock-write.port';
 import { resolveMovementCondition, resolveMovementType } from '../stock-shared/movement-type';
 import { PRICING_PORT, PricingPort } from '../pricing/ports/pricing.port';
@@ -69,6 +70,7 @@ export class ProductService {
     @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
     @Inject(STORE_AWARE_STOCK_QUERY_PORT) private readonly storeAwareStockQuery: StoreAwareStockQueryPort,
     @Inject(STORE_OWNER_LOOKUP_PORT) private readonly storeOwnerLookup: StoreOwnerLookupPort,
+    @Inject(STORE_PORT) private readonly storePort: StorePort,
     @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     private readonly queueService: QueueService,
     private readonly productCompatibilityService: ProductCompatibilityService,
@@ -1187,7 +1189,7 @@ export class ProductService {
         return { attempted: false, reason: 'no_ml_vehicle_ids' };
       }
 
-      const syncResult = await this.pushCompatibilitiesToMercadoLivre(productTitles, mlVehicleIds);
+      const syncResult = await this.pushCompatibilitiesToMercadoLivre(productTitles, mlVehicleIds, marketplace.tag);
 
       if (syncResult.successCount > 0) {
         const syncedInternalIds = relevant
@@ -1217,6 +1219,7 @@ export class ProductService {
   private async pushCompatibilitiesToMercadoLivre(
     productTitles: any[],
     vehicleIds: string[],
+    marketplaceTag: string,
   ): Promise<{ successCount: number; errorCount: number; results: any[] }> {
     const results: any[] = [];
     let successCount = 0;
@@ -1233,6 +1236,10 @@ export class ProductService {
         results.push({ title: title.title, status: 'skipped', reason: 'missing_externalId' });
         continue;
       }
+      // Roteia pela conta DONA da loja do anúncio (storeId), nunca a conta ativa do
+      // marketplace — sem isso, itens de lojas diferentes da ativa recebem 403
+      // "Unauthorized access to resource" do ML (ver ml-403-owner-account-routing).
+      const accountId = (await this.storePort.resolveAccountId(title.storeId, marketplaceTag)) ?? undefined;
       for (const chunk of chunks) {
         const payloadML = {
           products: chunk.map((id) => ({ id })),
@@ -1240,7 +1247,7 @@ export class ProductService {
           domain_id: 'MLB-CARS_AND_VANS',
         };
         try {
-          const resp = await this.mercadoLivreCompatibilityAdapter.syncCompatibility(title.externalId, payloadML);
+          const resp = await this.mercadoLivreCompatibilityAdapter.syncCompatibility(title.externalId, payloadML, accountId);
           results.push({ title: title.title, itemId: title.externalId, status: 'success', count: chunk.length, response: resp });
           successCount += chunk.length;
         } catch (err: any) {
@@ -1280,9 +1287,10 @@ export class ProductService {
 
       for (const title of productTitles) {
         if (!title.externalId) continue;
+        const accountId = (await this.storePort.resolveAccountId(title.storeId, marketplace.tag)) ?? undefined;
         for (const mlVehicleId of mlVehicleIds) {
           try {
-            await this.mercadoLivreCompatibilityAdapter.removeCompatibilityFromMarketplace(title.externalId, mlVehicleId);
+            await this.mercadoLivreCompatibilityAdapter.removeCompatibilityFromMarketplace(title.externalId, mlVehicleId, accountId);
           } catch (err: any) {
             this.logger.warn(
               `removeCompatibilityFromMarketplace falhou item=${title.externalId} mlVehicleId=${mlVehicleId}: ${err?.message}`,
@@ -1421,7 +1429,7 @@ export class ProductService {
         throw new BadRequestException(`Sincronização direta ainda não implementada para ${marketplace.name}`);
       }
 
-      const { successCount, errorCount, results } = await this.pushCompatibilitiesToMercadoLivre(productTitles, vehicleIds);
+      const { successCount, errorCount, results } = await this.pushCompatibilitiesToMercadoLivre(productTitles, vehicleIds, marketplace.tag);
 
       return {
         message: 'Compatibilidades diretas sincronizadas imediatamente',
