@@ -57,6 +57,7 @@ describe('ProductService.update — isUniversalFit', () => {
             noop, // productDiscoveryModel
             eventEmitter as any,
             noop, // productReadinessService
+            noop, // orchestratorPublisher
         );
     });
 

@@ -73,6 +73,7 @@ describe('ProductService.update — title/subtitle + category hint', () => {
             noop, // productDiscoveryModel
             eventEmitter as any,
             noop, // productReadinessService
+            noop, // orchestratorPublisher
         );
     });
 

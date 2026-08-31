@@ -84,6 +84,7 @@ describe('ProductService — sync de compatibilidades com Mercado Livre (chunkin
       noop, // productDiscoveryModel
       { emit: jest.fn() } as any, // eventEmitter
       noop, // productReadinessService
+      { requestSync: jest.fn().mockResolvedValue(undefined) } as any, // orchestratorPublisher
     );
 
     // productTitleService precisa retornar o marketplaceId real resolvido acima
@@ -230,6 +231,7 @@ describe('ProductService — remoção de compatibilidade propaga pro Mercado Li
       noop, // productDiscoveryModel
       { emit: jest.fn() } as any, // eventEmitter
       noop, // productReadinessService
+      { requestSync: jest.fn().mockResolvedValue(undefined) } as any, // orchestratorPublisher
     );
   });
 

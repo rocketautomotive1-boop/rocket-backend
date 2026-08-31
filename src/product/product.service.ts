@@ -33,6 +33,7 @@ import { ProductShortTitleService } from './services/product-short-title.service
 import { UserProductivityService } from '../monitoring/user-productivity.service';
 import { ProductivityType } from '../monitoring/schemas/user-productivity.schema';
 import { MercadoLivreCompatibilityAdapter } from '../marketplace/adapters/mercado-livre/mercado-livre-compatibility.adapter';
+import { OrchestratorPublisherService } from '../marketplace-orchestrator/orchestrator-publisher.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PRODUCT_EVENTS, ProductUpdatedEvent } from './events/product.events';
 import { ProductReadinessService } from './services/product-readiness.service';
@@ -94,6 +95,8 @@ export class ProductService {
     private readonly eventEmitter: EventEmitter2,
     @Inject(forwardRef(() => ProductReadinessService))
     private readonly productReadinessService: ProductReadinessService,
+    @Inject(forwardRef(() => OrchestratorPublisherService))
+    private readonly orchestratorPublisher: OrchestratorPublisherService,
   ) { }
 
   @ValidateMongoId()
@@ -1197,6 +1200,24 @@ export class ProductService {
           .map((c: any) => String(c._id ?? c.id))
           .filter(Boolean);
         await this.productCompatibilityService.markAsSynced(syncedInternalIds);
+
+        // POST /user-products/{id}/compatibilities aceita a mudança mas o ML às vezes
+        // coloca o item em status=under_review por causa dela — enquanto isso, a ficha
+        // técnica pública do anúncio não reflete as compatibilidades recém-salvas, mesmo
+        // já estando corretamente gravadas (confirmado via GET /items/{id}/compatibilities).
+        // Um UPDATE (PUT /items/{id}, disparado pelo resync do orchestrator) força o ML a
+        // reavaliar e sair do under_review — pedimos esse resync aqui pra não depender do
+        // usuário perceber e republicar manualmente. Best-effort: nunca bloqueia a resposta.
+        this.orchestratorPublisher
+          .requestSync({
+            productId: String(product._id),
+            reason: 'compatibility_auto_sync',
+            resolutionSignal: 'compatibility_auto_sync',
+            targetMarketplaceIds: [resolvedMarketplaceId],
+          })
+          .catch((err: any) =>
+            this.logger.warn(`Falha ao pedir resync pós-compatibilidade (não bloqueante): ${err?.message}`),
+          );
       }
 
       return { attempted: true, ...syncResult };
