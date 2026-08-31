@@ -15,7 +15,6 @@ import { CategorySnapshotService } from '../product/services/category-snapshot.s
 import { ProductService } from '../product/product.service';
 import { ProductCompatibilityPositionService } from '../product/services/product-compatibility-position.service';
 import { StoreService } from '../store/services/store.service';
-import { MercadoLivreCompatibilityAdapter } from '../marketplace/adapters/mercado-livre/mercado-livre-compatibility.adapter';
 
 // Piloto Fase 2 (catalog listing): só category_id do ML já validados ao vivo como
 // portadores de POSITION/SIDE_POSITION no catálogo de peças (GET /categories/{id}/attributes).
@@ -42,7 +41,6 @@ export class InternalProductController {
         @Inject(forwardRef(() => ProductService)) private readonly productService: ProductService,
         private readonly compatibilityPosition: ProductCompatibilityPositionService,
         private readonly storeService: StoreService,
-        private readonly mlCompatAdapter: MercadoLivreCompatibilityAdapter,
     ) {}
 
     @Get(':id')
@@ -155,19 +153,6 @@ export class InternalProductController {
         const mapping = mappings.find((m: any) => String(m.marketplaceId) === mlId);
         const externalId = mapping?.externalId ?? mapping?.categoryResult?.category_id;
         if (externalId) category.mlCategoryId = String(externalId);
-    }
-
-    /**
-     * DEBUG TEMPORÁRIO — compara compatibilidades vistas pelo item clássico vs.
-     * user_product no ML, pra investigar o sintoma "compat salva mas some do
-     * anúncio até resync". Remover após a investigação.
-     */
-    @Get(':id/debug-compat')
-    async debugCompat(@Param('id') id: string) {
-        const listings = await this.getListings(id);
-        const mlListing = listings.find((l: any) => l.marketplaceTag === 'mercadolivre' && l.externalId);
-        if (!mlListing) return { error: 'no_ml_listing_with_externalId' };
-        return this.mlCompatAdapter.debugCompareCompatibilities((mlListing as any).externalId, (mlListing as any).accountId);
     }
 
     @Get(':id/listings')

@@ -307,34 +307,6 @@ export class MercadoLivreCompatibilityAdapter {
         }
       }
 
-      /**
-       * DEBUG TEMPORÁRIO — investigação do sintoma "compat salva mas não aparece
-       * no anúncio até resync". Resolve user_product_id do item e busca
-       * compatibilidades por AMBOS os recursos (item clássico e user product) pra
-       * comparar. Remover após a investigação.
-       */
-      async debugCompareCompatibilities(itemId: string, accountId?: string): Promise<any> {
-        const item = await this.http.get<any>(`/items/${itemId}`, CTX('debugResolveItem', accountId));
-        const userProductId = item?.user_product_id;
-
-        const [itemCompat, userProductCompat] = await Promise.all([
-          this.getCompatibilities(itemId, accountId).catch((e) => ({ error: e?.message })),
-          userProductId
-            ? this.http
-                .get<any>(`/user-products/${userProductId}/compatibilities`, CTX('debugUserProductCompat', accountId))
-                .catch((e: any) => ({ error: e?.response?.data || e?.message }))
-            : null,
-        ]);
-
-        return {
-          itemId,
-          userProductId,
-          itemStatus: item?.status,
-          itemCompatibilities: itemCompat,
-          userProductCompatibilities: userProductCompat,
-        };
-      }
-
       /** GET /items/{id}/compatibilities — lista atual registrada no ML. */
       async getCompatibilities(itemId: string, accountId?: string): Promise<any[]> {
         try {
