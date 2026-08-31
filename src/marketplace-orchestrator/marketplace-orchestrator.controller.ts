@@ -1,4 +1,4 @@
-import { Controller, Post, Delete, Get, Param, Query, Request, HttpCode, HttpStatus, UseGuards, Body } from '@nestjs/common';
+import { BadRequestException, Controller, Post, Delete, Get, Param, Query, Request, HttpCode, HttpStatus, UseGuards, Body } from '@nestjs/common';
 import { PublicationFlowService } from './services/publication-flow.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -38,16 +38,31 @@ export class MarketplaceOrchestratorController {
         return this.publicationFlowService.removeListing(listingId, requesterId);
     }
 
+    /**
+     * storeId nunca vem do client — sempre resolvido de req.user.storeId (mesmo
+     * padrão de StoreListingController), para que um usuário nunca veja
+     * moderações de outra loja por engano ou má-fé.
+     */
+    private requireStoreId(req: any): string {
+        const storeId = req?.user?.storeId;
+        if (!storeId) {
+            throw new BadRequestException('Usuário sem loja configurada — não é possível listar moderações.');
+        }
+        return storeId;
+    }
+
     @Get('issues')
+    @UseGuards(JwtAuthGuard)
     async listIssues(
+        @Request() req: any,
         @Query('marketplaceTag') marketplaceTag?: string,
-        @Query('storeId') storeId?: string,
         @Query('status') status?: 'blocked' | 'all',
         @Query('classifier') classifier?: string,
         @Query('productId') productId?: string,
         @Query('limit') limit?: string,
         @Query('offset') offset?: string,
     ) {
+        const storeId = this.requireStoreId(req);
         return this.publicationFlowService.listIssues({
             marketplaceTag,
             storeId,
