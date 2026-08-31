@@ -1200,24 +1200,7 @@ export class ProductService {
           .map((c: any) => String(c._id ?? c.id))
           .filter(Boolean);
         await this.productCompatibilityService.markAsSynced(syncedInternalIds);
-
-        // POST /user-products/{id}/compatibilities aceita a mudança mas o ML às vezes
-        // coloca o item em status=under_review por causa dela — enquanto isso, a ficha
-        // técnica pública do anúncio não reflete as compatibilidades recém-salvas, mesmo
-        // já estando corretamente gravadas (confirmado via GET /items/{id}/compatibilities).
-        // Um UPDATE (PUT /items/{id}, disparado pelo resync do orchestrator) força o ML a
-        // reavaliar e sair do under_review — pedimos esse resync aqui pra não depender do
-        // usuário perceber e republicar manualmente. Best-effort: nunca bloqueia a resposta.
-        this.orchestratorPublisher
-          .requestSync({
-            productId: String(product._id),
-            reason: 'compatibility_auto_sync',
-            resolutionSignal: 'compatibility_auto_sync',
-            targetMarketplaceIds: [resolvedMarketplaceId],
-          })
-          .catch((err: any) =>
-            this.logger.warn(`Falha ao pedir resync pós-compatibilidade (não bloqueante): ${err?.message}`),
-          );
+        this.requestPostCompatibilitySyncResync(String(product._id), resolvedMarketplaceId, 'compatibility_auto_sync');
       }
 
       return { attempted: true, ...syncResult };
@@ -1225,6 +1208,29 @@ export class ProductService {
       this.logger.warn(`Auto-sync de compatibilidades com Mercado Livre falhou (não bloqueante): ${error?.message}`);
       return { attempted: true, reason: 'error', successCount: 0, errorCount: requestedVehicleIds.length };
     }
+  }
+
+  /**
+   * POST /items/{id}/compatibilities (ou /user-products/{id}/compatibilities) é aceito pelo
+   * ML mas às vezes coloca o item em status=under_review por causa dessa mudança — enquanto
+   * isso, a ficha técnica pública do anúncio não reflete as compatibilidades recém-salvas,
+   * mesmo já estando corretamente gravadas (confirmado via GET /items/{id}/compatibilities
+   * contra a API real). Só um UPDATE (PUT /items/{id}, via resync do orchestrator) força o ML
+   * a reavaliar e sair do under_review. Compartilhado por TODO caminho que grava compatibilidade
+   * no ML (auto-sync ao salvar E sincronização manual/genérica) — nenhum deve pular esse passo.
+   * Best-effort: nunca bloqueia a resposta do endpoint que chamou.
+   */
+  private requestPostCompatibilitySyncResync(productId: string, marketplaceId: string, reason: string): void {
+    this.orchestratorPublisher
+      .requestSync({
+        productId,
+        reason,
+        resolutionSignal: reason,
+        targetMarketplaceIds: [marketplaceId],
+      })
+      .catch((err: any) =>
+        this.logger.warn(`Falha ao pedir resync pós-compatibilidade (não bloqueante): ${err?.message}`),
+      );
   }
 
   /**
@@ -1451,6 +1457,10 @@ export class ProductService {
       }
 
       const { successCount, errorCount, results } = await this.pushCompatibilitiesToMercadoLivre(productTitles, vehicleIds, marketplace.tag);
+
+      if (successCount > 0) {
+        this.requestPostCompatibilitySyncResync(productId, resolvedMarketplaceId, 'compatibility_manual_sync');
+      }
 
       return {
         message: 'Compatibilidades diretas sincronizadas imediatamente',
