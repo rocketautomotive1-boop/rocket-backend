@@ -134,24 +134,30 @@ export class ModerationReconciler implements OnModuleInit {
 
     let changes = 0;
     let statusChecksUsed = 0;
+
+    // Status checks must be spent in findAllOpen's own order (oldest-updated first), NOT
+    // /infractions' order (date_created_desc). /infractions returns the same few thousand rows
+    // at the front every run for a large, mostly-static account — if the cap just walked toIngest
+    // in that order, rows sorting later in /infractions would never rotate into the cap and could
+    // stay open forever even when genuinely resolved on ML. Iterate openRows (already sorted) to
+    // decide who gets checked, then handle the rest of toIngest (new + already-decided) after.
     const openByExternalId = new Map(openRows.map((r) => [r.externalId, r]));
+    const toIngestSet = new Set(toIngest);
+    const resolvedNow = new Set<string>();
+    for (const row of openRows) {
+      if (statusChecksUsed >= maxStatusChecks) break;
+      if (!toIngestSet.has(row.externalId)) continue;
+      statusChecksUsed++;
+      const itemStatus = await this.mlClient.getItemModerationStatus(row.externalId, token.accessToken);
+      if (!itemStatus.stillModerated) {
+        await this.resolve(marketplaceId, acctKey, row.externalId, String(row._id), String(row.productId ?? ''));
+        changes++;
+        resolvedNow.add(row.externalId);
+      }
+    }
 
     for (const externalId of toIngest) {
-      // /infractions is a historical log (per ML's own docs) — it never drops an entry just
-      // because the item got fixed. For a row we already have open, trust /items/{id}'s current
-      // status/sub_status over the stale infractions listing: if the item is genuinely no longer
-      // under moderation, resolve it instead of re-flagging it forever. Capped per run — see
-      // RECON.MAX_STATUS_CHECKS_PER_RUN.
-      const openRow = openByExternalId.get(externalId);
-      if (openRow && statusChecksUsed < maxStatusChecks) {
-        statusChecksUsed++;
-        const itemStatus = await this.mlClient.getItemModerationStatus(externalId, token.accessToken);
-        if (!itemStatus.stillModerated) {
-          await this.resolve(marketplaceId, acctKey, externalId, String(openRow._id), String(openRow.productId ?? ''));
-          changes++;
-          continue;
-        }
-      }
+      if (resolvedNow.has(externalId)) continue;
 
       const canonical = activeById.get(externalId)!;
       // Enrich reason/remedy via last_moderation, and the blocked category for wrong-category.

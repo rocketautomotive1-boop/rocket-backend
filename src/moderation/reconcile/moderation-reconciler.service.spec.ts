@@ -114,6 +114,33 @@ describe('ModerationReconciler.runFor', () => {
   });
 
   /**
+   * The status-check order must follow findAllOpen's own ordering (oldest-updated first), NOT
+   * /infractions' order. /infractions comes back sorted by date_created_desc (ML's own default) —
+   * a large, mostly-static account has the same few thousand infractions at the front every single
+   * run, so if the cap consumes toIngest's order directly, rows that happen to sort late in
+   * /infractions never rotate into the cap and stay open forever even though they're genuinely
+   * resolved on ML. Confirmed live: findAllOpen's updatedAt-asc sort alone did NOT fix this,
+   * because the reconciler loop iterates toIngest, not openRows — this test locks the actual fix.
+   */
+  it('checks the open rows findAllOpen returns first, ignoring /infractions ordering', async () => {
+    // /infractions returns MLB-LATE before MLB-FIRST (its own date_created_desc order) — the
+    // opposite of findAllOpen's oldest-updated-first order. The cap (1) must still pick MLB-FIRST.
+    mlClient.getAllInfractions.mockResolvedValue([
+      { element_id: 'MLB-LATE', filter_subgroup: 'COMPATS' },
+      { element_id: 'MLB-FIRST', filter_subgroup: 'COMPATS' },
+    ]);
+    repo.findAllOpen.mockResolvedValue([
+      { _id: 'S-FIRST', externalId: 'MLB-FIRST', productId: 'P1' },
+      { _id: 'S-LATE', externalId: 'MLB-LATE', productId: 'P2' },
+    ]);
+
+    await reconciler.runFor('M1', undefined, 1);
+
+    expect(mlClient.getItemModerationStatus).toHaveBeenCalledTimes(1);
+    expect(mlClient.getItemModerationStatus).toHaveBeenCalledWith('MLB-FIRST', 'tok');
+  });
+
+  /**
    * /moderations/infractions is a historical log (per ML docs) — it never drops an entry just
    * because the item was fixed. So a row can be BOTH present in /infractions AND genuinely resolved
    * (item back to status=active, no pending sub_status). The reconciler must trust /items/{id}'s
