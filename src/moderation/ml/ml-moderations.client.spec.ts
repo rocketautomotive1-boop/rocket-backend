@@ -68,3 +68,38 @@ describe('MlModerationsClient.getAllInfractions parsing', () => {
     expect(await client.getAllInfractions('tok', 1)).toHaveLength(20);
   });
 });
+
+/**
+ * /moderations/infractions is a historical log — per ML's own docs it never closes an entry when
+ * the item is fixed, so it can't be used alone to decide "still moderated". getItemModerationStatus
+ * reads current status/sub_status/tags off /items/{id}, which IS how ML says to detect an item that
+ * is genuinely still under moderation right now (status=under_review with a pending sub_status).
+ */
+describe('MlModerationsClient.getItemModerationStatus', () => {
+  it('reports still-moderated for an item under_review with a pending sub_status', async () => {
+    const client = new MlModerationsClient();
+    (client as any).http = {
+      get: jest.fn().mockResolvedValue({
+        data: { status: 'under_review', sub_status: ['waiting_for_patch'], tags: ['incomplete_compatibilities'] },
+      }),
+    };
+    const out = await client.getItemModerationStatus('MLB1', 'tok');
+    expect(out).toEqual({ status: 'under_review', subStatus: ['waiting_for_patch'], stillModerated: true });
+  });
+
+  it('reports resolved for an active item with no pending sub_status', async () => {
+    const client = new MlModerationsClient();
+    (client as any).http = {
+      get: jest.fn().mockResolvedValue({ data: { status: 'active', sub_status: [], tags: ['cart_eligible'] } }),
+    };
+    const out = await client.getItemModerationStatus('MLB1', 'tok');
+    expect(out).toEqual({ status: 'active', subStatus: [], stillModerated: false });
+  });
+
+  it('treats a lookup failure as still-moderated (fail safe, never silently close)', async () => {
+    const client = new MlModerationsClient();
+    (client as any).http = { get: jest.fn().mockRejectedValue(new Error('500')) };
+    const out = await client.getItemModerationStatus('MLB1', 'tok');
+    expect(out.stillModerated).toBe(true);
+  });
+});

@@ -17,6 +17,13 @@ import { diffModerations } from './moderation-diff';
  */
 const RECON = {
   DAILY_MS: 24 * 60 * 60 * 1000,
+  /**
+   * Cap on how many already-open rows get the extra live getItemModerationStatus check per run.
+   * Open-row count scales with account size (seen live: 1600+), not with the once-a-day cadence —
+   * without a cap a single run could burst thousands of GET /items/{id} calls and risk ML's rate
+   * limit. Rows past the cap simply keep their current state and get re-checked on a later run.
+   */
+  MAX_STATUS_CHECKS_PER_RUN: 200,
 };
 
 /**
@@ -83,7 +90,11 @@ export class ModerationReconciler implements OnModuleInit {
     this.timers.set(k, t);
   }
 
-  async runFor(marketplaceId: string, accountId?: string): Promise<void> {
+  async runFor(
+    marketplaceId: string,
+    accountId?: string,
+    maxStatusChecks: number = RECON.MAX_STATUS_CHECKS_PER_RUN,
+  ): Promise<void> {
     const k = this.key(marketplaceId, accountId);
 
     let token: { accessToken: string; additionalData: Record<string, any> };
@@ -122,8 +133,26 @@ export class ModerationReconciler implements OnModuleInit {
     });
 
     let changes = 0;
+    let statusChecksUsed = 0;
+    const openByExternalId = new Map(openRows.map((r) => [r.externalId, r]));
 
     for (const externalId of toIngest) {
+      // /infractions is a historical log (per ML's own docs) — it never drops an entry just
+      // because the item got fixed. For a row we already have open, trust /items/{id}'s current
+      // status/sub_status over the stale infractions listing: if the item is genuinely no longer
+      // under moderation, resolve it instead of re-flagging it forever. Capped per run — see
+      // RECON.MAX_STATUS_CHECKS_PER_RUN.
+      const openRow = openByExternalId.get(externalId);
+      if (openRow && statusChecksUsed < maxStatusChecks) {
+        statusChecksUsed++;
+        const itemStatus = await this.mlClient.getItemModerationStatus(externalId, token.accessToken);
+        if (!itemStatus.stillModerated) {
+          await this.resolve(marketplaceId, acctKey, externalId, String(openRow._id), String(openRow.productId ?? ''));
+          changes++;
+          continue;
+        }
+      }
+
       const canonical = activeById.get(externalId)!;
       // Enrich reason/remedy via last_moderation, and the blocked category for wrong-category.
       const last = await this.mlClient.getLastModeration(externalId, token.accessToken);
@@ -136,7 +165,6 @@ export class ModerationReconciler implements OnModuleInit {
       if (res.outcome === 'handled') changes++;
     }
 
-    const openByExternalId = new Map(openRows.map((r) => [r.externalId, r]));
     for (const externalId of toResolve) {
       const row = openByExternalId.get(externalId);
       if (!row) continue;

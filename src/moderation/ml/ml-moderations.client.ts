@@ -76,4 +76,38 @@ export class MlModerationsClient {
       return null;
     }
   }
+
+  /**
+   * ML's own docs: /moderations/infractions is a historical log that never closes an entry when
+   * the item is fixed — it is NOT a signal that an item is still moderated. The doc's recommended
+   * way to detect that is status=under_review with one of a known set of pending sub_status values
+   * (see "Gerenciar Moderações" — warning/waiting_for_patch/held/pending_documentation/forbidden/
+   * picture_downloading_pending), which is what this reads off /items/{id}. On lookup failure we
+   * fail safe (stillModerated=true) — never silently close a moderation state we couldn't verify.
+   */
+  async getItemModerationStatus(
+    itemId: string,
+    accessToken: string,
+  ): Promise<{ status: string | null; subStatus: string[]; stillModerated: boolean }> {
+    const PENDING_SUB_STATUS = new Set([
+      'warning',
+      'waiting_for_patch',
+      'held',
+      'pending_documentation',
+      'forbidden',
+      'picture_downloading_pending',
+    ]);
+    try {
+      const res = await this.http.get(`/items/${itemId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: { attributes: 'status,sub_status' },
+      });
+      const status: string | null = res.data?.status ?? null;
+      const subStatus: string[] = Array.isArray(res.data?.sub_status) ? res.data.sub_status : [];
+      const stillModerated = status === 'under_review' && subStatus.some((s) => PENDING_SUB_STATUS.has(s));
+      return { status, subStatus, stillModerated };
+    } catch {
+      return { status: null, subStatus: [], stillModerated: true };
+    }
+  }
 }
