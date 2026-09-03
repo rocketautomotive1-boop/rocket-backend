@@ -135,15 +135,22 @@ export class ModerationReconciler implements OnModuleInit {
     let changes = 0;
     let statusChecksUsed = 0;
 
-    // Status checks must be spent in findAllOpen's own order (oldest-updated first), NOT
-    // /infractions' order (date_created_desc). /infractions returns the same few thousand rows
-    // at the front every run for a large, mostly-static account — if the cap just walked toIngest
-    // in that order, rows sorting later in /infractions would never rotate into the cap and could
-    // stay open forever even when genuinely resolved on ML. Iterate openRows (already sorted) to
-    // decide who gets checked, then handle the rest of toIngest (new + already-decided) after.
+    // Status checks must cover EVERY toIngest entry, not just ones with a pre-existing open row.
+    // A row resolved in an earlier run is no longer 'open' — findAllOpen no longer returns it — so
+    // on the next run it looks identical to a brand-new infraction. /infractions still lists it
+    // (per ML's docs, entries never expire there), so without checking brand-new entries too, the
+    // bug reappears one level up: resolve -> next run sees no openRow -> skips the check ->
+    // re-ingests -> re-opens. Confirmed live: a resolved count that actually DROPPED between runs.
+    //
+    // Checks are spent in findAllOpen's own order first (oldest-updated), NOT /infractions' order
+    // (date_created_desc) — a large, mostly-static account has the same few thousand rows at the
+    // front of /infractions every run, so walking toIngest in that order would starve rows sorting
+    // later. Pre-existing open rows go first (they're already known to need re-verification);
+    // brand-new toIngest entries (no openRow) go second, once the pre-existing ones are settled.
     const openByExternalId = new Map(openRows.map((r) => [r.externalId, r]));
     const toIngestSet = new Set(toIngest);
-    const resolvedNow = new Set<string>();
+    const resolvedNow = new Set<string>(); // checked + genuinely resolved -> must not be ingested
+
     for (const row of openRows) {
       if (statusChecksUsed >= maxStatusChecks) break;
       if (!toIngestSet.has(row.externalId)) continue;
@@ -158,6 +165,14 @@ export class ModerationReconciler implements OnModuleInit {
 
     for (const externalId of toIngest) {
       if (resolvedNow.has(externalId)) continue;
+
+      if (!openByExternalId.has(externalId) && statusChecksUsed < maxStatusChecks) {
+        // Brand-new to us, but /infractions is historical — verify it's genuinely still moderated
+        // before creating a moderation_state row at all (never create-then-immediately-resolve).
+        statusChecksUsed++;
+        const itemStatus = await this.mlClient.getItemModerationStatus(externalId, token.accessToken);
+        if (!itemStatus.stillModerated) continue; // already resolved on ML — nothing to ingest
+      }
 
       const canonical = activeById.get(externalId)!;
       // Enrich reason/remedy via last_moderation, and the blocked category for wrong-category.

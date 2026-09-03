@@ -61,8 +61,10 @@ describe('ModerationReconciler.runFor', () => {
     // wrong-category resolves blocked category; compats does not
     expect(mlClient.getItemCategoryId).toHaveBeenCalledWith('MLB1', 'tok');
     expect(mlClient.getItemCategoryId).not.toHaveBeenCalledWith('MLB2', 'tok');
-    // no pre-existing open row for either id — the extra current-status check must not fire
-    expect(mlClient.getItemModerationStatus).not.toHaveBeenCalled();
+    // brand-new infractions (no pre-existing open row) are still verified against /items — the
+    // mock's default stillModerated:true means they proceed to ingest normally.
+    expect(mlClient.getItemModerationStatus).toHaveBeenCalledWith('MLB1', 'tok');
+    expect(mlClient.getItemModerationStatus).toHaveBeenCalledWith('MLB2', 'tok');
   });
 
   it('resolves an open row that disappeared from /infractions (clears listing + re-publish)', async () => {
@@ -122,6 +124,28 @@ describe('ModerationReconciler.runFor', () => {
    * resolved on ML. Confirmed live: findAllOpen's updatedAt-asc sort alone did NOT fix this,
    * because the reconciler loop iterates toIngest, not openRows — this test locks the actual fix.
    */
+  /**
+   * A row resolved in an earlier run is no longer in findAllOpen's result (status != 'open'), so
+   * it looks identical to a brand-new infraction on the next run — /infractions still lists it
+   * (per ML's docs, it never drops entries), so without a status check on brand-new entries too,
+   * the old bug reappears one level up: resolve → next run treats it as new → skips the check
+   * (no openRow) → re-ingests → re-opens. Confirmed live: RCK_AUTOMOTIVE's resolved count actually
+   * DROPPED between consecutive runs (357 -> 272) because previously-resolved rows were reopened.
+   * The fix: check status for every toIngest entry, not just ones with a pre-existing open row —
+   * and skip ingesting entirely (never create/reopen the row) when the item is already resolved.
+   */
+  it('does not re-ingest a brand-new /infractions entry whose item is already resolved on ML (no pre-existing open row)', async () => {
+    mlClient.getAllInfractions.mockResolvedValue([{ element_id: 'MLB-STALE', filter_subgroup: 'COMPATS' }]);
+    mlClient.getItemModerationStatus.mockResolvedValue({ status: 'active', subStatus: [], stillModerated: false });
+    repo.findAllOpen.mockResolvedValue([]); // no pre-existing row — this looks brand new
+
+    await reconciler.runFor('M1');
+
+    expect(mlClient.getItemModerationStatus).toHaveBeenCalledWith('MLB-STALE', 'tok');
+    expect(ingest.ingest).not.toHaveBeenCalled();
+    expect(repo.markResolved).not.toHaveBeenCalled(); // nothing to resolve — it was never opened
+  });
+
   it('checks the open rows findAllOpen returns first, ignoring /infractions ordering', async () => {
     // /infractions returns MLB-LATE before MLB-FIRST (its own date_created_desc order) — the
     // opposite of findAllOpen's oldest-updated-first order. The cap (1) must still pick MLB-FIRST.
