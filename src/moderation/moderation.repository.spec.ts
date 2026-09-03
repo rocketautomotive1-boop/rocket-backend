@@ -87,6 +87,34 @@ describe('ModerationRepository', () => {
     expect(open.map((d) => d.externalId)).toEqual(['MLB2']);
   });
 
+  /**
+   * The reconciler caps how many open rows get a live current-status check per run (a large
+   * account can have 300+ open rows, well over the cap). Without ordering, rows near the "front"
+   * of Mongo's natural order get re-checked every run while rows further back never get checked at
+   * all — that starvation is exactly what let genuinely-resolved items sit open indefinitely (seen
+   * live: 300+ active infractions vs 200/run cap, resolved=0 run after run). Sorting oldest-updated
+   * first guarantees every row eventually rotates through the cap within a few runs.
+   */
+  it('findAllOpen orders rows oldest-updated first, so the reconciler cap rotates through all rows over successive runs', async () => {
+    // insert MLB-NEW first (so natural/insertion order alone would put it before MLB-OLD) —
+    // proves the result is actually driven by updatedAt, not incidental Mongo ordering.
+    const newer = await repo.upsertOpen(canonical({ externalId: 'MLB-NEW' }), { marketplaceId });
+    const older = await repo.upsertOpen(canonical({ externalId: 'MLB-OLD' }), { marketplaceId });
+    await model.updateOne(
+      { _id: newer._id },
+      { $set: { updatedAt: new Date('2026-08-01T00:00:00Z') } },
+      { timestamps: false },
+    );
+    await model.updateOne(
+      { _id: older._id },
+      { $set: { updatedAt: new Date('2026-01-01T00:00:00Z') } },
+      { timestamps: false },
+    );
+
+    const open = await repo.findAllOpen(marketplaceId, null);
+    expect(open.map((d) => d.externalId)).toEqual(['MLB-OLD', 'MLB-NEW']);
+  });
+
   it('upsertOpen re-opens a previously resolved row (same listing moderated again)', async () => {
     const doc = await repo.upsertOpen(canonical(), { marketplaceId });
     await repo.markResolved(doc._id);
