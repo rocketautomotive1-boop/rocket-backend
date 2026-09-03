@@ -1,8 +1,11 @@
 import { ModerationReconciler } from './moderation-reconciler.service';
 
 /**
- * Focus: the diff-driven runFor — ingest active infractions AND close (resolve) open rows that
- * vanished from /infractions. Timers/scheduling are not asserted (setTimeout is fire-and-forget).
+ * Status-first design: /infractions is only used to discover candidate externalIds (it's a
+ * historical log that never expires an entry, per ML's own docs). Every candidate — whether
+ * currently in /infractions, already locally open, or both — gets its REAL current status
+ * checked via getItemsModerationStatus before the reconciler decides to ingest or resolve.
+ * No cap, no priority ordering: every run covers every candidate.
  */
 describe('ModerationReconciler.runFor', () => {
   let listingModel: { findOne: jest.Mock };
@@ -12,12 +15,19 @@ describe('ModerationReconciler.runFor', () => {
     getAllInfractions: jest.Mock;
     getLastModeration: jest.Mock;
     getItemCategoryId: jest.Mock;
-    getItemModerationStatus: jest.Mock;
+    getItemsModerationStatus: jest.Mock;
   };
   let repo: { findAllOpen: jest.Mock; markResolved: jest.Mock };
   let ingest: { ingest: jest.Mock };
   let publisher: { requestSync: jest.Mock };
   let reconciler: ModerationReconciler;
+
+  /** Default: every id checked comes back still-moderated, unless a test overrides it. */
+  const statusMap = (ids: string[], entry: { status: string | null; subStatus: string[]; stillModerated: boolean }) =>
+    new Map(ids.map((id) => [id, entry] as const));
+
+  const STILL_MODERATED = { status: 'under_review', subStatus: ['waiting_for_patch'], stillModerated: true };
+  const RESOLVED = { status: 'active', subStatus: [], stillModerated: false };
 
   beforeEach(() => {
     listingModel = { findOne: jest.fn() };
@@ -30,7 +40,7 @@ describe('ModerationReconciler.runFor', () => {
       getAllInfractions: jest.fn().mockResolvedValue([]),
       getLastModeration: jest.fn().mockResolvedValue(undefined),
       getItemCategoryId: jest.fn().mockResolvedValue('MLB-CAT'),
-      getItemModerationStatus: jest.fn().mockResolvedValue({ status: 'under_review', subStatus: ['waiting_for_patch'], stillModerated: true }),
+      getItemsModerationStatus: jest.fn().mockImplementation((ids: string[]) => Promise.resolve(statusMap(ids, STILL_MODERATED))),
     };
     repo = { findAllOpen: jest.fn().mockResolvedValue([]), markResolved: jest.fn().mockResolvedValue(undefined) };
     ingest = { ingest: jest.fn().mockResolvedValue({ outcome: 'handled', externalId: 'x' }) };
@@ -49,7 +59,7 @@ describe('ModerationReconciler.runFor', () => {
     jest.spyOn<any, any>(reconciler as any, 'scheduleNext').mockImplementation(() => undefined);
   });
 
-  it('ingests each active infraction', async () => {
+  it('ingests each active infraction that is genuinely still moderated', async () => {
     mlClient.getAllInfractions.mockResolvedValue([
       { element_id: 'MLB1', filter_subgroup: 'DOMAIN' },
       { element_id: 'MLB2', filter_subgroup: 'COMPATS' },
@@ -61,17 +71,43 @@ describe('ModerationReconciler.runFor', () => {
     // wrong-category resolves blocked category; compats does not
     expect(mlClient.getItemCategoryId).toHaveBeenCalledWith('MLB1', 'tok');
     expect(mlClient.getItemCategoryId).not.toHaveBeenCalledWith('MLB2', 'tok');
-    // brand-new infractions (no pre-existing open row) are still verified against /items — the
-    // mock's default stillModerated:true means they proceed to ingest normally.
-    expect(mlClient.getItemModerationStatus).toHaveBeenCalledWith('MLB1', 'tok');
-    expect(mlClient.getItemModerationStatus).toHaveBeenCalledWith('MLB2', 'tok');
+    // every candidate gets its real status checked in one batch call, brand-new or not
+    expect(mlClient.getItemsModerationStatus).toHaveBeenCalledWith(expect.arrayContaining(['MLB1', 'MLB2']), 'tok');
   });
 
-  it('resolves an open row that disappeared from /infractions (clears listing + re-publish)', async () => {
+  it('does not ingest a brand-new /infractions entry whose item is already resolved on ML (no create-then-resolve churn)', async () => {
+    mlClient.getAllInfractions.mockResolvedValue([{ element_id: 'MLB-STALE', filter_subgroup: 'COMPATS' }]);
+    mlClient.getItemsModerationStatus.mockResolvedValue(statusMap(['MLB-STALE'], RESOLVED));
+    repo.findAllOpen.mockResolvedValue([]); // no pre-existing row — /infractions is just stale history
+
+    await reconciler.runFor('M1');
+
+    expect(ingest.ingest).not.toHaveBeenCalled();
+    expect(repo.markResolved).not.toHaveBeenCalled(); // nothing to resolve — it was never opened
+  });
+
+  it('resolves an open row whose item is actually active again, even though /infractions still lists it', async () => {
+    mlClient.getAllInfractions.mockResolvedValue([{ element_id: 'MLB1', filter_subgroup: 'COMPATS' }]);
+    mlClient.getItemsModerationStatus.mockResolvedValue(statusMap(['MLB1'], RESOLVED));
+    repo.findAllOpen.mockResolvedValue([{ _id: 'S1', externalId: 'MLB1', productId: 'P1' }]);
+    const listing: any = {
+      status: 'error',
+      marketplaceData: { syncIssue: { blocked: true } },
+      save: jest.fn().mockResolvedValue(undefined),
+    };
+    listingModel.findOne.mockResolvedValue(listing);
+
+    await reconciler.runFor('M1');
+
+    expect(ingest.ingest).not.toHaveBeenCalled();
+    expect(repo.markResolved).toHaveBeenCalledWith('S1');
+    expect(listing.status).toBe('active');
+  });
+
+  it('resolves an open row that vanished from /infractions entirely (still checked via the union, not a special branch)', async () => {
     mlClient.getAllInfractions.mockResolvedValue([]); // nothing active now
-    repo.findAllOpen.mockResolvedValue([
-      { _id: 'S1', externalId: 'MLB-GONE', productId: 'P1' },
-    ]);
+    mlClient.getItemsModerationStatus.mockResolvedValue(statusMap(['MLB-GONE'], RESOLVED));
+    repo.findAllOpen.mockResolvedValue([{ _id: 'S1', externalId: 'MLB-GONE', productId: 'P1' }]);
     const listing: any = {
       status: 'pending_removal',
       marketplaceData: { syncIssue: { blocked: true } },
@@ -90,7 +126,7 @@ describe('ModerationReconciler.runFor', () => {
     );
   });
 
-  it('keeps an open row that is still active (no resolve)', async () => {
+  it('keeps an open row that is still genuinely moderated (no resolve)', async () => {
     mlClient.getAllInfractions.mockResolvedValue([{ element_id: 'MLB1', filter_subgroup: 'DOMAIN' }]);
     repo.findAllOpen.mockResolvedValue([{ _id: 'S1', externalId: 'MLB1', productId: 'P1' }]);
 
@@ -100,92 +136,35 @@ describe('ModerationReconciler.runFor', () => {
   });
 
   /**
-   * getItemModerationStatus costs one live GET /items/{id} per already-open row — and open-row
-   * count scales with account size (seen live: 1600+), not with the once-a-day run cadence. Capping
-   * how many open rows get re-checked per run bounds the burst; rows past the cap simply keep their
-   * current state and get picked up on a later run (nothing is lost, just spread out).
+   * The regression this redesign exists to prevent: resolving in run N must not make the same id
+   * look "brand new" (and therefore un-checked / re-ingested) in run N+1, just because it's no
+   * longer in findAllOpen's result. Every candidate is always checked, so there is no "new" branch
+   * that can skip verification.
    */
-  it('caps how many already-open rows get the extra current-status check per run', async () => {
-    const ids = Array.from({ length: 10 }, (_, i) => `MLB${i}`);
+  it('does not reopen a row resolved in a previous run when /infractions still lists it on the next run', async () => {
+    mlClient.getAllInfractions.mockResolvedValue([{ element_id: 'MLB1', filter_subgroup: 'COMPATS' }]);
+    mlClient.getItemsModerationStatus.mockResolvedValue(statusMap(['MLB1'], RESOLVED));
+    repo.findAllOpen.mockResolvedValue([]); // run N already resolved it — no longer open
+
+    await reconciler.runFor('M1');
+    await reconciler.runFor('M1'); // run N+1, same /infractions listing, same real status
+
+    expect(ingest.ingest).not.toHaveBeenCalled();
+    expect(repo.markResolved).not.toHaveBeenCalled();
+  });
+
+  it('checks every candidate id in one batch call regardless of account size (no per-run cap)', async () => {
+    const ids = Array.from({ length: 250 }, (_, i) => `MLB${i}`);
     mlClient.getAllInfractions.mockResolvedValue(ids.map((id) => ({ element_id: id, filter_subgroup: 'COMPATS' })));
     repo.findAllOpen.mockResolvedValue(ids.map((id) => ({ _id: `S-${id}`, externalId: id, productId: 'P1' })));
 
-    await reconciler.runFor('M1', undefined, 3);
-
-    expect(mlClient.getItemModerationStatus).toHaveBeenCalledTimes(3);
-  });
-
-  /**
-   * The status-check order must follow findAllOpen's own ordering (oldest-updated first), NOT
-   * /infractions' order. /infractions comes back sorted by date_created_desc (ML's own default) —
-   * a large, mostly-static account has the same few thousand infractions at the front every single
-   * run, so if the cap consumes toIngest's order directly, rows that happen to sort late in
-   * /infractions never rotate into the cap and stay open forever even though they're genuinely
-   * resolved on ML. Confirmed live: findAllOpen's updatedAt-asc sort alone did NOT fix this,
-   * because the reconciler loop iterates toIngest, not openRows — this test locks the actual fix.
-   */
-  /**
-   * A row resolved in an earlier run is no longer in findAllOpen's result (status != 'open'), so
-   * it looks identical to a brand-new infraction on the next run — /infractions still lists it
-   * (per ML's docs, it never drops entries), so without a status check on brand-new entries too,
-   * the old bug reappears one level up: resolve → next run treats it as new → skips the check
-   * (no openRow) → re-ingests → re-opens. Confirmed live: RCK_AUTOMOTIVE's resolved count actually
-   * DROPPED between consecutive runs (357 -> 272) because previously-resolved rows were reopened.
-   * The fix: check status for every toIngest entry, not just ones with a pre-existing open row —
-   * and skip ingesting entirely (never create/reopen the row) when the item is already resolved.
-   */
-  it('does not re-ingest a brand-new /infractions entry whose item is already resolved on ML (no pre-existing open row)', async () => {
-    mlClient.getAllInfractions.mockResolvedValue([{ element_id: 'MLB-STALE', filter_subgroup: 'COMPATS' }]);
-    mlClient.getItemModerationStatus.mockResolvedValue({ status: 'active', subStatus: [], stillModerated: false });
-    repo.findAllOpen.mockResolvedValue([]); // no pre-existing row — this looks brand new
-
     await reconciler.runFor('M1');
 
-    expect(mlClient.getItemModerationStatus).toHaveBeenCalledWith('MLB-STALE', 'tok');
-    expect(ingest.ingest).not.toHaveBeenCalled();
-    expect(repo.markResolved).not.toHaveBeenCalled(); // nothing to resolve — it was never opened
-  });
-
-  it('checks the open rows findAllOpen returns first, ignoring /infractions ordering', async () => {
-    // /infractions returns MLB-LATE before MLB-FIRST (its own date_created_desc order) — the
-    // opposite of findAllOpen's oldest-updated-first order. The cap (1) must still pick MLB-FIRST.
-    mlClient.getAllInfractions.mockResolvedValue([
-      { element_id: 'MLB-LATE', filter_subgroup: 'COMPATS' },
-      { element_id: 'MLB-FIRST', filter_subgroup: 'COMPATS' },
-    ]);
-    repo.findAllOpen.mockResolvedValue([
-      { _id: 'S-FIRST', externalId: 'MLB-FIRST', productId: 'P1' },
-      { _id: 'S-LATE', externalId: 'MLB-LATE', productId: 'P2' },
-    ]);
-
-    await reconciler.runFor('M1', undefined, 1);
-
-    expect(mlClient.getItemModerationStatus).toHaveBeenCalledTimes(1);
-    expect(mlClient.getItemModerationStatus).toHaveBeenCalledWith('MLB-FIRST', 'tok');
-  });
-
-  /**
-   * /moderations/infractions is a historical log (per ML docs) — it never drops an entry just
-   * because the item was fixed. So a row can be BOTH present in /infractions AND genuinely resolved
-   * (item back to status=active, no pending sub_status). The reconciler must trust /items/{id}'s
-   * current status over the historical infractions list, and resolve instead of re-ingesting.
-   */
-  it('resolves an open row whose item is actually active again, even though /infractions still lists it', async () => {
-    mlClient.getAllInfractions.mockResolvedValue([{ element_id: 'MLB1', filter_subgroup: 'COMPATS' }]);
-    mlClient.getItemModerationStatus.mockResolvedValue({ status: 'active', subStatus: [], stillModerated: false });
-    repo.findAllOpen.mockResolvedValue([{ _id: 'S1', externalId: 'MLB1', productId: 'P1' }]);
-    const listing: any = {
-      status: 'error',
-      marketplaceData: { syncIssue: { blocked: true } },
-      save: jest.fn().mockResolvedValue(undefined),
-    };
-    listingModel.findOne.mockResolvedValue(listing);
-
-    await reconciler.runFor('M1');
-
-    expect(ingest.ingest).not.toHaveBeenCalled();
-    expect(repo.markResolved).toHaveBeenCalledWith('S1');
-    expect(listing.status).toBe('active');
+    const checked = new Set<string>();
+    for (const call of mlClient.getItemsModerationStatus.mock.calls) {
+      for (const id of call[0]) checked.add(id);
+    }
+    expect(checked.size).toBe(250);
   });
 
   it('skips when the token has no userId', async () => {

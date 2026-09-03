@@ -89,12 +89,9 @@ export class ModerationRepository {
   }
 
   /**
-   * All open moderations for a (marketplace, account) — used by the reconciler to diff/close.
-   * Ordered oldest-updated first: the reconciler caps how many rows get a live current-status
-   * check per run, and a large account can have far more open rows than the cap. Without this
-   * ordering, rows near the "front" of Mongo's natural order get re-checked every run while rows
-   * further back never rotate in — this ordering guarantees every row eventually gets checked
-   * across successive runs instead of starving.
+   * All open moderations for a (marketplace, account) — the reconciler unions these externalIds
+   * with /infractions' discovered ones and batch-checks every candidate's real status every run
+   * (no cap), so no particular ordering is needed here.
    */
   async findAllOpen(
     marketplaceId: string,
@@ -106,7 +103,6 @@ export class ModerationRepository {
         accountId: accountId ?? null,
         status: 'open',
       })
-      .sort({ updatedAt: 1 })
       .exec();
   }
 

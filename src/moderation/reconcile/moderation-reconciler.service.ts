@@ -9,7 +9,6 @@ import { MlModerationsClient } from '../ml/ml-moderations.client';
 import { MercadoLivreModerationProvider } from '../providers/mercadolivre-moderation.provider';
 import { ModerationRepository } from '../moderation.repository';
 import { ModerationIngestService } from '../ingest/moderation-ingest.service';
-import { diffModerations } from './moderation-diff';
 
 /**
  * Moderation reconciliation runs once a day — that cadence is enough. /infractions changes slowly,
@@ -17,23 +16,22 @@ import { diffModerations } from './moderation-diff';
  */
 const RECON = {
   DAILY_MS: 24 * 60 * 60 * 1000,
-  /**
-   * Cap on how many already-open rows get the extra live getItemModerationStatus check per run.
-   * Open-row count scales with account size (seen live: 1600+), not with the once-a-day cadence —
-   * without a cap a single run could burst thousands of GET /items/{id} calls and risk ML's rate
-   * limit. Rows past the cap simply keep their current state and get re-checked on a later run.
-   */
-  MAX_STATUS_CHECKS_PER_RUN: 200,
 };
 
 /**
  * PRIMARY moderation source of truth. ML has no `moderations` webhook topic — infractions are
- * discovered by polling /infractions. Per (marketplace, account) this fetches active infractions,
- * diffs them against our open moderation_state rows, then:
- *   - ingests the active ones (upsert open + apply handler), and
- *   - RESOLVES rows that vanished from /infractions — closing the state and clearing the listing's
- *     pending_removal/syncIssue, then asking the orchestrator to re-publish. The old polling never
- *     closed anything, so local state diverged and got stuck; this is the fix.
+ * discovered by polling /infractions, but /infractions is a historical log that NEVER expires an
+ * entry (confirmed against ML's own docs and live data) — it is a discovery mechanism only, never
+ * a signal that something is still open. Per (marketplace, account) this:
+ *   1. discovers candidate externalIds from /infractions (still the only way to find NEW ones),
+ *   2. unions them with every currently-open moderation_state row (a row can still be open locally
+ *      even if it dropped out of /infractions, or vice versa — both need the same real check),
+ *   3. batch-checks EVERY candidate's real current status via /items multiget (no cap — batching
+ *      is what makes covering the whole set per run affordable; a 1700-infraction account is ~85
+ *      calls instead of up to 1700 sequential ones),
+ *   4. ingests candidates that are genuinely still moderated, resolves open rows that aren't, and
+ *      no-ops on brand-new candidates that are already resolved (never create-then-immediately-
+ *      resolve a row).
  * Runs once a day — that cadence is enough; the `items` webhook probe covers low-latency cases.
  */
 @Injectable()
@@ -90,11 +88,7 @@ export class ModerationReconciler implements OnModuleInit {
     this.timers.set(k, t);
   }
 
-  async runFor(
-    marketplaceId: string,
-    accountId?: string,
-    maxStatusChecks: number = RECON.MAX_STATUS_CHECKS_PER_RUN,
-  ): Promise<void> {
+  async runFor(marketplaceId: string, accountId?: string): Promise<void> {
     const k = this.key(marketplaceId, accountId);
 
     let token: { accessToken: string; additionalData: Record<string, any> };
@@ -118,8 +112,9 @@ export class ModerationReconciler implements OnModuleInit {
     const infractions = await this.mlClient.getAllInfractions(token.accessToken, userId);
     const acctKey = accountId ?? null;
     const openRows = await this.repo.findAllOpen(marketplaceId, acctKey);
+    const openByExternalId = new Map(openRows.map((r) => [r.externalId, r]));
 
-    // Classify the active infractions to canonical, keyed by externalId.
+    // Classify the discovered infractions to canonical, keyed by externalId.
     const activeById = new Map(
       infractions
         .map((inf) => this.mlProvider.toCanonical(inf))
@@ -127,74 +122,41 @@ export class ModerationReconciler implements OnModuleInit {
         .map((c) => [c.externalId, c] as const),
     );
 
-    const { toIngest, toResolve } = diffModerations({
-      activeExternalIds: [...activeById.keys()],
-      openExternalIds: openRows.map((r) => r.externalId),
-    });
+    // /infractions never expires an entry (per ML's docs), so it's a discovery mechanism only —
+    // the union with currently-open rows is the full set of candidates that need a REAL status
+    // check this run. No cap: the batch multiget makes checking everyone affordable.
+    const candidateIds = new Set([...activeById.keys(), ...openByExternalId.keys()]);
+    const statusById = await this.mlClient.getItemsModerationStatus([...candidateIds], token.accessToken);
 
-    let changes = 0;
-    let statusChecksUsed = 0;
+    let ingested = 0;
+    let resolved = 0;
 
-    // Status checks must cover EVERY toIngest entry, not just ones with a pre-existing open row.
-    // A row resolved in an earlier run is no longer 'open' — findAllOpen no longer returns it — so
-    // on the next run it looks identical to a brand-new infraction. /infractions still lists it
-    // (per ML's docs, entries never expire there), so without checking brand-new entries too, the
-    // bug reappears one level up: resolve -> next run sees no openRow -> skips the check ->
-    // re-ingests -> re-opens. Confirmed live: a resolved count that actually DROPPED between runs.
-    //
-    // Checks are spent in findAllOpen's own order first (oldest-updated), NOT /infractions' order
-    // (date_created_desc) — a large, mostly-static account has the same few thousand rows at the
-    // front of /infractions every run, so walking toIngest in that order would starve rows sorting
-    // later. Pre-existing open rows go first (they're already known to need re-verification);
-    // brand-new toIngest entries (no openRow) go second, once the pre-existing ones are settled.
-    const openByExternalId = new Map(openRows.map((r) => [r.externalId, r]));
-    const toIngestSet = new Set(toIngest);
-    const resolvedNow = new Set<string>(); // checked + genuinely resolved -> must not be ingested
+    for (const externalId of candidateIds) {
+      const itemStatus = statusById.get(externalId);
+      const openRow = openByExternalId.get(externalId);
 
-    for (const row of openRows) {
-      if (statusChecksUsed >= maxStatusChecks) break;
-      if (!toIngestSet.has(row.externalId)) continue;
-      statusChecksUsed++;
-      const itemStatus = await this.mlClient.getItemModerationStatus(row.externalId, token.accessToken);
-      if (!itemStatus.stillModerated) {
-        await this.resolve(marketplaceId, acctKey, row.externalId, String(row._id), String(row.productId ?? ''));
-        changes++;
-        resolvedNow.add(row.externalId);
+      if (itemStatus?.stillModerated) {
+        const canonical = activeById.get(externalId);
+        if (!canonical) continue; // open locally but no longer in /infractions AND still moderated — nothing new to ingest, leave as-is
+        // Enrich reason/remedy via last_moderation, and the blocked category for wrong-category.
+        const last = await this.mlClient.getLastModeration(externalId, token.accessToken);
+        const enriched = last ? this.mlProvider.toCanonical(canonical.raw as any, last) : canonical;
+        const blockedCategoryId =
+          enriched.type === 'WRONG_CATEGORY'
+            ? await this.mlClient.getItemCategoryId(externalId, token.accessToken)
+            : null;
+        const res = await this.ingest.ingest(marketplaceId, acctKey, enriched, blockedCategoryId);
+        if (res.outcome === 'handled') ingested++;
+      } else if (openRow) {
+        // Genuinely no longer moderated AND we have a row to close — resolve it. A brand-new
+        // candidate that's already resolved (no openRow) is a no-op: never create then resolve.
+        await this.resolve(marketplaceId, acctKey, externalId, String(openRow._id), String(openRow.productId ?? ''));
+        resolved++;
       }
-    }
-
-    for (const externalId of toIngest) {
-      if (resolvedNow.has(externalId)) continue;
-
-      if (!openByExternalId.has(externalId) && statusChecksUsed < maxStatusChecks) {
-        // Brand-new to us, but /infractions is historical — verify it's genuinely still moderated
-        // before creating a moderation_state row at all (never create-then-immediately-resolve).
-        statusChecksUsed++;
-        const itemStatus = await this.mlClient.getItemModerationStatus(externalId, token.accessToken);
-        if (!itemStatus.stillModerated) continue; // already resolved on ML — nothing to ingest
-      }
-
-      const canonical = activeById.get(externalId)!;
-      // Enrich reason/remedy via last_moderation, and the blocked category for wrong-category.
-      const last = await this.mlClient.getLastModeration(externalId, token.accessToken);
-      const enriched = last ? this.mlProvider.toCanonical(canonical.raw as any, last) : canonical;
-      const blockedCategoryId =
-        enriched.type === 'WRONG_CATEGORY'
-          ? await this.mlClient.getItemCategoryId(externalId, token.accessToken)
-          : null;
-      const res = await this.ingest.ingest(marketplaceId, acctKey, enriched, blockedCategoryId);
-      if (res.outcome === 'handled') changes++;
-    }
-
-    for (const externalId of toResolve) {
-      const row = openByExternalId.get(externalId);
-      if (!row) continue;
-      await this.resolve(marketplaceId, acctKey, externalId, String(row._id), String(row.productId ?? ''));
-      changes++;
     }
 
     this.logger.log(
-      `[Moderation] ${k} active=${activeById.size} open=${openRows.length} ingested=${toIngest.length} resolved=${toResolve.length} changes=${changes} nextMs=${RECON.DAILY_MS}`,
+      `[Moderation] ${k} candidates=${candidateIds.size} open=${openRows.length} ingested=${ingested} resolved=${resolved} nextMs=${RECON.DAILY_MS}`,
     );
     this.scheduleNext(marketplaceId, RECON.DAILY_MS, accountId);
   }
