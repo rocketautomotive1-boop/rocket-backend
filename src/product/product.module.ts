@@ -122,6 +122,7 @@ import { PRODUCT_INFO_QUERY_PORT } from '../notifications/bot/ports/bot-query.po
 import { StockModule } from '../stock/stock.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { StoreListingModule } from '../store-listing/store-listing.module';
+import { ProductDeletionModule } from '../product-deletion/product-deletion.module';
 
 
 @Module({
@@ -166,6 +167,7 @@ import { StoreListingModule } from '../store-listing/store-listing.module';
     forwardRef(() => MarketplaceOrchestratorModule),
     GatewaysModule,
     VehicleCompatibilityModule,
+    forwardRef(() => ProductDeletionModule),
   ],
   controllers: [
     ProductController,

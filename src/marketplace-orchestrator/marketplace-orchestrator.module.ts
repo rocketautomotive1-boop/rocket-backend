@@ -28,6 +28,7 @@ import { SyncResultConsumer } from './sync-result.consumer';
 import { ModerationModule } from '../moderation/moderation.module';
 import { ModerationRemovalWorker } from './workers/moderation-removal.worker';
 import { ListingModule } from '../listing/listing.module';
+import { ProductDeletionModule } from '../product-deletion/product-deletion.module';
 
 /**
  * Backend half of the marketplace-sync contract. This module is NOT the orchestrator itself —
@@ -66,6 +67,7 @@ import { ListingModule } from '../listing/listing.module';
         OutboxModule,
         ModerationModule,
         ListingModule,
+        forwardRef(() => ProductDeletionModule),
     ],
     controllers: [MarketplaceOrchestratorController],
     providers: [

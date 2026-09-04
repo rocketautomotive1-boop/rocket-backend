@@ -3,17 +3,20 @@ import { SyncResultConsumer } from './sync-result.consumer';
 import { ListingService } from '../listing/listing.service';
 import { SyncGateway } from '../gateways/sync.gateway';
 import { ModerationRepository } from '../moderation/moderation.repository';
+import { ProductDeletionService } from '../product-deletion/product-deletion.service';
 
 describe('SyncResultConsumer', () => {
     let consumer: SyncResultConsumer;
     let listingServiceMock: jest.Mocked<Pick<ListingService, 'update'>>;
     let syncGatewayMock: any;
     let moderationRepoMock: any;
+    let productDeletionMock: jest.Mocked<Pick<ProductDeletionService, 'onListingRemovalResult'>>;
 
     beforeEach(async () => {
         listingServiceMock = { update: jest.fn() };
         syncGatewayMock = { emitSyncCompleted: jest.fn(), emitSyncFailed: jest.fn() };
         moderationRepoMock = { markResolvedByListingId: jest.fn() };
+        productDeletionMock = { onListingRemovalResult: jest.fn() };
 
         const moduleRef = await Test.createTestingModule({
             providers: [
@@ -21,6 +24,7 @@ describe('SyncResultConsumer', () => {
                 { provide: ListingService, useValue: listingServiceMock },
                 { provide: SyncGateway, useValue: syncGatewayMock },
                 { provide: ModerationRepository, useValue: moderationRepoMock },
+                { provide: ProductDeletionService, useValue: productDeletionMock },
             ],
         }).compile();
 
@@ -116,6 +120,7 @@ describe('SyncResultConsumer', () => {
         expect(syncGatewayMock.emitSyncCompleted).toHaveBeenCalledWith(
             expect.objectContaining({ productId: 'P4', listingId: 'L4', success: true }),
         );
+        expect(productDeletionMock.onListingRemovalResult).toHaveBeenCalledWith('P4', 'L4', true);
     });
 
     it('regressão: DELETE por moderação (moderationDelete:true) marca removed_by_moderation, não removed — elegível a reentrar num sync futuro (SyncQueueTargetResolverService/PublicationContextService filtram só status:removed)', async () => {
@@ -159,6 +164,7 @@ describe('SyncResultConsumer', () => {
         expect(syncGatewayMock.emitSyncFailed).toHaveBeenCalledWith(
             expect.objectContaining({ productId: 'P5', listingId: 'L5', success: false }),
         );
+        expect(productDeletionMock.onListingRemovalResult).toHaveBeenCalledWith('P5', 'L5', false);
     });
 
     it('CREATE com sucesso continua resolvendo moderação (comportamento existente preservado)', async () => {

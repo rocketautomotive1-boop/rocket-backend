@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 // import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ProductModule } from './product/product.module';
+import { ProductDeletionModule } from './product-deletion/product-deletion.module';
 import { MarketplaceModule } from './marketplace/marketplace.module';
 import { MarketplaceCredentialsModule } from './marketplace/credentials/marketplace-credentials.module';
 import { MarketplaceConfigCacheModule } from './marketplace/services/marketplace-config-cache.module';
@@ -102,6 +103,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     //   }),
     // }),
     ProductModule,
+    ProductDeletionModule,
     MarketplaceModule,
     QueueModule,
     RabbitMqModule,

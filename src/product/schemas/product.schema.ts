@@ -561,6 +561,28 @@ export class ProductModel {
     /** Origem do produto. 'autopecas' (default) ou 'general' (projetado de general_products). */
     @Prop({ default: 'autopecas', index: true })
     domain: string;
+
+    /**
+     * Exclusão completa em cascata (admin-only, ver ProductDeletionService). Ausente = normal.
+     * 'pending': aguardando confirmação assíncrona de remoção de 1+ Listing publicado no
+     * marketplace (via fila do orchestrator). 'failed': algum marketplace não confirmou a
+     * remoção — admin pode tentar de novo.
+     */
+    @Prop({ type: String, enum: ['pending', 'failed'] })
+    deletionStatus?: 'pending' | 'failed';
+
+    @Prop({ type: Date })
+    deletionRequestedAt?: Date;
+
+    @Prop({ type: SchemaTypes.ObjectId })
+    deletionRequestedBy?: Types.ObjectId;
+
+    /** Listings publicados ainda aguardando confirmação de remoção via fila. */
+    @Prop({ type: [SchemaTypes.ObjectId], default: undefined })
+    deletionPendingListingIds?: Types.ObjectId[];
+
+    @Prop({ type: String })
+    deletionFailureReason?: string;
 }
 
 export const ProductSchema = SchemaFactory.createForClass(ProductModel);

@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { RabbitSubscribe } from '@golevelup/nestjs-rabbitmq';
 import { ListingService } from '../listing/listing.service';
 import { SyncGateway } from '../gateways/sync.gateway';
 import { ModerationRepository } from '../moderation/moderation.repository';
+import { ProductDeletionService } from '../product-deletion/product-deletion.service';
 
 interface SyncResultMessage {
     syncRequestId: string;
@@ -28,6 +29,8 @@ export class SyncResultConsumer {
         private readonly listingService: ListingService,
         private readonly syncGateway: SyncGateway,
         private readonly moderationRepo: ModerationRepository,
+        @Inject(forwardRef(() => ProductDeletionService))
+        private readonly productDeletion: ProductDeletionService,
     ) {}
 
     @RabbitSubscribe({
@@ -69,6 +72,9 @@ export class SyncResultConsumer {
                 marketplaceTag,
                 success: true,
             });
+
+            // No-op se o produto não estiver em exclusão em cascata (ver ProductDeletionService).
+            await this.productDeletion.onListingRemovalResult(String(msg.productId), String(msg.listingId), true);
             return;
         }
 
@@ -87,6 +93,8 @@ export class SyncResultConsumer {
                 marketplaceTag,
                 success: false,
             });
+
+            await this.productDeletion.onListingRemovalResult(String(msg.productId), String(msg.listingId), false);
             return;
         }
 
