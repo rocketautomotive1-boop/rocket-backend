@@ -151,6 +151,54 @@ describe('SignatureVerifier (aws-sns)', () => {
   });
 });
 
+describe('SignatureVerifier (hmac-sha256 com prefixo sha256= — formato Magalu)', () => {
+  const makeSut = (secret?: string) => {
+    const credentials = { get: jest.fn().mockResolvedValue(secret) };
+    return { sut: new SignatureVerifier(credentials as any) };
+  };
+  const scheme = {
+    type: 'hmac-sha256' as const,
+    header: 'x-signature-256',
+    secretKey: 'webhookSecret',
+    baseString: (ctx: WebhookContext) => `${ctx.headers['x-timestamp'] ?? ''}.${ctx.rawBody?.toString('utf8') ?? ''}`,
+  };
+
+  it('aceita header no formato "sha256=<hex>"', async () => {
+    const { sut } = makeSut('whsec_test');
+    const body = '{"data":{"status":"published"}}';
+    const timestamp = '1700000000';
+    const expected = sign('whsec_test', `${timestamp}.${body}`);
+    const ctx = makeCtx({
+      rawBody: Buffer.from(body),
+      headers: { 'x-signature-256': `sha256=${expected}`, 'x-timestamp': timestamp },
+    });
+    await expect(sut.verify(scheme, ctx)).resolves.toBe(true);
+  });
+
+  it('aceita QUALQUER assinatura válida dentre múltiplas separadas por vírgula (grace period de rotação de secret)', async () => {
+    const { sut } = makeSut('whsec_new');
+    const body = '{"data":{"status":"published"}}';
+    const timestamp = '1700000000';
+    const oldSig = sign('whsec_old', `${timestamp}.${body}`);
+    const newSig = sign('whsec_new', `${timestamp}.${body}`);
+    const ctx = makeCtx({
+      rawBody: Buffer.from(body),
+      headers: { 'x-signature-256': `sha256=${oldSig},sha256=${newSig}`, 'x-timestamp': timestamp },
+    });
+    await expect(sut.verify(scheme, ctx)).resolves.toBe(true);
+  });
+
+  it('rejeita quando nenhuma assinatura da lista bate', async () => {
+    const { sut } = makeSut('whsec_test');
+    const body = '{"data":{"status":"published"}}';
+    const ctx = makeCtx({
+      rawBody: Buffer.from(body),
+      headers: { 'x-signature-256': 'sha256=deadbeef', 'x-timestamp': '1700000000' },
+    });
+    await expect(sut.verify(scheme, ctx)).resolves.toBe(false);
+  });
+});
+
 function buildSignedSnsFixture() {
   const { generateKeyPairSync, createSign } = require('crypto');
   const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });

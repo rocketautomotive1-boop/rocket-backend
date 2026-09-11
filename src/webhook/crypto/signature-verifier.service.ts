@@ -58,7 +58,15 @@ export class SignatureVerifier {
       base = Buffer.from(custom);
     }
     const expected = crypto.createHmac('sha256', secret).update(base).digest('hex');
-    return this.safeEqual(expected, provided);
+    // Alguns marketplaces (Magalu) prefixam o header com "sha256=" (e podem enviar
+    // múltiplas assinaturas separadas por vírgula durante rotação de secret) — ver
+    // signup v1: X-Signature-256: sha256=<hex>[,sha256=<hex>]. Extrai cada candidato
+    // e aceita se QUALQUER um bater (suporta o grace period de troca de secret).
+    const candidates = provided
+      .split(',')
+      .map((s) => s.trim().replace(/^sha256=/, ''))
+      .filter(Boolean);
+    return candidates.some((c) => this.safeEqual(expected, c));
   }
 
   private async verifySharedToken(

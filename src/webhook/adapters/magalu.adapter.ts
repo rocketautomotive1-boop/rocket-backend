@@ -8,7 +8,21 @@ const PORTFOLIO_TOPICS = new Set(['portfolios_sku', 'portfolios_price', 'portfol
 @RegisterWebhookAdapter('magalu')
 export class MagaluAdapter implements WebhookAdapter {
   readonly marketplace = 'magalu';
-  readonly signatureScheme: SignatureScheme = { type:'hmac-sha256', header:'x-magalu-signature', secretKey:'webhookSecret', baseString:'rawBody' };
+  /**
+   * Confirmado na doc oficial de webhooks (signup v1) — NÃO é HMAC simples sobre
+   * o rawBody como os demais marketplaces: header é `X-Signature-256` no formato
+   * `sha256=<hex>` (SignatureVerifier já trata o prefixo/múltiplas assinaturas em
+   * rotação de secret), e a base assinada é `{timestamp}.{body}` — o timestamp vem
+   * de um header IRMÃO (`X-Timestamp`), não do payload. `secretKey: 'webhookSecret'`
+   * guarda o `secret` (formato `whsec_*`) devolvido pelo PUT /v1/onboarding/signup —
+   * exibido só uma vez na criação.
+   */
+  readonly signatureScheme: SignatureScheme = {
+    type: 'hmac-sha256',
+    header: 'x-signature-256',
+    secretKey: 'webhookSecret',
+    baseString: (ctx) => `${ctx.headers['x-timestamp'] ?? ''}.${ctx.rawBody?.toString('utf8') ?? ''}`,
+  };
   parse(ctx: WebhookContext): NormalizedWebhook {
     const topic = String(ctx.topic||'').toLowerCase();
     if (topic === 'orders') {
