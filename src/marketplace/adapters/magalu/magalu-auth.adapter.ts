@@ -70,7 +70,10 @@ export class MagaluAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit 
         },
         { headers: { 'Content-Type': 'application/json', Accept: 'application/json' } },
       );
-      return this.toTokenData(response.data, clientId);
+      // previousAdditionalData (re-auth da mesma conta, ex.: re-consent após novo
+      // escopo): preserva campos fora do OAuth padrão, como magaluChannelId,
+      // resolvido fora do fluxo de token — sem isso, cada re-auth apaga o canal.
+      return this.toTokenData(response.data, clientId, additionalData?.previousAdditionalData);
     } catch (error: any) {
       this.logger.error(`Falha na autenticação do Magalu: ${error.message}`, error.response?.data);
       throw new InternalServerErrorException(error.response?.data ?? `Falha na autenticação do Magalu: ${error.message}`);

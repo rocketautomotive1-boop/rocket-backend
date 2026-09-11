@@ -505,7 +505,16 @@ export class MarketplaceTokenBrokerService {
     if (!located) throw new BadRequestException(`Conta ${accountId} não encontrada.`);
     const { clientId, clientSecret } = await this.resolveCredentials(located);
     const adapter = this.registry.getAuthAdapter(located.tag);
-    const tokenData = await adapter.authenticate(code, { redirectUri, credentials: { clientId, clientSecret } });
+    // previousAdditionalData: re-autenticação (mesma conta, novo code — ex.: re-consent
+    // após adicionar escopos) troca o token inteiro, não passa por refreshToken(). Sem
+    // isto, adapters que guardam dados fora do OAuth padrão em additionalData (ex.:
+    // magaluChannelId, resolvido fora do fluxo de token) perdem o valor no re-auth.
+    // Adapters que não usam previousAdditionalData simplesmente ignoram o campo.
+    const tokenData = await adapter.authenticate(code, {
+      redirectUri,
+      credentials: { clientId, clientSecret },
+      previousAdditionalData: located.token?.additionalData,
+    });
     await this.saveAccountToken(located, await this.enrichWithProfile(adapter, tokenData));
   }
 
