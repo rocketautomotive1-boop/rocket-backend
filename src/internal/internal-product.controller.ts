@@ -296,4 +296,18 @@ export class InternalProductController {
         });
         return { resolved: true };
     }
+
+    /**
+     * Chamado por mercadolivre-sync.worker.ts (microservices/orchestrator) logo após um
+     * CREATE ou UPDATE bem-sucedido no ML — catch-up best-effort de qualquer compatibilidade
+     * de veículo salva localmente que ainda não foi confirmada como sincronizada (produto
+     * publicado antes de ter compatibilidades, ou um envio anterior que falhou). Único ponto
+     * que decide/executa esse sync — ver ProductService.syncPendingCompatibilitiesAfterPublish.
+     * Sempre 200: best-effort, nunca deve derrubar o worker que chamou.
+     */
+    @Patch(':id/sync-compatibilities')
+    async syncCompatibilitiesAfterPublish(@Param('id') id: string) {
+        await this.productService.syncPendingCompatibilitiesAfterPublish(id);
+        return { accepted: true };
+    }
 }

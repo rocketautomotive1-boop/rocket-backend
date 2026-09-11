@@ -264,8 +264,15 @@ describe('ProductService — remoção de compatibilidade propaga pro Mercado Li
  * compatibilidades pendentes — só o auto-sync ao SALVAR uma compatibilidade nova enviava
  * ao ML, e ele pulava silenciosamente se o produto ainda não tinha externalId. Compatibilidades
  * salvas antes da primeira publicação, ou que falharam num envio anterior, ficavam presas para
- * sempre. Fix: handleMarketplaceItemPublished escuta MARKETPLACE_EVENTS.ITEM_PUBLISHED (emitido
- * pelo adapter ML tanto no create quanto no update) e reenvia tudo com syncedWithMarketplace=false.
+ * sempre.
+ *
+ * Fix: syncPendingCompatibilitiesAfterPublish é chamado via POST /internal/products/:id/
+ * sync-compatibilities (InternalProductController) pelo worker REAL que publica no ML —
+ * mercadolivre-sync.worker.ts em microservices/orchestrator — logo após um CREATE ou UPDATE
+ * bem-sucedido. (Uma primeira versão deste fix emitia um evento local no adapter ML deste
+ * backend, mas confirmou-se ao vivo que esse adapter nunca é chamado em produção: a publicação
+ * real acontece inteiramente no microserviço orchestrator, fora deste processo — por isso o
+ * gatilho é uma chamada HTTP explícita, não um EventEmitter2 interno.)
  */
 describe('ProductService — catch-up de compatibilidades ao publicar/atualizar no marketplace', () => {
   let service: ProductService;
@@ -332,12 +339,8 @@ describe('ProductService — catch-up de compatibilidades ao publicar/atualizar 
     );
   });
 
-  it('envia todas as compatibilidades não sincronizadas ao receber ITEM_PUBLISHED (create)', async () => {
-    await service.handleMarketplaceItemPublished({
-      productId: String(existingProduct._id),
-      externalId: 'MLB9',
-      marketplaceName: 'Mercado Livre',
-    } as any);
+  it('envia todas as compatibilidades não sincronizadas ao ser chamado após CREATE', async () => {
+    await service.syncPendingCompatibilitiesAfterPublish(String(existingProduct._id));
 
     expect(mercadoLivreCompatibilityAdapter.syncCompatibility).toHaveBeenCalledWith(
       'MLB9',
@@ -347,14 +350,11 @@ describe('ProductService — catch-up de compatibilidades ao publicar/atualizar 
     expect(productCompatibilityService.markAsSynced).toHaveBeenCalled();
   });
 
-  it('também sincroniza no evento de update/resync, não só no create', async () => {
-    // Mesmo handler, mesmo evento — o adapter emite ITEM_PUBLISHED tanto de
-    // createNewProduct quanto de updateExistingProduct (ver mercado-livre-product.adapter.ts).
-    await service.handleMarketplaceItemPublished({
-      productId: String(existingProduct._id),
-      externalId: 'MLB9',
-      marketplaceName: 'Mercado Livre',
-    } as any);
+  it('também sincroniza quando chamado após UPDATE/resync, não só após CREATE', async () => {
+    // Mesmo método, mesmo endpoint (POST /internal/products/:id/sync-compatibilities) — o
+    // worker do orchestrator chama tanto depois de CREATE quanto de UPDATE (ver
+    // microservices/orchestrator/src/workers/ml/mercadolivre-sync.worker.ts).
+    await service.syncPendingCompatibilitiesAfterPublish(String(existingProduct._id));
 
     expect(mercadoLivreCompatibilityAdapter.syncCompatibility).toHaveBeenCalledTimes(1);
   });
@@ -362,35 +362,25 @@ describe('ProductService — catch-up de compatibilidades ao publicar/atualizar 
   it('não chama o ML quando não há compatibilidades pendentes', async () => {
     productCompatibilityService.getUnsyncedByProduct.mockResolvedValue([]);
 
-    await service.handleMarketplaceItemPublished({
-      productId: String(existingProduct._id),
-      externalId: 'MLB9',
-      marketplaceName: 'Mercado Livre',
-    } as any);
+    await service.syncPendingCompatibilitiesAfterPublish(String(existingProduct._id));
 
     expect(mercadoLivreCompatibilityAdapter.syncCompatibility).not.toHaveBeenCalled();
   });
 
-  it('ignora eventos de marketplaces diferentes de Mercado Livre', async () => {
-    await service.handleMarketplaceItemPublished({
-      productId: String(existingProduct._id),
-      externalId: 'SHP9',
-      marketplaceName: 'Shopee',
-    } as any);
+  it('não lança quando o produto não existe', async () => {
+    (productRepository as any).findByIdClean.mockResolvedValue(null);
 
+    await expect(
+      service.syncPendingCompatibilitiesAfterPublish(String(existingProduct._id)),
+    ).resolves.toBeUndefined();
     expect(productCompatibilityService.getUnsyncedByProduct).not.toHaveBeenCalled();
-    expect(mercadoLivreCompatibilityAdapter.syncCompatibility).not.toHaveBeenCalled();
   });
 
   it('não lança quando o sync falha (best-effort)', async () => {
     mercadoLivreCompatibilityAdapter.syncCompatibility.mockRejectedValue(new Error('ML fora do ar'));
 
     await expect(
-      service.handleMarketplaceItemPublished({
-        productId: String(existingProduct._id),
-        externalId: 'MLB9',
-        marketplaceName: 'Mercado Livre',
-      } as any),
+      service.syncPendingCompatibilitiesAfterPublish(String(existingProduct._id)),
     ).resolves.toBeUndefined();
   });
 });

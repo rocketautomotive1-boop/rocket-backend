@@ -34,9 +34,8 @@ import { UserProductivityService } from '../monitoring/user-productivity.service
 import { ProductivityType } from '../monitoring/schemas/user-productivity.schema';
 import { MercadoLivreCompatibilityAdapter } from '../marketplace/adapters/mercado-livre/mercado-livre-compatibility.adapter';
 import { OrchestratorPublisherService } from '../marketplace-orchestrator/orchestrator-publisher.service';
-import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PRODUCT_EVENTS, ProductUpdatedEvent } from './events/product.events';
-import { MARKETPLACE_EVENTS, MarketplaceItemPublishedEvent } from '../marketplace/events/marketplace.events';
 import { ProductReadinessService } from './services/product-readiness.service';
 import {
   PRODUCT_SECTION_EVENTS,
@@ -1180,12 +1179,13 @@ export class ProductService {
 
   /**
    * Único ponto que efetivamente fala com o ML para gravar compatibilidades — reusado
-   * pelo auto-sync ao salvar (relevant = as recém-salvas) e pelo listener de
-   * MARKETPLACE_EVENTS.ITEM_PUBLISHED (relevant = todas as ainda não sincronizadas,
-   * cobrindo o caso de compatibilidades salvas ANTES da primeira publicação, ou que
-   * ficaram para trás por qualquer falha anterior). NUNCA duplicar esta lógica em outro
-   * módulo (ex.: adapters de marketplace) — eles devem emitir o evento e deixar este
-   * método decidir o que sincronizar.
+   * pelo auto-sync ao salvar (relevant = as recém-salvas) e por syncPendingCompatibilitiesAfterPublish
+   * (relevant = todas as ainda não sincronizadas, cobrindo o caso de compatibilidades
+   * salvas ANTES da primeira publicação, ou que ficaram para trás por qualquer falha
+   * anterior). NUNCA duplicar esta lógica em outro lugar (adapter de marketplace no
+   * backend, ou o worker no microservices/orchestrator) — quem publica no ML deve
+   * chamar POST /internal/products/:id/sync-compatibilities e deixar este método
+   * decidir o que sincronizar.
    */
   private async syncRelevantCompatibilitiesToMercadoLivre(
     product: any,
@@ -1230,30 +1230,32 @@ export class ProductService {
   }
 
   /**
-   * Catch-up de compatibilidades pendentes sempre que um item passa a existir (POST) ou é
-   * atualizado (PUT) em um marketplace — cobre os dois casos que o auto-sync-ao-salvar não
+   * Catch-up de compatibilidades pendentes sempre que um item passa a existir (CREATE) ou é
+   * atualizado (UPDATE) no Mercado Livre — cobre os dois casos que o auto-sync-ao-salvar não
    * cobre: (1) compatibilidades salvas ANTES da primeira publicação (não havia externalId
    * ainda, autoSyncCompatibilitiesWithMercadoLivre pulou com no_ml_title na hora do save) e
    * (2) qualquer resync/update posterior de um item já publicado, onde um envio anterior
-   * pode ter falhado e ficado para trás. Único listener deste evento — os adapters de
-   * marketplace só emitem MARKETPLACE_EVENTS.ITEM_PUBLISHED, nunca replicam esta lógica
-   * (ver marketplace/adapters/mercado-livre/mercado-livre-product.adapter.ts).
+   * pode ter falhado e ficado para trás.
+   *
+   * Chamado via POST /internal/products/:id/sync-compatibilities (InternalProductController) —
+   * quem publica de fato no ML é o worker mercadolivre-sync.worker.ts em
+   * microservices/orchestrator (NÃO os adapters deste backend, que são código morto para
+   * escrita — ver mercado-livre-product.adapter.ts), e ele chama esse endpoint após CREATE/
+   * UPDATE bem-sucedidos. Único ponto que decide o que sincronizar — nunca duplicar esta
+   * lógica no worker ou em outro lugar.
    */
-  @OnEvent(MARKETPLACE_EVENTS.ITEM_PUBLISHED, { async: true })
-  async handleMarketplaceItemPublished(event: MarketplaceItemPublishedEvent): Promise<void> {
-    if (event.marketplaceName !== 'Mercado Livre') return; // único fluxo suportado hoje (ver pushCompatibilitiesToMercadoLivre)
-
+  async syncPendingCompatibilitiesAfterPublish(productId: string): Promise<void> {
     try {
-      const product = await this.findOne(event.productId);
+      const product = await this.findOne(productId);
       if (!product) return;
 
-      const pending = await this.productCompatibilityService.getUnsyncedByProduct(event.productId);
+      const pending = await this.productCompatibilityService.getUnsyncedByProduct(productId);
       if (pending.length === 0) return;
 
       await this.syncRelevantCompatibilitiesToMercadoLivre(product, pending, 'compatibility_catchup_on_publish');
     } catch (error: any) {
       this.logger.warn(
-        `Catch-up de compatibilidades pendentes falhou (não bloqueante) produto=${event.productId} externalId=${event.externalId}: ${error?.message}`,
+        `Catch-up de compatibilidades pendentes falhou (não bloqueante) produto=${productId}: ${error?.message}`,
       );
     }
   }

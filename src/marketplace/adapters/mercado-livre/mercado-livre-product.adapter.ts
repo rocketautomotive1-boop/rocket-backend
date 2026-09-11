@@ -1,5 +1,4 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MarketplaceDescriptionService } from '../../services/marketplace-description.service';
 import { IMarketplaceProductAdapter } from '../../interfaces/marketplace-product-adapter.interface';
 import { MarketplaceDocument } from '../../schemas/marketplace.schema';
@@ -9,7 +8,6 @@ import { MercadoLivreListingAdapter } from './mercado-livre-listing.adapter';
 import { ListingService } from '../../../listing/listing.service'; // [NEW] Import
 import { MlHttpClient } from './ml-http-client';
 import { HttpAuthContext } from '../shared/marketplace-http-client';
-import { MARKETPLACE_EVENTS, MarketplaceItemPublishedEvent } from '../../events/marketplace.events';
 
 interface InventoryData {
   priceSale?: number;
@@ -18,6 +16,15 @@ interface InventoryData {
   condition?: string;
 }
 
+/**
+ * ATENÇÃO: os métodos de ESCRITA deste adapter (createNewProduct/updateExistingProduct/
+ * publishProduct) NÃO são o caminho real de publicação no Mercado Livre em produção —
+ * confirmado ao vivo (2026-09-11): o SyncQueueWorker real vive em
+ * microservices/orchestrator/src/workers/ml/mercadolivre-sync.worker.ts, que fala
+ * diretamente com a API do ML e nunca passa por aqui. Este adapter só é chamado hoje
+ * para LEITURA (getListings/getListingDetail, via MarketplaceIntegrationService). Não
+ * adicione lógica de negócio nova nos métodos de escrita — ela nunca vai rodar.
+ */
 @Injectable()
 export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, OnModuleInit {
   private readonly logger = new Logger(MercadoLivreProductAdapter.name);
@@ -28,7 +35,6 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
     private readonly listingAdapter: MercadoLivreListingAdapter,
     private readonly listingService: ListingService, // [NEW] Inject ListingService
     private readonly http: MlHttpClient,
-    private readonly eventEmitter: EventEmitter2,
   ) { }
 
   private name = 'Mercado Livre';
@@ -423,7 +429,6 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
       );
 
       await this.updateProductDescription(title.externalId, product, title, ctx);
-      this.emitItemPublished(String(product._id ?? product.id), title.externalId, title.storeId);
 
       return {
         success: true,
@@ -468,7 +473,6 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
       );
 
       await this.updateProductDescription(createResponse.data.id, product, title, ctx);
-      this.emitItemPublished(String(product._id ?? product.id), createResponse.data.id, title.storeId);
 
       return {
         success: true,
@@ -492,27 +496,6 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
         requestPayload: mlData,
         responsePayload: error.response?.data || null
       };
-    }
-  }
-
-  /**
-   * Sinal genérico para quem quiser reagir a "este item existe/foi atualizado no ML agora"
-   * — hoje só o sync de compatibilidades pendentes escuta (ver product/listeners/
-   * sync-pending-compatibilities.listener.ts), mas o adapter não sabe disso: ele só
-   * publica o fato. Emitido em createNewProduct (POST) E updateExistingProduct (PUT),
-   * cobrindo tanto a primeira publicação quanto qualquer resync/update posterior —
-   * nenhum caminho de "item passou a existir no ML" fica descoberto. Best-effort e
-   * síncrono ao evento (EventEmitter2 sem { async: true } aqui é intencional: o handler
-   * é quem decide ser best-effort; a emissão em si nunca lança).
-   */
-  private emitItemPublished(productId: string, externalId: string, storeId?: any): void {
-    try {
-      this.eventEmitter.emit(
-        MARKETPLACE_EVENTS.ITEM_PUBLISHED,
-        new MarketplaceItemPublishedEvent(productId, externalId, this.name, storeId ? String(storeId) : undefined),
-      );
-    } catch (error: any) {
-      this.logger.warn(`Falha ao emitir ${MARKETPLACE_EVENTS.ITEM_PUBLISHED} (não bloqueante): ${error?.message}`);
     }
   }
 

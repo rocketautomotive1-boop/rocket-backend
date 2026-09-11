@@ -351,3 +351,47 @@ describe('InternalProductController — getProduct (gate de readiness por loja)'
     });
   });
 });
+
+/**
+ * Chamado por mercadolivre-sync.worker.ts (microservices/orchestrator) logo após um
+ * CREATE/UPDATE bem-sucedido no ML — ver ProductService.syncPendingCompatibilitiesAfterPublish.
+ */
+describe('InternalProductController — POST sync-compatibilities (catch-up pós-publicação)', () => {
+  let controller: InternalProductController;
+  let productService: { syncPendingCompatibilitiesAfterPublish: jest.Mock };
+  const productId = new Types.ObjectId().toHexString();
+
+  beforeEach(async () => {
+    productService = { syncPendingCompatibilitiesAfterPublish: jest.fn().mockResolvedValue(undefined) };
+
+    const moduleRef = await Test.createTestingModule({
+      controllers: [InternalProductController],
+      providers: [
+        { provide: getModelToken(ProductModel.name), useValue: {} },
+        { provide: getModelToken(ListingModel.name), useValue: {} },
+        { provide: getModelToken(UserModel.name), useValue: {} },
+        { provide: MarketplaceConfigCacheService, useValue: {} },
+        { provide: MarketplaceDescriptionService, useValue: {} },
+        { provide: STOCK_QUERY_PORT, useValue: {} },
+        { provide: STORE_AWARE_STOCK_QUERY_PORT, useValue: {} },
+        { provide: PRICING_PORT, useValue: {} },
+        { provide: CategorySnapshotService, useValue: {} },
+        { provide: ProductService, useValue: productService },
+        { provide: ProductCompatibilityPositionService, useValue: {} },
+        { provide: StoreService, useValue: {} },
+      ],
+    })
+      .overrideGuard(InternalKeyGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+
+    controller = moduleRef.get(InternalProductController);
+  });
+
+  it('delega para ProductService.syncPendingCompatibilitiesAfterPublish e responde accepted', async () => {
+    const result = await controller.syncCompatibilitiesAfterPublish(productId);
+
+    expect(productService.syncPendingCompatibilitiesAfterPublish).toHaveBeenCalledWith(productId);
+    expect(result).toEqual({ accepted: true });
+  });
+});
