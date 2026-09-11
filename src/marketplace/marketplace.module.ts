@@ -66,6 +66,7 @@ import { MagaluProductAdapter } from './adapters/magalu/magalu-product.adapter';
 import { MagaluOrderAdapter } from './adapters/magalu/magalu-order.adapter';
 import { MagaluCategoryAdapter } from './adapters/magalu/magalu-category.adapter';
 import { MagaluAdapter } from './adapters/magalu/magalu.adapter';
+import { MagaluListingStatusListener } from './adapters/magalu/webhook/magalu-listing-status.listener';
 
 import { ShopeeController } from './controllers/shopee.controller';
 import { AmazonAdapter } from './adapters/amazon/amazon.adapter';
@@ -211,6 +212,7 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
     MagaluOrderAdapter,
     MagaluCategoryAdapter,
     MagaluAdapter,
+    MagaluListingStatusListener,
     // Hexagonal port implementation consumed by OrderModule (pure — no Order DB access)
     MarketplaceOrderGatewayProvider,
     { provide: MARKETPLACE_ORDER_GATEWAY, useClass: MarketplaceOrderGatewayProvider },

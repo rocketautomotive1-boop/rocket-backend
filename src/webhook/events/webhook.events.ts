@@ -5,6 +5,7 @@ export const WEBHOOK_DOMAIN_COMMANDS = {
   QUESTION_INGEST_REQUESTED: 'question.ingest_requested',
   MODERATION_PROBE_REQUESTED: 'moderation.probe_requested',
   RETURN_INGEST_REQUESTED: 'return.ingest_requested',
+  LISTING_STATUS_SYNC_REQUESTED: 'listing.status_sync_requested',
 } as const;
 
 export interface OrderSyncRequestedCommand {
@@ -75,6 +76,24 @@ export interface ReturnIngestRequestedCommand {
   externalId: string;
   /** Seller id no marketplace (ML user_id) → conta multi-client destino. */
   externalUserId?: string | null;
+  resource?: string | null;
+  receivedAt: Date;
+  source: 'webhook';
+}
+
+/**
+ * Ciclo de vida de publicação assíncrono (hoje só Magalu — topic `portfolios_sku`):
+ * o marketplace processa o SKU internamente (new → draft → policies_* →
+ * published/unpublished/inactivated) e notifica via webhook quando o status muda —
+ * não há chamada nossa que force essa transição. O listener consulta a API (fonte
+ * de verdade) e atualiza Listing.status. `externalId` é o `sku` do payload — no
+ * Magalu isso É o nosso productId (endpoint idempotente por sku), então resolve o
+ * Listing por (marketplace, productId), sem precisar de externalId gravado.
+ */
+export interface ListingStatusSyncRequestedCommand {
+  marketplace: string;
+  /** sku no marketplace — no Magalu, é o productId (ver magalu-payload.builder.ts). */
+  externalId: string;
   resource?: string | null;
   receivedAt: Date;
   source: 'webhook';

@@ -1,8 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
+import { WebhookKindWithParseFailure } from '../adapters/webhook-adapter.interface';
 export type WebhookInboxDocument = HydratedDocument<WebhookInboxModel>;
 export type WebhookInboxStatus = 'pending' | 'processing' | 'done' | 'failed' | 'dead';
-export type WebhookInboxKind = 'order' | 'order_pack' | 'shipment' | 'question' | 'moderation' | 'return' | 'unparseable';
+export type WebhookInboxKind = WebhookKindWithParseFailure;
 @Schema({ collection: 'webhook_inbox', timestamps: true })
 export class WebhookInboxModel {
   @Prop({ required: true, index: true }) marketplace: string;

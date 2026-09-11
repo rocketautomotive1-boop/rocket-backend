@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { WEBHOOK_DOMAIN_COMMANDS } from '../events/webhook.events';
+import { WebhookKindWithParseFailure } from '../adapters/webhook-adapter.interface';
 export interface DispatchInput {
   marketplace: string; topic: string;
-  kind: 'order' | 'order_pack' | 'shipment' | 'question' | 'moderation' | 'return' | 'unparseable';
+  kind: WebhookKindWithParseFailure;
   externalId?: string; externalUserId?: string; resource?: string; payload: any; receivedAt: Date;
 }
 @Injectable()
@@ -31,6 +32,9 @@ export class WebhookDispatcher {
         return;
       case 'return':
         await this.emitter.emitAsync(WEBHOOK_DOMAIN_COMMANDS.RETURN_INGEST_REQUESTED, { marketplace: input.marketplace, externalId: input.externalId, externalUserId: input.externalUserId ?? null, resource: input.resource ?? null, receivedAt: input.receivedAt, source: 'webhook' });
+        return;
+      case 'listing_status':
+        await this.emitter.emitAsync(WEBHOOK_DOMAIN_COMMANDS.LISTING_STATUS_SYNC_REQUESTED, { marketplace: input.marketplace, externalId: input.externalId, resource: input.resource ?? null, receivedAt: input.receivedAt, source: 'webhook' });
         return;
     }
   }

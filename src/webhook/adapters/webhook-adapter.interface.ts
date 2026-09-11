@@ -2,7 +2,24 @@ import { SetMetadata } from '@nestjs/common';
 
 export const WEBHOOK_ADAPTER_METADATA = 'webhook:adapter:marketplace';
 
-export type WebhookKind = 'order' | 'order_pack' | 'shipment' | 'question' | 'moderation' | 'return' | 'ignore';
+/**
+ * Fonte única dos "kinds" de webhook reconhecidos — cada um mapeia 1:1 a um
+ * comando de domínio em webhook.events.ts e a um case em WebhookDispatcher.
+ * NÃO redeclarar esta union em outro arquivo (havia 3 cópias divergentes:
+ * WebhookKind, DispatchInput.kind e WebhookInboxKind — adicionar um kind novo
+ * exigia lembrar de tocar os 3, e cada um usava um "estado de erro/vazio"
+ * diferente: 'ignore' aqui vs 'unparseable' nos outros). Downstream deriva
+ * daqui via WebhookKindWithParseFailure.
+ */
+export type WebhookKind = 'order' | 'order_pack' | 'shipment' | 'question' | 'moderation' | 'return' | 'listing_status' | 'ignore';
+
+/**
+ * WebhookKind + o estado de falha de parse (payload não reconhecido/corrompido).
+ * Usado onde o pipeline downstream do parse() precisa distinguir "adapter viu e
+ * decidiu ignorar" (kind: 'ignore') de "não deu nem pra interpretar" ('unparseable') —
+ * DispatchInput e o schema de persistência do inbox.
+ */
+export type WebhookKindWithParseFailure = WebhookKind | 'unparseable';
 
 export interface WebhookContext {
   readonly marketplace: string;
