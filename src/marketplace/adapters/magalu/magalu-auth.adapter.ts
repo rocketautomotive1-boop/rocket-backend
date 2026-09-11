@@ -1,110 +1,116 @@
-import { Injectable, HttpException } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException, OnModuleInit } from '@nestjs/common';
 import axios from 'axios';
-import * as crypto from 'crypto';
-import { MarketplaceRegistryService } from '../../services/marketplace-registry.service';
-import { resolveRedirectUri } from '../shared/resolve-redirect-uri';
+import { IMarketplaceAuthAdapter, AdapterAccountCredentials } from '../../interfaces/marketplace-auth-adapter.interface';
+import { MarketplaceAdapterRegistry } from '../../registries/marketplace-adapter.registry';
 
-function base64UrlEncode(buffer: Buffer) {
-  return buffer.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-}
-
-function generateCodeVerifier(): string {
-  return base64UrlEncode(crypto.randomBytes(64));
-}
-
-function generateCodeChallenge(verifier: string): string {
-  return base64UrlEncode(crypto.createHash('sha256').update(verifier).digest());
-}
-
+/**
+ * Adapter de auth do Magalu — OAuth 2.0 Authorization Code, SEM PKCE.
+ *
+ * Confirmado via doc oficial de sellers (não confundir com a doc do Magalu
+ * Cloud/IAM de infra, que é outro produto e usa PKCE): troca de code é
+ * Content-Type application/json; refresh é application/x-www-form-urlencoded.
+ * Isso é intencional e assimétrico — não "corrigir" para uniformizar.
+ *
+ * `choose_tenants=true` é fixo (não configurável): sem ele o consentimento
+ * vale só para a pessoa física, não para a loja/organização do seller.
+ */
 @Injectable()
-export class MagaluAuthAdapter {
-  private authUrl = process.env.MAGALU_OAUTH_AUTHORIZE_URL || 'https://id.magalu.com/login';
-  private tokenUrl = process.env.MAGALU_OAUTH_TOKEN_URL!;
-  private clientId = process.env.MAGALU_CLIENT_ID!;
-  private clientSecret = process.env.MAGALU_CLIENT_SECRET!;
+export class MagaluAuthAdapter implements IMarketplaceAuthAdapter, OnModuleInit {
+  private readonly logger = new Logger(MagaluAuthAdapter.name);
+  private readonly authUrl = 'https://id.magalu.com/login';
+  private readonly tokenUrl = 'https://id.magalu.com/oauth/token';
+  public readonly name = 'Magalu';
+  public readonly tag = 'magalu';
 
-  constructor(private readonly marketplaceRegistry: MarketplaceRegistryService) {}
+  constructor(private readonly registry: MarketplaceAdapterRegistry) {}
 
-  private async getRedirectUri(): Promise<string> {
-    const mkt = await this.marketplaceRegistry.findByTag('magalu').catch(() => null);
-    return resolveRedirectUri(mkt, process.env.MAGALU_REDIRECT_URI);
+  onModuleInit() {
+    this.registry.registerAuthAdapter(this);
   }
 
-  private encodeScope(scope: string) {
-    return scope.trim().split(/\s+/).join('%20');
+  /** clientId/secret das credenciais fornecidas pelo broker → fallback ao env (seed/dev). */
+  private resolveCreds(credentials?: AdapterAccountCredentials): { clientId: string; clientSecret: string } {
+    const clientId = credentials?.clientId || process.env.MP_MAGALU_CLIENTID || '';
+    const clientSecret = credentials?.clientSecret || process.env.MP_MAGALU_CLIENTSECRET || '';
+    if (!clientId || !clientSecret) {
+      throw new InternalServerErrorException('Credenciais do Magalu (client_id / client_secret) não configuradas.');
+    }
+    return { clientId, clientSecret };
   }
 
-  async getAuthorizeUrl(state?: string) {
-    const scopes =
-      (process.env.MAGALU_SCOPES?.trim()) ||
-      'openid pa:clients:read pa:clients:update-public pa:api-products:read-apf pa:clients:create-public pa:scopes:read';
-
-    const codeVerifier = generateCodeVerifier();
-    const codeChallenge = generateCodeChallenge(codeVerifier);
-    const redirectUri = await this.getRedirectUri();
-
-    const parts = [
-      `response_type=code`,
-      `client_id=${this.clientId}`,
-      `scope=${this.encodeScope(scopes)}`,
-      `redirect_uri=${redirectUri}`,
-      `code_challenge=${codeChallenge}`,
-      `code_challenge_method=S256`,
-      `choose_tenants=true`,
-    ];
-    if (state) parts.push(`state=${state}`);
-
-    return {
-      url: `${this.authUrl}?${parts.join('&')}`,
-      codeVerifier,
-    };
+  async generateAuthUrl(
+    redirectUri?: string,
+    options?: { state?: string; credentials?: AdapterAccountCredentials },
+  ): Promise<{ authUrl: string }> {
+    const { clientId } = this.resolveCreds(options?.credentials);
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri ?? '',
+      response_type: 'code',
+      choose_tenants: 'true',
+    });
+    // scope é omitido de propósito: os --scopes-default do client já cobrem
+    // o consentimento necessário; o seller vê exatamente os defaults.
+    if (options?.state) params.set('state', options.state);
+    return { authUrl: `${this.authUrl}?${params.toString()}` };
   }
 
-  async exchangeCode(code: string, codeVerifier?: string) {
+  async authenticate(code: string, additionalData?: any): Promise<any> {
+    const { clientId, clientSecret } = this.resolveCreds(additionalData?.credentials);
+    const redirectUri = additionalData?.redirectUri ?? '';
     try {
-      const redirectUri = await this.getRedirectUri();
-      // Monta corpo conforme PKCE
-      const body: Record<string, string> = {
-        client_id: this.clientId,
-        client_secret: this.clientSecret,
-        redirect_uri: redirectUri,
-        code,
-        grant_type: 'authorization_code',
-        // client_id NÃO vai no corpo quando usamos Basic Auth
-      };
-      if (codeVerifier) body.code_verifier = codeVerifier;
-
-      // Autenticação do cliente via Basic Auth (requisitado por muitos IdPs)
-      const basic = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
-
-      const res = await axios.post(this.tokenUrl, new URLSearchParams(body), {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Authorization: `Basic ${basic}`,
+      const response = await axios.post(
+        this.tokenUrl,
+        {
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+          code,
+          grant_type: 'authorization_code',
         },
-      });
-      return res.data;
-    } catch (e: any) {
-      throw new HttpException(e.response?.data || 'Magalu token error', e.response?.status || 500);
+        { headers: { 'Content-Type': 'application/json', Accept: 'application/json' } },
+      );
+      return this.toTokenData(response.data, clientId);
+    } catch (error: any) {
+      this.logger.error(`Falha na autenticação do Magalu: ${error.message}`, error.response?.data);
+      throw new InternalServerErrorException(error.response?.data ?? `Falha na autenticação do Magalu: ${error.message}`);
     }
   }
 
-  async refreshToken(refreshToken: string) {
-    // Também via Basic Auth
-    const basic = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
-    const res = await axios.post(
-      this.tokenUrl,
-      new URLSearchParams({
+  async refreshToken(token: any, credentials?: AdapterAccountCredentials): Promise<any> {
+    const { clientId, clientSecret } = this.resolveCreds({
+      clientId: credentials?.clientId ?? token?.additionalData?.clientId,
+      clientSecret: credentials?.clientSecret ?? token?.additionalData?.clientSecret,
+    });
+    try {
+      const params = new URLSearchParams({
         grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-      }),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Authorization: `Basic ${basic}`,
-        },
-      },
-    );
-    return res.data;
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: token.refreshToken,
+      });
+      const response = await axios.post(this.tokenUrl, params, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      });
+      return this.toTokenData(response.data, clientId, token.additionalData);
+    } catch (error: any) {
+      const apiErr = error.response?.data;
+      const detail = apiErr
+        ? `${apiErr.error ?? ''}: ${apiErr.error_description ?? apiErr.message ?? ''}`.trim()
+        : error.message;
+      this.logger.error(`Falha na renovação do token do Magalu (clientId=${clientId}): ${detail}`, apiErr);
+      throw new Error(`Falha na renovação do token do Magalu: ${detail}`);
+    }
+  }
+
+  private toTokenData(data: any, clientId: string, previousAdditionalData?: Record<string, any>) {
+    return {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      expiresAt: new Date(Date.now() + data.expires_in * 1000),
+      tokenType: data.token_type,
+      additionalData: { ...(previousAdditionalData ?? {}), scope: data.scope, clientId },
+      isActive: true,
+    };
   }
 }
