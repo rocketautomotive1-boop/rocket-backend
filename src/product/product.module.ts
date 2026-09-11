@@ -116,7 +116,6 @@ import { CategorySnapshotService } from './services/category-snapshot.service';
 
 import { ProductResolverProvider } from './ports/product-resolver.provider';
 import { PRODUCT_RESOLVER_PORT } from '../order/ports/product-resolver.port';
-import { PRODUCT_COMPATIBILITY_PORT } from '../marketplace/ports/product-compatibility.port';
 import { ProductBotQueryService } from './services/product-bot-query.service';
 import { PRODUCT_INFO_QUERY_PORT } from '../notifications/bot/ports/bot-query.ports';
 // STOCK_LEDGER_PORT is now owned by StockModule (single stock owner).
@@ -246,8 +245,6 @@ import { ProductDeletionModule } from '../product-deletion/product-deletion.modu
     // Bot read-port consumed by NotificationsModule
     ProductBotQueryService,
     { provide: PRODUCT_INFO_QUERY_PORT, useExisting: ProductBotQueryService },
-    // Compatibility read/write port consumed by MarketplaceModule (ML adapter)
-    { provide: PRODUCT_COMPATIBILITY_PORT, useExisting: ProductCompatibilityService },
   ],
   exports: [
 
@@ -276,8 +273,6 @@ import { ProductDeletionModule } from '../product-deletion/product-deletion.modu
     PRODUCT_RESOLVER_PORT,
     // Token consumed by NotificationsModule (bot product search)
     PRODUCT_INFO_QUERY_PORT,
-    // Token consumed by MarketplaceModule (ML adapter, sem precisar de forwardRef)
-    PRODUCT_COMPATIBILITY_PORT,
   ],
 })
 export class ProductModule { }

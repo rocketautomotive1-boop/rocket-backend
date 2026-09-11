@@ -34,8 +34,9 @@ import { UserProductivityService } from '../monitoring/user-productivity.service
 import { ProductivityType } from '../monitoring/schemas/user-productivity.schema';
 import { MercadoLivreCompatibilityAdapter } from '../marketplace/adapters/mercado-livre/mercado-livre-compatibility.adapter';
 import { OrchestratorPublisherService } from '../marketplace-orchestrator/orchestrator-publisher.service';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { PRODUCT_EVENTS, ProductUpdatedEvent } from './events/product.events';
+import { MARKETPLACE_EVENTS, MarketplaceItemPublishedEvent } from '../marketplace/events/marketplace.events';
 import { ProductReadinessService } from './services/product-readiness.service';
 import {
   PRODUCT_SECTION_EVENTS,
@@ -1173,6 +1174,25 @@ export class ProductService {
     requestedVehicleIds: string[],
     savedCompatibilities: any[],
   ): Promise<{ attempted: boolean; reason?: string; successCount?: number; errorCount?: number }> {
+    const relevant = savedCompatibilities.filter((c: any) => requestedVehicleIds.includes(c.vehicleId));
+    return this.syncRelevantCompatibilitiesToMercadoLivre(product, relevant, 'compatibility_auto_sync');
+  }
+
+  /**
+   * Único ponto que efetivamente fala com o ML para gravar compatibilidades — reusado
+   * pelo auto-sync ao salvar (relevant = as recém-salvas) e pelo listener de
+   * MARKETPLACE_EVENTS.ITEM_PUBLISHED (relevant = todas as ainda não sincronizadas,
+   * cobrindo o caso de compatibilidades salvas ANTES da primeira publicação, ou que
+   * ficaram para trás por qualquer falha anterior). NUNCA duplicar esta lógica em outro
+   * módulo (ex.: adapters de marketplace) — eles devem emitir o evento e deixar este
+   * método decidir o que sincronizar.
+   */
+  private async syncRelevantCompatibilitiesToMercadoLivre(
+    product: any,
+    relevant: any[],
+    resyncReason: string,
+  ): Promise<{ attempted: boolean; reason?: string; successCount?: number; errorCount?: number }> {
+    const requestedCount = relevant.length;
     try {
       const marketplace = await this.marketplaceRegistry.findByName('Mercado Livre');
       if (!marketplace) return { attempted: false, reason: 'marketplace_not_configured' };
@@ -1185,7 +1205,6 @@ export class ProductService {
         return { attempted: false, reason: 'no_ml_title' };
       }
 
-      const relevant = savedCompatibilities.filter((c: any) => requestedVehicleIds.includes(c.vehicleId));
       const mlVehicleIds = [...new Set(relevant.map((c: any) => c.mlVehicleId).filter(Boolean))] as string[];
 
       if (mlVehicleIds.length === 0) {
@@ -1200,13 +1219,42 @@ export class ProductService {
           .map((c: any) => String(c._id ?? c.id))
           .filter(Boolean);
         await this.productCompatibilityService.markAsSynced(syncedInternalIds);
-        this.requestPostCompatibilitySyncResync(String(product._id), resolvedMarketplaceId, 'compatibility_auto_sync');
+        this.requestPostCompatibilitySyncResync(String(product._id), resolvedMarketplaceId, resyncReason);
       }
 
       return { attempted: true, ...syncResult };
     } catch (error: any) {
-      this.logger.warn(`Auto-sync de compatibilidades com Mercado Livre falhou (não bloqueante): ${error?.message}`);
-      return { attempted: true, reason: 'error', successCount: 0, errorCount: requestedVehicleIds.length };
+      this.logger.warn(`Sync de compatibilidades com Mercado Livre falhou (não bloqueante): ${error?.message}`);
+      return { attempted: true, reason: 'error', successCount: 0, errorCount: requestedCount };
+    }
+  }
+
+  /**
+   * Catch-up de compatibilidades pendentes sempre que um item passa a existir (POST) ou é
+   * atualizado (PUT) em um marketplace — cobre os dois casos que o auto-sync-ao-salvar não
+   * cobre: (1) compatibilidades salvas ANTES da primeira publicação (não havia externalId
+   * ainda, autoSyncCompatibilitiesWithMercadoLivre pulou com no_ml_title na hora do save) e
+   * (2) qualquer resync/update posterior de um item já publicado, onde um envio anterior
+   * pode ter falhado e ficado para trás. Único listener deste evento — os adapters de
+   * marketplace só emitem MARKETPLACE_EVENTS.ITEM_PUBLISHED, nunca replicam esta lógica
+   * (ver marketplace/adapters/mercado-livre/mercado-livre-product.adapter.ts).
+   */
+  @OnEvent(MARKETPLACE_EVENTS.ITEM_PUBLISHED, { async: true })
+  async handleMarketplaceItemPublished(event: MarketplaceItemPublishedEvent): Promise<void> {
+    if (event.marketplaceName !== 'Mercado Livre') return; // único fluxo suportado hoje (ver pushCompatibilitiesToMercadoLivre)
+
+    try {
+      const product = await this.findOne(event.productId);
+      if (!product) return;
+
+      const pending = await this.productCompatibilityService.getUnsyncedByProduct(event.productId);
+      if (pending.length === 0) return;
+
+      await this.syncRelevantCompatibilitiesToMercadoLivre(product, pending, 'compatibility_catchup_on_publish');
+    } catch (error: any) {
+      this.logger.warn(
+        `Catch-up de compatibilidades pendentes falhou (não bloqueante) produto=${event.productId} externalId=${event.externalId}: ${error?.message}`,
+      );
     }
   }
 

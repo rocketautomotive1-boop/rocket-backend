@@ -1,33 +1,27 @@
 import { MercadoLivreProductAdapter } from './mercado-livre-product.adapter';
+import { MARKETPLACE_EVENTS } from '../../events/marketplace.events';
 
 /**
- * O auth-retry agora vive no MlHttpClient (ml-http-client.spec). Aqui só
- * verificamos que createProduct delega ao client com o ctx roteado por domínio.
+ * O auth-retry agora vive no MlHttpClient (ml-http-client.spec). Aqui verificamos que
+ * createProduct delega ao client com o ctx roteado por domínio, e que create/update
+ * emitem MARKETPLACE_EVENTS.ITEM_PUBLISHED — o adapter NÃO fala com compatibilidades
+ * diretamente (isso é responsabilidade de ProductService, ver product.service.ts
+ * handleMarketplaceItemPublished); ele só publica o fato de que o item existe no ML.
  */
 describe('MercadoLivreProductAdapter', () => {
-  function makeAdapter(
-    httpRequest: jest.Mock,
-    opts?: { compatibilities?: any[]; syncCompatibility?: jest.Mock; resolveAccountId?: jest.Mock },
-  ): MercadoLivreProductAdapter {
+  function makeAdapter(httpRequest: jest.Mock, emit?: jest.Mock): MercadoLivreProductAdapter {
     const http = { request: httpRequest, get: jest.fn(), post: jest.fn() };
-    const compatibilityAdapter = { syncCompatibility: opts?.syncCompatibility ?? jest.fn().mockResolvedValue({}) };
-    // Mock do PRODUCT_COMPATIBILITY_PORT (ver marketplace/ports/product-compatibility.port.ts)
-    const productCompatibilityPort = {
-      getCompatibilitiesByProduct: jest.fn().mockResolvedValue(opts?.compatibilities ?? []),
-      markAsSynced: jest.fn().mockResolvedValue(undefined),
-    };
-    const storePort = { resolveAccountId: opts?.resolveAccountId ?? jest.fn().mockResolvedValue('account-1') };
+    const eventEmitter = { emit: emit ?? jest.fn() };
     const adapter = new (MercadoLivreProductAdapter as any)(
       { generateDescription: jest.fn().mockResolvedValue('desc') }, // descriptionService
       { registerProductAdapter: jest.fn() },                        // registry
       {},                                                           // listingAdapter
       {},                                                           // listingService
       http,                                                         // MlHttpClient
-      compatibilityAdapter,                                         // MercadoLivreCompatibilityAdapter
-      productCompatibilityPort,                                     // PRODUCT_COMPATIBILITY_PORT
-      storePort,                                                    // StorePort
+      eventEmitter,                                                 // EventEmitter2
     );
     adapter.buildMercadoLivreCreateData = jest.fn().mockReturnValue({ title: 'x' });
+    adapter.buildMercadoLivreUpdateData = jest.fn().mockReturnValue({ title: 'x' });
     return adapter;
   }
 
@@ -45,35 +39,32 @@ describe('MercadoLivreProductAdapter', () => {
     expect(ctx).toEqual(expect.objectContaining({ context: 'createProduct', domain: 'general' }));
   });
 
-  it('pushes pre-existing compatibilities to ML right after creating the item', async () => {
+  it('emits MARKETPLACE_EVENTS.ITEM_PUBLISHED after creating the item', async () => {
     const request = jest.fn().mockResolvedValue({ status: 201, data: { id: 'MLB9' } });
-    const syncCompatibility = jest.fn().mockResolvedValue({ created_compatibilities_count: 1 });
-    const adapter = makeAdapter(request, {
-      compatibilities: [{ _id: 'c1', mlVehicleId: 'MLB111' }, { _id: 'c2', mlVehicleId: 'MLB222' }],
-      syncCompatibility,
-    });
-
-    const res = await adapter.createProduct({ _id: 'p1', name: 'Item', domain: 'general' });
-
-    expect(res.success).toBe(true);
-    expect(syncCompatibility).toHaveBeenCalledWith(
-      'MLB9',
-      expect.objectContaining({
-        products: [{ id: 'MLB111' }, { id: 'MLB222' }],
-        site_id: 'MLB',
-        domain_id: 'MLB-CARS_AND_VANS',
-      }),
-      'account-1',
-    );
-  });
-
-  it('does not call syncCompatibility when the product has no saved compatibilities', async () => {
-    const request = jest.fn().mockResolvedValue({ status: 201, data: { id: 'MLB9' } });
-    const syncCompatibility = jest.fn();
-    const adapter = makeAdapter(request, { compatibilities: [], syncCompatibility });
+    const emit = jest.fn();
+    const adapter = makeAdapter(request, emit);
 
     await adapter.createProduct({ _id: 'p1', name: 'Item', domain: 'general' });
 
-    expect(syncCompatibility).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith(
+      MARKETPLACE_EVENTS.ITEM_PUBLISHED,
+      expect.objectContaining({ productId: 'p1', externalId: 'MLB9', marketplaceName: 'Mercado Livre' }),
+    );
+  });
+
+  it('emits MARKETPLACE_EVENTS.ITEM_PUBLISHED after updating an existing item', async () => {
+    const request = jest.fn().mockResolvedValue({ status: 200, data: { id: 'MLB9' } });
+    const emit = jest.fn();
+    const adapter = makeAdapter(request, emit);
+    (adapter as any).getItem = jest.fn().mockResolvedValue({});
+    (adapter as any).canUpdateItem = jest.fn().mockReturnValue({ canUpdate: true, restrictions: [] });
+    (adapter as any).filterUpdatableFields = jest.fn().mockReturnValue({ title: 'x' });
+
+    await adapter.updateProduct('MLB9', { _id: 'p1', name: 'Item', domain: 'general', storeId: 's1' });
+
+    expect(emit).toHaveBeenCalledWith(
+      MARKETPLACE_EVENTS.ITEM_PUBLISHED,
+      expect.objectContaining({ productId: 'p1', externalId: 'MLB9', marketplaceName: 'Mercado Livre' }),
+    );
   });
 });

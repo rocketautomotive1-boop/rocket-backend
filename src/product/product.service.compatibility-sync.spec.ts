@@ -258,3 +258,139 @@ describe('ProductService — remoção de compatibilidade propaga pro Mercado Li
     ).resolves.toBeUndefined();
   });
 });
+
+/**
+ * Reproduz bug: item já publicado (create OU resync/update) nunca disparava catch-up de
+ * compatibilidades pendentes — só o auto-sync ao SALVAR uma compatibilidade nova enviava
+ * ao ML, e ele pulava silenciosamente se o produto ainda não tinha externalId. Compatibilidades
+ * salvas antes da primeira publicação, ou que falharam num envio anterior, ficavam presas para
+ * sempre. Fix: handleMarketplaceItemPublished escuta MARKETPLACE_EVENTS.ITEM_PUBLISHED (emitido
+ * pelo adapter ML tanto no create quanto no update) e reenvia tudo com syncedWithMarketplace=false.
+ */
+describe('ProductService — catch-up de compatibilidades ao publicar/atualizar no marketplace', () => {
+  let service: ProductService;
+  let productCompatibilityService: {
+    getUnsyncedByProduct: jest.Mock;
+    markAsSynced: jest.Mock;
+  };
+  let marketplaceRegistry: { findByName: jest.Mock };
+  let productTitleService: { findByProductId: jest.Mock };
+  let mercadoLivreCompatibilityAdapter: { syncCompatibility: jest.Mock };
+  let productRepository: { findByIdClean: jest.Mock; findOne: jest.Mock };
+  let existingProduct: any;
+  let marketplaceDoc: any;
+
+  beforeEach(() => {
+    existingProduct = { _id: new Types.ObjectId(), name: 'Produto teste' };
+    marketplaceDoc = { _id: new Types.ObjectId(), tag: 'mercadolivre' };
+
+    productRepository = {
+      findOne: jest.fn().mockResolvedValue(existingProduct),
+      findByIdClean: jest.fn().mockResolvedValue(existingProduct),
+    };
+
+    productCompatibilityService = {
+      getUnsyncedByProduct: jest.fn().mockResolvedValue([
+        { _id: new Types.ObjectId(), vehicleId: 'v1', mlVehicleId: 'MLB111' },
+        { _id: new Types.ObjectId(), vehicleId: 'v2', mlVehicleId: 'MLB222' },
+      ]),
+      markAsSynced: jest.fn().mockResolvedValue(undefined),
+    };
+
+    marketplaceRegistry = { findByName: jest.fn().mockResolvedValue(marketplaceDoc) };
+
+    productTitleService = {
+      findByProductId: jest.fn().mockResolvedValue([
+        { marketplaceId: String(marketplaceDoc._id), externalId: 'MLB9', title: 'Item' },
+      ]),
+    };
+
+    mercadoLivreCompatibilityAdapter = {
+      syncCompatibility: jest.fn().mockResolvedValue({ created_compatibilities_count: 2 }),
+    };
+
+    const noop: any = {};
+    const storePort: any = { resolveAccountId: jest.fn().mockResolvedValue(null) };
+
+    service = new ProductService(
+      productRepository as any,
+      noop, noop, noop, // STOCK_QUERY_PORT, STORE_AWARE_STOCK_QUERY_PORT, STORE_OWNER_LOOKUP_PORT
+      storePort,
+      noop, // PRICING_PORT
+      noop, // queueService
+      productCompatibilityService as any,
+      noop, // productFilterService
+      marketplaceRegistry as any,
+      noop, noop, noop, noop, // stockService, marketplaceDescriptionService, publicationLogService, categoryMappingService
+      productTitleService as any,
+      noop, noop, noop, noop, // userProductivityService, productCategoryService, titleCategoryHintService, productShortTitleService
+      mercadoLivreCompatibilityAdapter as any,
+      noop, noop, // brandModel, productDiscoveryModel
+      { emit: jest.fn() } as any,
+      noop, // productReadinessService
+      { requestSync: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+  });
+
+  it('envia todas as compatibilidades não sincronizadas ao receber ITEM_PUBLISHED (create)', async () => {
+    await service.handleMarketplaceItemPublished({
+      productId: String(existingProduct._id),
+      externalId: 'MLB9',
+      marketplaceName: 'Mercado Livre',
+    } as any);
+
+    expect(mercadoLivreCompatibilityAdapter.syncCompatibility).toHaveBeenCalledWith(
+      'MLB9',
+      expect.objectContaining({ products: [{ id: 'MLB111' }, { id: 'MLB222' }] }),
+      undefined,
+    );
+    expect(productCompatibilityService.markAsSynced).toHaveBeenCalled();
+  });
+
+  it('também sincroniza no evento de update/resync, não só no create', async () => {
+    // Mesmo handler, mesmo evento — o adapter emite ITEM_PUBLISHED tanto de
+    // createNewProduct quanto de updateExistingProduct (ver mercado-livre-product.adapter.ts).
+    await service.handleMarketplaceItemPublished({
+      productId: String(existingProduct._id),
+      externalId: 'MLB9',
+      marketplaceName: 'Mercado Livre',
+    } as any);
+
+    expect(mercadoLivreCompatibilityAdapter.syncCompatibility).toHaveBeenCalledTimes(1);
+  });
+
+  it('não chama o ML quando não há compatibilidades pendentes', async () => {
+    productCompatibilityService.getUnsyncedByProduct.mockResolvedValue([]);
+
+    await service.handleMarketplaceItemPublished({
+      productId: String(existingProduct._id),
+      externalId: 'MLB9',
+      marketplaceName: 'Mercado Livre',
+    } as any);
+
+    expect(mercadoLivreCompatibilityAdapter.syncCompatibility).not.toHaveBeenCalled();
+  });
+
+  it('ignora eventos de marketplaces diferentes de Mercado Livre', async () => {
+    await service.handleMarketplaceItemPublished({
+      productId: String(existingProduct._id),
+      externalId: 'SHP9',
+      marketplaceName: 'Shopee',
+    } as any);
+
+    expect(productCompatibilityService.getUnsyncedByProduct).not.toHaveBeenCalled();
+    expect(mercadoLivreCompatibilityAdapter.syncCompatibility).not.toHaveBeenCalled();
+  });
+
+  it('não lança quando o sync falha (best-effort)', async () => {
+    mercadoLivreCompatibilityAdapter.syncCompatibility.mockRejectedValue(new Error('ML fora do ar'));
+
+    await expect(
+      service.handleMarketplaceItemPublished({
+        productId: String(existingProduct._id),
+        externalId: 'MLB9',
+        marketplaceName: 'Mercado Livre',
+      } as any),
+    ).resolves.toBeUndefined();
+  });
+});

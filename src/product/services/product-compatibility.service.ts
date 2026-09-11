@@ -9,10 +9,9 @@ import { VehicleCompatibilityService } from '../../vehicle-compatibility/service
 import { VehicleCompatibilityDocument } from '../../vehicle-compatibility/schemas/vehicle-compatibility.schema';
 import { ProductCompatibilityPositionService } from './product-compatibility-position.service';
 import { CompatibilityGroupPropagationService } from './compatibility-group-propagation.service';
-import { ProductCompatibilityPort } from '../../marketplace/ports/product-compatibility.port';
 
 @Injectable()
-export class ProductCompatibilityService implements ProductCompatibilityPort {
+export class ProductCompatibilityService {
   private readonly logger = new Logger(ProductCompatibilityService.name);
 
   constructor(
@@ -334,6 +333,19 @@ export class ProductCompatibilityService implements ProductCompatibilityPort {
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
+  }
+
+  /**
+   * Compatibilidades do produto ainda não confirmadas como sincronizadas com NENHUM
+   * marketplace (syncedWithMarketplace: false) — sem o enriquecimento de veículo de
+   * getCompatibilitiesByProduct (não é dado de UI, é insumo para reenviar ao ML).
+   * Usado pelo listener de MARKETPLACE_EVENTS.ITEM_PUBLISHED para fazer catch-up de
+   * qualquer compatibilidade que ficou para trás (salva antes da primeira publicação,
+   * ou que falhou num envio anterior).
+   */
+  async getUnsyncedByProduct(productId: string): Promise<any[]> {
+    const query: any = { product: new Types.ObjectId(productId), syncedWithMarketplace: { $ne: true } };
+    return this.compatibilityModel.find(query).lean().exec();
   }
 
   /** Devolve o documento removido (null se não existia) — usado pelo caller para desfazer no ML por mlVehicleId. */
