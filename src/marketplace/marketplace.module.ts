@@ -61,7 +61,11 @@ import { OLXWebhookService } from './adapters/olx/olx-webhook.service';
 import { ViaVarejoModule } from './adapters/viavarejo/viavarejo.module';
 
 import { YampiModule } from './adapters/yampi/yampi.module';
-import { MagaluModule } from './adapters/magalu/magalu.module';
+import { MagaluHttpClient } from './adapters/magalu/magalu-http-client';
+import { MagaluProductAdapter } from './adapters/magalu/magalu-product.adapter';
+import { MagaluOrderAdapter } from './adapters/magalu/magalu-order.adapter';
+import { MagaluCategoryAdapter } from './adapters/magalu/magalu-category.adapter';
+import { MagaluAdapter } from './adapters/magalu/magalu.adapter';
 
 import { ShopeeController } from './controllers/shopee.controller';
 import { AmazonAdapter } from './adapters/amazon/amazon.adapter';
@@ -120,7 +124,6 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
     forwardRef(() => AiModule),
     ViaVarejoModule,
     YampiModule,
-    MagaluModule,
     forwardRef(() => QueueModule),
     ListingModule,
     MongooseModule.forFeature([
@@ -203,6 +206,11 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
     MlDimensionsCalculatorService,
     MlDimensionsAttributeHandler,
     MlAttributeHydrationService,
+    MagaluHttpClient,
+    MagaluProductAdapter,
+    MagaluOrderAdapter,
+    MagaluCategoryAdapter,
+    MagaluAdapter,
     // Hexagonal port implementation consumed by OrderModule (pure — no Order DB access)
     MarketplaceOrderGatewayProvider,
     { provide: MARKETPLACE_ORDER_GATEWAY, useClass: MarketplaceOrderGatewayProvider },
@@ -254,6 +262,7 @@ import { MARKETPLACE_ORDER_GATEWAY } from '../order/ports/marketplace-order.gate
     MlAttributeHydrationService,
     // Transporte canônico ML consumido pelo OrderMarketplaceDetailsService (billing)
     MlHttpClient,
+    MagaluAdapter,
     // Token consumed by OrderModule
     MARKETPLACE_ORDER_GATEWAY,
   ],
