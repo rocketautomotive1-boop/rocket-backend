@@ -48,7 +48,13 @@ export type SignatureScheme =
   | {
       type: 'hmac-sha256';
       header: string;
-      secretKey: string;
+      /**
+       * Chave da credencial no MarketplaceCredentialsService. Aceita uma função
+       * do ctx quando o secret varia por sub-recurso (ex.: Magalu: cada topic de
+       * webhook tem sua PRÓPRIA subscription com secret independente — não há
+       * um único webhookSecret por marketplace nesse caso).
+       */
+      secretKey: string | ((ctx: WebhookContext) => string);
       baseString: 'rawBody' | ((ctx: WebhookContext) => string);
     }
   | { type: 'shared-token'; header: string; secretKey: string }

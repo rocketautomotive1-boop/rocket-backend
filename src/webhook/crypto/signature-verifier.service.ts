@@ -33,10 +33,11 @@ export class SignatureVerifier {
       this.logger.warn(`[Sig] header ausente (${scheme.header}) marketplace=${ctx.marketplace}`);
       return false;
     }
-    const secret = await this.credentials.get(ctx.marketplace, scheme.secretKey);
+    const secretKey = typeof scheme.secretKey === 'function' ? scheme.secretKey(ctx) : scheme.secretKey;
+    const secret = await this.credentials.get(ctx.marketplace, secretKey);
     if (!secret) {
       this.logger.error(
-        `[Sig] segredo '${scheme.secretKey}' ausente para ${ctx.marketplace} — rejeitando (fail-closed)`,
+        `[Sig] segredo '${secretKey}' ausente para ${ctx.marketplace} — rejeitando (fail-closed)`,
       );
       return false;
     }

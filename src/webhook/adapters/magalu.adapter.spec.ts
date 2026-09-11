@@ -20,6 +20,15 @@ describe('MagaluAdapter.parse', () => {
     expect((scheme.baseString as (c: WebhookContext) => string)(c)).toBe(`1234567890.${c.rawBody!.toString('utf8')}`);
   });
 
+  it('scheme secretKey varia por tópico (cada subscription tem secret próprio)', () => {
+    const scheme = sut.signatureScheme as Extract<typeof sut.signatureScheme, { type: 'hmac-sha256' }>;
+    expect(typeof scheme.secretKey).toBe('function');
+    const resolveKey = scheme.secretKey as (c: WebhookContext) => string;
+    expect(resolveKey(ctx('portfolios_sku', {}))).toBe('webhookSecret:portfolios_sku');
+    expect(resolveKey(ctx('portfolios_price', {}))).toBe('webhookSecret:portfolios_price');
+    expect(resolveKey(ctx('portfolios_stock', {}))).toBe('webhookSecret:portfolios_stock');
+  });
+
   it('portfolios_sku com data.params.sku → listing_status', () => {
     const payload = { data: { status: 'published', params: { sku: 'prod123' }, resource: '/seller/v1/portfolios/skus/prod123' } };
     const n = sut.parse(ctx('portfolios_sku', payload));

@@ -13,14 +13,19 @@ export class MagaluAdapter implements WebhookAdapter {
    * o rawBody como os demais marketplaces: header é `X-Signature-256` no formato
    * `sha256=<hex>` (SignatureVerifier já trata o prefixo/múltiplas assinaturas em
    * rotação de secret), e a base assinada é `{timestamp}.{body}` — o timestamp vem
-   * de um header IRMÃO (`X-Timestamp`), não do payload. `secretKey: 'webhookSecret'`
-   * guarda o `secret` (formato `whsec_*`) devolvido pelo PUT /v1/onboarding/signup —
-   * exibido só uma vez na criação.
+   * de um header IRMÃO (`X-Timestamp`), não do payload.
+   *
+   * secretKey varia por TÓPICO, não é único por marketplace: cada chamada de
+   * PUT /v1/onboarding/signup cria uma subscription com seu PRÓPRIO secret
+   * independente (confirmado ao vivo — 3 tópicos registrados, 3 secrets
+   * diferentes). Guardamos cada um sob `webhookSecret:<topic>` em
+   * marketplaces.credentials. `ctx.topic` já vem resolvido do body (data.topic)
+   * antes da verificação de assinatura rodar — ver webhook-context.ts.
    */
   readonly signatureScheme: SignatureScheme = {
     type: 'hmac-sha256',
     header: 'x-signature-256',
-    secretKey: 'webhookSecret',
+    secretKey: (ctx) => `webhookSecret:${ctx.topic}`,
     baseString: (ctx) => `${ctx.headers['x-timestamp'] ?? ''}.${ctx.rawBody?.toString('utf8') ?? ''}`,
   };
   parse(ctx: WebhookContext): NormalizedWebhook {
