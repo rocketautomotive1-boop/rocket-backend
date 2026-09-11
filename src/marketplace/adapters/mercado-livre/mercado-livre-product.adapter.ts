@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Inject } from '@nestjs/common';
 import { MarketplaceDescriptionService } from '../../services/marketplace-description.service';
 import { IMarketplaceProductAdapter } from '../../interfaces/marketplace-product-adapter.interface';
 import { MarketplaceDocument } from '../../schemas/marketplace.schema';
@@ -8,6 +8,9 @@ import { MercadoLivreListingAdapter } from './mercado-livre-listing.adapter';
 import { ListingService } from '../../../listing/listing.service'; // [NEW] Import
 import { MlHttpClient } from './ml-http-client';
 import { HttpAuthContext } from '../shared/marketplace-http-client';
+import { MercadoLivreCompatibilityAdapter } from './mercado-livre-compatibility.adapter';
+import { PRODUCT_COMPATIBILITY_PORT, ProductCompatibilityPort } from '../../ports/product-compatibility.port';
+import { STORE_PORT, StorePort } from '../../../store/ports/store.port';
 
 interface InventoryData {
   priceSale?: number;
@@ -26,6 +29,9 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
     private readonly listingAdapter: MercadoLivreListingAdapter,
     private readonly listingService: ListingService, // [NEW] Inject ListingService
     private readonly http: MlHttpClient,
+    private readonly compatibilityAdapter: MercadoLivreCompatibilityAdapter,
+    @Inject(PRODUCT_COMPATIBILITY_PORT) private readonly productCompatibilityPort: ProductCompatibilityPort,
+    @Inject(STORE_PORT) private readonly storePort: StorePort,
   ) { }
 
   private name = 'Mercado Livre';
@@ -464,6 +470,7 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
       );
 
       await this.updateProductDescription(createResponse.data.id, product, title, ctx);
+      await this.pushExistingCompatibilities(createResponse.data.id, product, title);
 
       return {
         success: true,
@@ -487,6 +494,46 @@ export class MercadoLivreProductAdapter implements IMarketplaceProductAdapter, O
         requestPayload: mlData,
         responsePayload: error.response?.data || null
       };
+    }
+  }
+
+  /**
+   * O item acabou de nascer no ML sem NENHUMA compatibilidade — buildMercadoLivreCreateData
+   * não envia compatibilidades no POST /items (a API de criação não aceita esse campo; o
+   * único endpoint que grava compatibilidade é POST /items/{id}/compatibilities). Se o produto
+   * já tinha veículos salvos localmente ANTES da primeira publicação (fluxo comum: usuário
+   * cadastra compatibilidades no pré-registro, publica depois), eles ficavam presos no banco e
+   * nunca chegavam ao ML — nada mais dispara esse envio após a criação (o auto-sync em
+   * ProductService só roda ao SALVAR uma compatibilidade nova, e pula silenciosamente se ainda
+   * não existe título publicado). Best-effort: nunca falha a criação do item por causa disso.
+   */
+  private async pushExistingCompatibilities(externalId: string, product: any, title: any): Promise<void> {
+    try {
+      const compatibilities = await this.productCompatibilityPort.getCompatibilitiesByProduct(String(product._id ?? product.id));
+      const mlVehicleIds = [...new Set(compatibilities.map((c: any) => c.mlVehicleId).filter(Boolean))] as string[];
+      if (mlVehicleIds.length === 0) return;
+
+      const accountId = (await this.storePort.resolveAccountId(title.storeId, this.name)) ?? undefined;
+
+      const chunkSize = 200; // teto rígido do ML por requisição (ver MercadoLivreCompatibilityAdapter.syncCompatibility)
+      for (let i = 0; i < mlVehicleIds.length; i += chunkSize) {
+        const chunk = mlVehicleIds.slice(i, i + chunkSize);
+        await this.compatibilityAdapter.syncCompatibility(
+          externalId,
+          { products: chunk.map((id) => ({ id })), site_id: 'MLB', domain_id: 'MLB-CARS_AND_VANS' },
+          accountId,
+        );
+      }
+
+      const syncedIds = compatibilities
+        .filter((c: any) => mlVehicleIds.includes(c.mlVehicleId))
+        .map((c: any) => String(c._id ?? c.id))
+        .filter(Boolean);
+      await this.productCompatibilityPort.markAsSynced(syncedIds);
+
+      this.logger.log(`Compatibilidades pré-existentes enviadas ao ML na criação: item=${externalId} count=${mlVehicleIds.length}`);
+    } catch (error: any) {
+      this.logger.warn(`Falha ao enviar compatibilidades pré-existentes na criação (não bloqueante) item=${externalId}: ${error?.message}`);
     }
   }
 

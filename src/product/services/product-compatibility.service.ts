@@ -9,9 +9,10 @@ import { VehicleCompatibilityService } from '../../vehicle-compatibility/service
 import { VehicleCompatibilityDocument } from '../../vehicle-compatibility/schemas/vehicle-compatibility.schema';
 import { ProductCompatibilityPositionService } from './product-compatibility-position.service';
 import { CompatibilityGroupPropagationService } from './compatibility-group-propagation.service';
+import { ProductCompatibilityPort } from '../../marketplace/ports/product-compatibility.port';
 
 @Injectable()
-export class ProductCompatibilityService {
+export class ProductCompatibilityService implements ProductCompatibilityPort {
   private readonly logger = new Logger(ProductCompatibilityService.name);
 
   constructor(
