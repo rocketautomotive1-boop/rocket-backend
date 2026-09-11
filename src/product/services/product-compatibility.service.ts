@@ -336,16 +336,60 @@ export class ProductCompatibilityService {
   }
 
   /**
-   * Compatibilidades do produto ainda não confirmadas como sincronizadas com NENHUM
-   * marketplace (syncedWithMarketplace: false) — sem o enriquecimento de veículo de
-   * getCompatibilitiesByProduct (não é dado de UI, é insumo para reenviar ao ML).
-   * Usado pelo listener de MARKETPLACE_EVENTS.ITEM_PUBLISHED para fazer catch-up de
-   * qualquer compatibilidade que ficou para trás (salva antes da primeira publicação,
-   * ou que falhou num envio anterior).
+   * Compatibilidades do produto que faltam para AO MENOS UM dos listings vivos passados em
+   * `liveExternalIds` (ex.: os externalId de cada StoreListing ML do produto) — granularidade
+   * por listing, não por produto. Sem o enriquecimento de veículo de getCompatibilitiesByProduct
+   * (não é dado de UI, é insumo para reenviar ao ML). Usado por
+   * ProductService.syncPendingCompatibilitiesAfterPublish para fazer catch-up do que ficou
+   * para trás — seja porque a compatibilidade foi salva antes da primeira publicação, seja
+   * porque um envio anterior teve sucesso para uma loja do produto e falhou silenciosamente
+   * para outra (bug corrigido 2026-09-11 — ver syncedExternalIds no schema).
+   *
+   * NÃO filtra mais por syncedWithMarketplace (legado, granularidade errada — fica true
+   * globalmente assim que QUALQUER listing do produto tem sucesso).
    */
-  async getUnsyncedByProduct(productId: string): Promise<any[]> {
-    const query: any = { product: new Types.ObjectId(productId), syncedWithMarketplace: { $ne: true } };
+  async getUnsyncedByProduct(productId: string, liveExternalIds: string[]): Promise<any[]> {
+    if (liveExternalIds.length === 0) return [];
+    const query: any = {
+      product: new Types.ObjectId(productId),
+      // syncedExternalIds não contém TODOS os liveExternalIds → falta ao menos 1 listing.
+      $expr: { $lt: [{ $size: { $setIntersection: [{ $ifNull: ['$syncedExternalIds', []] }, liveExternalIds] } }, liveExternalIds.length] },
+    };
     return this.compatibilityModel.find(query).lean().exec();
+  }
+
+  /**
+   * Marca as compatibilidades `ids` como sincronizadas APENAS para os listings em
+   * `successfulExternalIds` (acrescenta ao array syncedExternalIds — nunca substitui, um
+   * listing que já tinha sucesso antes continua marcado mesmo que não apareça nesta chamada).
+   * Substitui o antigo markAsSynced (que marcava globalmente por produto) como o caminho
+   * usado por qualquer sync real de compatibilidade com o ML — ver
+   * ProductService.syncRelevantCompatibilitiesToMercadoLivre.
+   */
+  async markSyncedForExternalIds(ids: Array<string | number>, successfulExternalIds: string[]): Promise<void> {
+    if (ids.length === 0 || successfulExternalIds.length === 0) return;
+    try {
+      const stringIds = ids.filter((id): id is string => typeof id === 'string' && Types.ObjectId.isValid(id));
+      if (stringIds.length === 0) return;
+
+      await this.compatibilityModel.updateMany(
+        { _id: { $in: stringIds } } as any,
+        { $addToSet: { syncedExternalIds: { $each: successfulExternalIds } } } as any,
+      ).exec();
+      this.logger.log(`${stringIds.length} compatibilidade(s) marcada(s) como sincronizada(s) para ${successfulExternalIds.length} listing(s)`);
+
+      for (const id of stringIds) {
+        this.positionService
+          .resolveForCompatibility(id)
+          .catch((err) => this.logger.warn(`Falha ao resolver posição da compatibilidade ${id}: ${err?.message}`));
+      }
+    } catch (error) {
+      this.logger.error('Erro ao marcar compatibilidades como sincronizadas por listing:', error);
+      throw new HttpException(
+        'Erro ao atualizar status de sincronização',
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
   }
 
   /** Devolve o documento removido (null se não existia) — usado pelo caller para desfazer no ML por mlVehicleId. */

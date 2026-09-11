@@ -1213,16 +1213,18 @@ export class ProductService {
 
       const syncResult = await this.pushCompatibilitiesToMercadoLivre(productTitles, mlVehicleIds, marketplace.tag);
 
-      if (syncResult.successCount > 0) {
+      if (syncResult.successfulExternalIds.length > 0) {
         const syncedInternalIds = relevant
           .filter((c: any) => mlVehicleIds.includes(c.mlVehicleId))
           .map((c: any) => String(c._id ?? c.id))
           .filter(Boolean);
-        await this.productCompatibilityService.markAsSynced(syncedInternalIds);
+        // Marca só para os listings (externalId) que de fato tiveram sucesso — nunca
+        // globalmente por produto (ver comentário em pushCompatibilitiesToMercadoLivre).
+        await this.productCompatibilityService.markSyncedForExternalIds(syncedInternalIds, syncResult.successfulExternalIds);
         this.requestPostCompatibilitySyncResync(String(product._id), resolvedMarketplaceId, resyncReason);
       }
 
-      return { attempted: true, ...syncResult };
+      return { attempted: true, successCount: syncResult.successCount, errorCount: syncResult.errorCount };
     } catch (error: any) {
       this.logger.warn(`Sync de compatibilidades com Mercado Livre falhou (não bloqueante): ${error?.message}`);
       return { attempted: true, reason: 'error', successCount: 0, errorCount: requestedCount };
@@ -1231,11 +1233,13 @@ export class ProductService {
 
   /**
    * Catch-up de compatibilidades pendentes sempre que um item passa a existir (CREATE) ou é
-   * atualizado (UPDATE) no Mercado Livre — cobre os dois casos que o auto-sync-ao-salvar não
-   * cobre: (1) compatibilidades salvas ANTES da primeira publicação (não havia externalId
-   * ainda, autoSyncCompatibilitiesWithMercadoLivre pulou com no_ml_title na hora do save) e
-   * (2) qualquer resync/update posterior de um item já publicado, onde um envio anterior
-   * pode ter falhado e ficado para trás.
+   * atualizado (UPDATE) no Mercado Livre — cobre os casos que o auto-sync-ao-salvar não cobre:
+   * (1) compatibilidades salvas ANTES da primeira publicação (não havia externalId ainda,
+   * autoSyncCompatibilitiesWithMercadoLivre pulou com no_ml_title na hora do save); (2) qualquer
+   * resync/update posterior de um item já publicado, onde um envio anterior pode ter falhado e
+   * ficado para trás; (3) produto com MÚLTIPLOS listings ML (multi-loja) onde uma loja recebeu
+   * a compatibilidade e outra não — checa por listing (liveExternalIds), não globalmente por
+   * produto (bug corrigido 2026-09-11, ver ProductCompatibilityModel.syncedExternalIds).
    *
    * Chamado via POST /internal/products/:id/sync-compatibilities (InternalProductController) —
    * quem publica de fato no ML é o worker mercadolivre-sync.worker.ts em
@@ -1249,7 +1253,16 @@ export class ProductService {
       const product = await this.findOne(productId);
       if (!product) return;
 
-      const pending = await this.productCompatibilityService.getUnsyncedByProduct(productId);
+      const marketplace = await this.marketplaceRegistry.findByName('Mercado Livre');
+      if (!marketplace) return;
+      const resolvedMarketplaceId = String(marketplace._id);
+      const allTitles = await this.productTitleService.findByProductId(product._id);
+      const liveExternalIds = allTitles
+        .filter((title: any) => String(title.marketplaceId) === resolvedMarketplaceId && title.externalId)
+        .map((title: any) => String(title.externalId));
+      if (liveExternalIds.length === 0) return;
+
+      const pending = await this.productCompatibilityService.getUnsyncedByProduct(productId, liveExternalIds);
       if (pending.length === 0) return;
 
       await this.syncRelevantCompatibilitiesToMercadoLivre(product, pending, 'compatibility_catchup_on_publish');
@@ -1293,14 +1306,25 @@ export class ProductService {
    */
   private static readonly ML_COMPATIBILITY_CHUNK_SIZE = 200;
 
+  /**
+   * successfulExternalIds: todo item ML (listing/loja) que recebeu TODOS os seus chunks com
+   * sucesso — granularidade por listing, não por produto. Bug corrigido 2026-09-11: antes,
+   * markAsSynced era chamado (marcando TODA compatibilidade do produto como sincronizada
+   * globalmente) sempre que successCount agregado > 0, mesmo que outra loja/listing do mesmo
+   * produto tivesse falhado por completo — confirmado ao vivo (produto com 2 StoreListings ML:
+   * uma recebeu 593 compatibilidades, a outra ficou com 0, ambas marcadas syncedWithMarketplace
+   * true igual, e a segunda nunca mais seria reenviada). Ver
+   * ProductCompatibilityModel.syncedExternalIds e markSyncedForExternalIds.
+   */
   private async pushCompatibilitiesToMercadoLivre(
     productTitles: any[],
     vehicleIds: string[],
     marketplaceTag: string,
-  ): Promise<{ successCount: number; errorCount: number; results: any[] }> {
+  ): Promise<{ successCount: number; errorCount: number; results: any[]; successfulExternalIds: string[] }> {
     const results: any[] = [];
     let successCount = 0;
     let errorCount = 0;
+    const successfulExternalIds: string[] = [];
 
     const chunkSize = ProductService.ML_COMPATIBILITY_CHUNK_SIZE;
     const chunks: string[][] = [];
@@ -1317,6 +1341,7 @@ export class ProductService {
       // marketplace — sem isso, itens de lojas diferentes da ativa recebem 403
       // "Unauthorized access to resource" do ML (ver ml-403-owner-account-routing).
       const accountId = (await this.storePort.resolveAccountId(title.storeId, marketplaceTag)) ?? undefined;
+      let allChunksSucceededForTitle = true;
       for (const chunk of chunks) {
         const payloadML = {
           products: chunk.map((id) => ({ id })),
@@ -1337,11 +1362,13 @@ export class ProductService {
             cause: err?.response?.cause || err?.response,
           });
           errorCount += chunk.length;
+          allChunksSucceededForTitle = false;
         }
       }
+      if (allChunksSucceededForTitle) successfulExternalIds.push(title.externalId);
     }
 
-    return { successCount, errorCount, results };
+    return { successCount, errorCount, results, successfulExternalIds };
   }
 
   /**

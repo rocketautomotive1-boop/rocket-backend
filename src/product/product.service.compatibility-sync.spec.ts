@@ -13,7 +13,7 @@ describe('ProductService — sync de compatibilidades com Mercado Livre (chunkin
   let service: ProductService;
   let productCompatibilityService: {
     createMultipleCompatibilitiesBatch: jest.Mock;
-    markAsSynced: jest.Mock;
+    markSyncedForExternalIds: jest.Mock;
   };
   let marketplaceRegistry: { findByName: jest.Mock };
   let productTitleService: { findByProductId: jest.Mock };
@@ -39,7 +39,7 @@ describe('ProductService — sync de compatibilidades com Mercado Livre (chunkin
 
     productCompatibilityService = {
       createMultipleCompatibilitiesBatch: jest.fn().mockResolvedValue(savedCompatibilities),
-      markAsSynced: jest.fn().mockResolvedValue(undefined),
+      markSyncedForExternalIds: jest.fn().mockResolvedValue(undefined),
     };
 
     marketplaceRegistry = {
@@ -273,16 +273,24 @@ describe('ProductService — remoção de compatibilidade propaga pro Mercado Li
  * backend, mas confirmou-se ao vivo que esse adapter nunca é chamado em produção: a publicação
  * real acontece inteiramente no microserviço orchestrator, fora deste processo — por isso o
  * gatilho é uma chamada HTTP explícita, não um EventEmitter2 interno.)
+ *
+ * Segunda camada do bug, confirmada ao vivo 2026-09-11 num produto com 2 StoreListings ML:
+ * markAsSynced (antigo) marcava TODA compatibilidade do produto como sincronizada
+ * GLOBALMENTE assim que qualquer uma das lojas tinha sucesso — a loja 'Max Eshop' nunca
+ * recebeu as 593 compatibilidades (ficou em 0 no ML) mas o flag mentia que sim, porque a
+ * loja 'Rocket Automotive' teve sucesso. getUnsyncedByProduct/markSyncedForExternalIds
+ * corrigem a granularidade para por-listing (syncedExternalIds).
  */
 describe('ProductService — catch-up de compatibilidades ao publicar/atualizar no marketplace', () => {
   let service: ProductService;
   let productCompatibilityService: {
     getUnsyncedByProduct: jest.Mock;
-    markAsSynced: jest.Mock;
+    markSyncedForExternalIds: jest.Mock;
   };
   let marketplaceRegistry: { findByName: jest.Mock };
   let productTitleService: { findByProductId: jest.Mock };
   let mercadoLivreCompatibilityAdapter: { syncCompatibility: jest.Mock };
+  let storePort: { resolveAccountId: jest.Mock };
   let productRepository: { findByIdClean: jest.Mock; findOne: jest.Mock };
   let existingProduct: any;
   let marketplaceDoc: any;
@@ -301,14 +309,14 @@ describe('ProductService — catch-up de compatibilidades ao publicar/atualizar 
         { _id: new Types.ObjectId(), vehicleId: 'v1', mlVehicleId: 'MLB111' },
         { _id: new Types.ObjectId(), vehicleId: 'v2', mlVehicleId: 'MLB222' },
       ]),
-      markAsSynced: jest.fn().mockResolvedValue(undefined),
+      markSyncedForExternalIds: jest.fn().mockResolvedValue(undefined),
     };
 
     marketplaceRegistry = { findByName: jest.fn().mockResolvedValue(marketplaceDoc) };
 
     productTitleService = {
       findByProductId: jest.fn().mockResolvedValue([
-        { marketplaceId: String(marketplaceDoc._id), externalId: 'MLB9', title: 'Item' },
+        { marketplaceId: String(marketplaceDoc._id), externalId: 'MLB9', title: 'Item', storeId: 's1' },
       ]),
     };
 
@@ -317,12 +325,12 @@ describe('ProductService — catch-up de compatibilidades ao publicar/atualizar 
     };
 
     const noop: any = {};
-    const storePort: any = { resolveAccountId: jest.fn().mockResolvedValue(null) };
+    storePort = { resolveAccountId: jest.fn().mockResolvedValue(null) };
 
     service = new ProductService(
       productRepository as any,
       noop, noop, noop, // STOCK_QUERY_PORT, STORE_AWARE_STOCK_QUERY_PORT, STORE_OWNER_LOOKUP_PORT
-      storePort,
+      storePort as any,
       noop, // PRICING_PORT
       noop, // queueService
       productCompatibilityService as any,
@@ -342,12 +350,20 @@ describe('ProductService — catch-up de compatibilidades ao publicar/atualizar 
   it('envia todas as compatibilidades não sincronizadas ao ser chamado após CREATE', async () => {
     await service.syncPendingCompatibilitiesAfterPublish(String(existingProduct._id));
 
+    expect(productCompatibilityService.getUnsyncedByProduct).toHaveBeenCalledWith(
+      String(existingProduct._id),
+      ['MLB9'],
+    );
     expect(mercadoLivreCompatibilityAdapter.syncCompatibility).toHaveBeenCalledWith(
       'MLB9',
       expect.objectContaining({ products: [{ id: 'MLB111' }, { id: 'MLB222' }] }),
       undefined,
     );
-    expect(productCompatibilityService.markAsSynced).toHaveBeenCalled();
+    // Marca só para o(s) externalId que de fato tiveram sucesso — nunca globalmente.
+    expect(productCompatibilityService.markSyncedForExternalIds).toHaveBeenCalledWith(
+      expect.any(Array),
+      ['MLB9'],
+    );
   });
 
   it('também sincroniza quando chamado após UPDATE/resync, não só após CREATE', async () => {
@@ -359,12 +375,40 @@ describe('ProductService — catch-up de compatibilidades ao publicar/atualizar 
     expect(mercadoLivreCompatibilityAdapter.syncCompatibility).toHaveBeenCalledTimes(1);
   });
 
+  it('produto multi-loja: marca sincronizado só o listing que teve sucesso, não o que falhou', async () => {
+    // 2 StoreListings ML pro mesmo produto — reproduz o bug ao vivo (Rocket Automotive
+    // sucesso, Max Eshop 403/erro).
+    productTitleService.findByProductId.mockResolvedValue([
+      { marketplaceId: String(marketplaceDoc._id), externalId: 'MLB_OK', title: 'Item', storeId: 'store-ok' },
+      { marketplaceId: String(marketplaceDoc._id), externalId: 'MLB_FAIL', title: 'Item', storeId: 'store-fail' },
+    ]);
+    mercadoLivreCompatibilityAdapter.syncCompatibility.mockImplementation((externalId: string) => {
+      if (externalId === 'MLB_FAIL') return Promise.reject(new Error('Unauthorized access to resource'));
+      return Promise.resolve({ created_compatibilities_count: 2 });
+    });
+
+    await service.syncPendingCompatibilitiesAfterPublish(String(existingProduct._id));
+
+    expect(productCompatibilityService.markSyncedForExternalIds).toHaveBeenCalledWith(
+      expect.any(Array),
+      ['MLB_OK'], // NUNCA inclui MLB_FAIL — essa loja continua pendente pro próximo catch-up
+    );
+  });
+
   it('não chama o ML quando não há compatibilidades pendentes', async () => {
     productCompatibilityService.getUnsyncedByProduct.mockResolvedValue([]);
 
     await service.syncPendingCompatibilitiesAfterPublish(String(existingProduct._id));
 
     expect(mercadoLivreCompatibilityAdapter.syncCompatibility).not.toHaveBeenCalled();
+  });
+
+  it('não chama getUnsyncedByProduct quando o produto não tem nenhum listing ML com externalId', async () => {
+    productTitleService.findByProductId.mockResolvedValue([]);
+
+    await service.syncPendingCompatibilitiesAfterPublish(String(existingProduct._id));
+
+    expect(productCompatibilityService.getUnsyncedByProduct).not.toHaveBeenCalled();
   });
 
   it('não lança quando o produto não existe', async () => {

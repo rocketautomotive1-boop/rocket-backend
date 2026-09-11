@@ -22,8 +22,26 @@ export class ProductCompatibilityModel {
     @Prop()
     vehicleName: string;
 
+    /**
+     * @deprecated Granularidade errada — fica true globalmente por PRODUTO assim que
+     * QUALQUER um dos listings/lojas do produto recebe sucesso no envio ao ML, mesmo que
+     * outra loja do mesmo produto tenha falhado (bug confirmado ao vivo 2026-09-11: produto
+     * com 2 StoreListings ML, 1 recebeu as 593 compatibilidades, a outra ficou com 0 —
+     * ambas marcadas true igual). Não usar para decidir pendência; ver syncedExternalIds.
+     * Mantido só por compatibilidade de leitura com dados antigos/scripts existentes.
+     */
     @Prop({ default: false })
     syncedWithMarketplace: boolean;
+
+    /**
+     * externalId (item ML) de cada listing que já confirmou receber esta compatibilidade —
+     * granularidade correta: um produto pode ter N listings (N lojas) no mesmo marketplace,
+     * cada um com seu próprio estado de sync. "Pendente para o listing X" = X não está aqui.
+     * Substitui syncedWithMarketplace para decidir o que reenviar (ver
+     * ProductCompatibilityService.getUnsyncedExternalIds).
+     */
+    @Prop({ type: [String], default: [] })
+    syncedExternalIds: string[];
 
     /** true quando a migração de dados legados não encontrou match em vehicle_compatibilities. */
     @Prop({ default: false })
