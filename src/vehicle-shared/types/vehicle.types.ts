@@ -1,5 +1,7 @@
 export enum VehicleOrigin {
   ML_IMPORT = 'ml_import',
+  FIPE_IMPORT = 'fipe_import',
+  OEM_IMPORT = 'oem_import',
   MANUAL = 'manual',
 }
 

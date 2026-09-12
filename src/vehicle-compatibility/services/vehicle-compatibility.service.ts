@@ -30,9 +30,18 @@ import {
   normalizeModel,
   normalizeVersionDisplay,
 } from '../../vehicle-shared/utils/vehicle-normalizer.util';
+import { shouldReplaceSection } from './vehicle-section-merge.util';
 import { parseVehicleQuery, ParsedVehicleQuery } from '../../vehicle-shared/utils/vehicle-query-parser.util';
 import { VehicleMarket, VehicleOrigin } from '../../vehicle-shared/types/vehicle.types';
 import { VEHICLE_CONSTANTS } from '../../vehicle-shared/constants/vehicle.constants';
+
+/** Objeto/array vazio conta como ausente — mesma regra usada dentro do merge por seção. */
+function isEmpty(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === 'object') return Object.keys(value as object).length === 0;
+  return false;
+}
 
 @Injectable()
 export class VehicleCompatibilityService {
@@ -54,25 +63,36 @@ export class VehicleCompatibilityService {
   }
 
   /**
-   * Upsert usado pelo importador do ML e pela curadoria manual. Registros já curados
-   * manualmente (origin: manual) nunca são sobrescritos por uma reimportação do ML.
+   * Upsert usado pelos importadores (ML, FIPE, OEM) e pela curadoria manual.
+   * Merge é por SEÇÃO, não por documento inteiro: cada seção rica (powertrain,
+   * chassisAndDynamics, safetyAndAdas, equipment, warranty, colors, fipe, years)
+   * só é sobrescrita se a fonte da seção entrante tem prioridade igual ou maior
+   * que a da seção já salva E o valor entrante não é vazio — ver
+   * vehicle-section-merge.util.ts para a tabela de prioridade completa.
+   * 'manual' é a única exceção universal: sempre vence, em qualquer seção.
    */
   async upsertByCanonicalKey(dto: UpsertVehicleCompatibilityDto): Promise<VehicleCompatibilityDocument> {
     const incoming = this.buildEnrichedFields(dto);
+    const incomingOrigin = incoming.origin;
+    const fetchedAt = new Date();
 
     const existing = await this.model.findOne({ canonicalKey: incoming.canonicalKey }).lean().exec();
 
     if (!existing) {
       const created = await this.model.findOneAndUpdate(
         { canonicalKey: incoming.canonicalKey },
-        { $setOnInsert: incoming },
+        { $setOnInsert: this.withProvenance(incoming, incomingOrigin, fetchedAt) },
         { upsert: true, new: true },
       ).exec();
       return created as VehicleCompatibilityDocument;
     }
 
-    if (existing.origin === VehicleOrigin.MANUAL && incoming.origin === VehicleOrigin.ML_IMPORT) {
-      this.logger.debug(`Skipping ML reimport over manually curated record: ${incoming.canonicalKey}`);
+    // Campos "core" fora de seção própria (make/model/version/dimensions/etc.)
+    // seguem a mesma regra: manual sempre vence; caso contrário, fonte de
+    // maior prioridade some o documento inteiro por enquanto (comportamento
+    // do v1). Isso preserva o guard-rail histórico.
+    if (existing.origin === VehicleOrigin.MANUAL && incomingOrigin !== VehicleOrigin.MANUAL) {
+      this.logger.debug(`Skipping ${incomingOrigin} reimport over manually curated record: ${incoming.canonicalKey}`);
       return existing as VehicleCompatibilityDocument;
     }
 
@@ -83,15 +103,130 @@ export class VehicleCompatibilityService {
       ...incoming,
       aliases: mergedAliases,
       tags: mergedTags,
-      dataQualityScore: Math.max(existing.dataQualityScore ?? 0, incoming.dataQualityScore),
     };
+
+    // Seções ricas v2: merge seção-a-seção em vez de sobrescrita cega.
+    this.mergeRichSection(update, existing, incoming, 'powertrain', incomingOrigin, fetchedAt);
+    this.mergeRichSection(update, existing, incoming, 'chassisAndDynamics', incomingOrigin, fetchedAt);
+    this.mergeRichSection(update, existing, incoming, 'safetyAndAdas', incomingOrigin, fetchedAt);
+    this.mergeRichSection(update, existing, incoming, 'equipment', incomingOrigin, fetchedAt);
+    this.mergeRichSection(update, existing, incoming, 'warranty', incomingOrigin, fetchedAt);
+    this.mergeColorsSection(update, existing, incoming, incomingOrigin, fetchedAt);
+    this.mergeFipeSection(update, existing, incoming, incomingOrigin, fetchedAt);
+
+    // dataQualityScore é recomputado sobre o documento PÓS-merge, não sobre o
+    // incoming isolado — uma seção preservada da fonte anterior deve contar.
+    update.dataQualityScore = computeDataQualityScore({
+      make: update.make,
+      model: update.model,
+      version: update.version,
+      years: update.years,
+      displacementCc: update.displacementCc,
+      fuelType: update.fuelType,
+      transmission: update.transmission,
+      bodyType: update.bodyType,
+      platform: update.platform,
+      fipe: update.fipe,
+      aliases: mergedAliases,
+    });
 
     const result = await this.model
       .findOneAndUpdate({ canonicalKey: incoming.canonicalKey }, { $set: update }, { new: true })
       .exec();
 
-    this.logger.debug(`Upserted compatibility ${incoming.canonicalKey}`);
+    this.logger.debug(`Upserted compatibility ${incoming.canonicalKey} (origin=${incomingOrigin})`);
     return result as VehicleCompatibilityDocument;
+  }
+
+  private withProvenance(
+    incoming: Record<string, any>,
+    origin: VehicleOrigin,
+    fetchedAt: Date,
+  ): Record<string, any> {
+    const provenance = { sourceType: origin, fetchedAt, confidence: 'medium' as const };
+    const result: Record<string, any> = { ...incoming, schemaVersion: 2 };
+    for (const section of ['powertrain', 'chassisAndDynamics', 'safetyAndAdas', 'equipment', 'warranty']) {
+      if (!isEmpty(incoming[section])) result[`${section}_provenance`] = provenance;
+    }
+    if (!isEmpty(incoming.exteriorColors) || !isEmpty(incoming.interiorColors)) {
+      result.colors_provenance = provenance;
+    }
+    return result;
+  }
+
+  /** Aplica shouldReplaceSection para uma seção rica nomeada (powertrain, warranty, etc). */
+  private mergeRichSection(
+    update: Record<string, any>,
+    existing: Record<string, any>,
+    incoming: Record<string, any>,
+    section: 'powertrain' | 'chassisAndDynamics' | 'safetyAndAdas' | 'equipment' | 'warranty',
+    incomingOrigin: VehicleOrigin,
+    fetchedAt: Date,
+  ): void {
+    const provenanceKey = `${section}_provenance`;
+    const replace = shouldReplaceSection(
+      section,
+      { value: existing[section], provenance: existing[provenanceKey] },
+      { value: incoming[section], provenance: { sourceType: incomingOrigin, fetchedAt } },
+    );
+
+    if (replace) {
+      update[section] = incoming[section];
+      update[provenanceKey] = { sourceType: incomingOrigin, fetchedAt, confidence: 'medium' };
+      update.schemaVersion = 2;
+    } else {
+      update[section] = existing[section];
+      update[provenanceKey] = existing[provenanceKey];
+    }
+  }
+
+  private mergeColorsSection(
+    update: Record<string, any>,
+    existing: Record<string, any>,
+    incoming: Record<string, any>,
+    incomingOrigin: VehicleOrigin,
+    fetchedAt: Date,
+  ): void {
+    const incomingHasColors = !isEmpty(incoming.exteriorColors) || !isEmpty(incoming.interiorColors);
+    const replace = shouldReplaceSection(
+      'colors',
+      { value: existing.exteriorColors, provenance: existing.colors_provenance },
+      { value: incomingHasColors ? incoming.exteriorColors ?? ['_has_colors_'] : undefined, provenance: { sourceType: incomingOrigin, fetchedAt } },
+    );
+
+    if (replace) {
+      update.exteriorColors = incoming.exteriorColors;
+      update.interiorColors = incoming.interiorColors;
+      update.ownerBenefits = incoming.ownerBenefits;
+      update.colors_provenance = { sourceType: incomingOrigin, fetchedAt, confidence: 'medium' };
+    } else {
+      update.exteriorColors = existing.exteriorColors;
+      update.interiorColors = existing.interiorColors;
+      update.ownerBenefits = existing.ownerBenefits;
+      update.colors_provenance = existing.colors_provenance;
+    }
+  }
+
+  private mergeFipeSection(
+    update: Record<string, any>,
+    existing: Record<string, any>,
+    incoming: Record<string, any>,
+    incomingOrigin: VehicleOrigin,
+    fetchedAt: Date,
+  ): void {
+    const replace = shouldReplaceSection(
+      'fipe',
+      { value: existing.fipe?.code ? existing.fipe : undefined, provenance: existing.fipe_provenance },
+      { value: incoming.fipe?.code ? incoming.fipe : undefined, provenance: { sourceType: incomingOrigin, fetchedAt } },
+    );
+
+    if (replace) {
+      update.fipe = incoming.fipe;
+      update.fipe_provenance = { sourceType: incomingOrigin, fetchedAt, confidence: 'medium' };
+    } else if (existing.fipe) {
+      update.fipe = existing.fipe;
+      update.fipe_provenance = existing.fipe_provenance;
+    }
   }
 
   async findById(id: string): Promise<VehicleCompatibilityDocument> {
@@ -480,6 +615,16 @@ export class VehicleCompatibilityService {
       active: dto.active ?? true,
       origin: dto.origin ?? VehicleOrigin.MANUAL,
       mlVehicleId: dto.mlVehicleId,
+      // v2: seções ricas repassadas como vieram — o merge por seção em
+      // upsertByCanonicalKey decide o que sobrevive contra o documento existente.
+      powertrain: (dto as any).powertrain,
+      chassisAndDynamics: (dto as any).chassisAndDynamics,
+      safetyAndAdas: (dto as any).safetyAndAdas,
+      equipment: (dto as any).equipment,
+      warranty: (dto as any).warranty,
+      exteriorColors: (dto as any).exteriorColors,
+      interiorColors: (dto as any).interiorColors,
+      ownerBenefits: (dto as any).ownerBenefits,
     };
   }
 }

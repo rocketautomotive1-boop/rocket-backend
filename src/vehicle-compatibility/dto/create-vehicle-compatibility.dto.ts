@@ -59,6 +59,20 @@ export class CreateVehicleCompatibilityDto {
   @IsOptional() @IsArray() @IsString({ each: true }) aliases?: string[];
   @IsOptional() @IsArray() @IsString({ each: true }) tags?: string[];
 
+  // ---- v2: seções ricas de ficha técnica de fabricante. Sem DTO próprio
+  // (IsObject solto) de propósito — cada OEM expõe um conjunto de chaves
+  // diferente (ver strict:false em SafetyAndAdasSchema/EquipmentSchema no
+  // schema), então validar campo-a-campo aqui recriaria a rigidez que o
+  // schema evita. A forma canônica de cada seção vive em vehicle-oem-spec.util.ts.
+  @IsOptional() @IsObject() powertrain?: Record<string, any>;
+  @IsOptional() @IsObject() chassisAndDynamics?: Record<string, any>;
+  @IsOptional() @IsObject() safetyAndAdas?: Record<string, any>;
+  @IsOptional() @IsObject() equipment?: Record<string, any>;
+  @IsOptional() @IsObject() warranty?: Record<string, any>;
+  @IsOptional() @IsArray() @IsString({ each: true }) exteriorColors?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) interiorColors?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) ownerBenefits?: string[];
+
   @IsOptional() @IsEnum(VehicleOrigin) origin?: VehicleOrigin;
   @IsOptional() @IsString() mlVehicleId?: string;
   @IsOptional() @IsBoolean() active?: boolean;
