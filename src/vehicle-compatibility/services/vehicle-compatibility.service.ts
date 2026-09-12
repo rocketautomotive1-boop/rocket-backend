@@ -545,7 +545,10 @@ export class VehicleCompatibilityService {
 
     const displacementCc = normalizeDisplacementCc(rawEngine?.displacement);
     const fuelType = rawEngine?.fuelType;
-    const doors = rawDimensions?.doors;
+    // dto.doors (top-level) é o formato v2 (importadores OEM mandam assim,
+    // já que `doors` não é uma "dimensão física" propriamente); dimensions.doors
+    // é o formato legado do ML, mantido como fallback para não quebrar imports existentes.
+    const doors = (dto as any).doors ?? rawDimensions?.doors;
 
     const canonicalKey = `${VEHICLE_CONSTANTS.CANONICAL_VERSION}:${generateCanonicalKey(
       dto.make,

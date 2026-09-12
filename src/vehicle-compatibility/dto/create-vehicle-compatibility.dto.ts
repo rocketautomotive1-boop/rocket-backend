@@ -51,6 +51,7 @@ export class CreateVehicleCompatibilityDto {
   @IsOptional() @IsString() generation?: string;
   @IsOptional() @IsString() facelift?: string;
   @IsOptional() @IsEnum(VehicleBodyType) bodyType?: VehicleBodyType;
+  @IsOptional() @IsInt() doors?: number;
   @IsOptional() @IsString() segment?: string;
 
   @IsOptional() @ValidateNested() @Type(() => FipeDto) fipe?: FipeDto;
