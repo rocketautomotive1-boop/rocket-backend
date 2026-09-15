@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Types, SchemaTypes } from 'mongoose';
 import { ProductModel } from './product.schema';
 
 export type ProductCompatibilityDocument = HydratedDocument<ProductCompatibilityModel>;
@@ -9,15 +9,18 @@ export class ProductCompatibilityModel {
     id: string;
 
     /**
-     * Tipado como Types.ObjectId (não a classe ProductModel) de propósito — quando o
-     * tipo TS declarado é uma classe @Schema, o @nestjs/mongoose prioriza o
-     * design:type do reflect-metadata sobre `type: Types.ObjectId` explícito e o
-     * path vira SchemaType Mixed, sem cast automático (bug real confirmado ao vivo:
-     * `product` era salvo como string crua, e getCompatibilitiesByProduct — que
-     * consulta com `new Types.ObjectId(productId)` — nunca encontrava esses
-     * documentos). Types.ObjectId como tipo TS evita a ambiguidade.
+     * `type: SchemaTypes.ObjectId` (não `Types.ObjectId`) de propósito — são classes
+     * DIFERENTES no Mongoose: Types.ObjectId é o construtor do VALOR (para
+     * instanciar ids), SchemaTypes.ObjectId é o SchemaType que o @Prop precisa
+     * para o Mongoose reconhecer o campo e fazer cast automático de string. Bug
+     * real confirmado ao vivo: com `type: Types.ObjectId`, o Mongoose não
+     * reconhecia o tipo e registrava o path como SchemaType Mixed — toda
+     * compatibilidade criada via createCompatibility gravava `product` como
+     * string crua (sem cast), e getCompatibilitiesByProduct (que consulta com
+     * `new Types.ObjectId(productId)`) nunca encontrava esses documentos —
+     * silenciosamente sumiam da listagem de compatibilidades do produto.
      */
-    @Prop({ type: Types.ObjectId, ref: 'ProductModel', required: true, index: true })
+    @Prop({ type: SchemaTypes.ObjectId, ref: 'ProductModel', required: true, index: true })
     product: Types.ObjectId;
 
     /** _id do vehicle_compatibilities correspondente (base própria). */
