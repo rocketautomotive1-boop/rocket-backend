@@ -8,8 +8,17 @@ export type ProductCompatibilityDocument = HydratedDocument<ProductCompatibility
 export class ProductCompatibilityModel {
     id: string;
 
+    /**
+     * Tipado como Types.ObjectId (não a classe ProductModel) de propósito — quando o
+     * tipo TS declarado é uma classe @Schema, o @nestjs/mongoose prioriza o
+     * design:type do reflect-metadata sobre `type: Types.ObjectId` explícito e o
+     * path vira SchemaType Mixed, sem cast automático (bug real confirmado ao vivo:
+     * `product` era salvo como string crua, e getCompatibilitiesByProduct — que
+     * consulta com `new Types.ObjectId(productId)` — nunca encontrava esses
+     * documentos). Types.ObjectId como tipo TS evita a ambiguidade.
+     */
     @Prop({ type: Types.ObjectId, ref: 'ProductModel', required: true, index: true })
-    product: ProductModel;
+    product: Types.ObjectId;
 
     /** _id do vehicle_compatibilities correspondente (base própria). */
     @Prop({ required: true, index: true })
