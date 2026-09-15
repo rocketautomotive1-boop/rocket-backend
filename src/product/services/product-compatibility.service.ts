@@ -73,11 +73,16 @@ export class ProductCompatibilityService {
         // Vínculo já existe — se o caller mandou yearsOverride diferente do que já
         // está salvo, atualiza em vez de devolver o registro antigo silenciosamente
         // (senão restringir/ampliar o range de uma compatibilidade já cadastrada
-        // nunca teria efeito, já que este early-return sempre venceria).
+        // nunca teria efeito, já que este early-return sempre venceria). searchText
+        // precisa ser recalculado junto — bug real confirmado ao vivo: atualizar só
+        // yearsOverride sem refazer o searchText deixava anos excluídos ainda
+        // indexados via alias antigo, sobrevivendo à própria correção do filtro.
         const currentOverride = (existingCompatibility as any).yearsOverride ?? undefined;
         const changed = JSON.stringify(currentOverride) !== JSON.stringify(yearsOverride);
         if (changed) {
+          const updatedSearchText = await this.buildSearchText(createDto, vehicle, yearsOverride);
           existingCompatibility.set('yearsOverride', yearsOverride);
+          existingCompatibility.set('searchText', updatedSearchText);
           await existingCompatibility.save();
         }
         return existingCompatibility;
