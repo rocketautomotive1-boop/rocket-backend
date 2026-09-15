@@ -29,8 +29,13 @@ export class CompatibilityGroupPropagationService {
   /**
    * Fire-and-forget: chamado depois que uma compatibilidade 'manual' é salva para `productId`.
    * Nunca lança — falha de propagação não pode derrubar o fluxo de cadastro de compatibilidade.
+   *
+   * yearsOverride da linha de origem é copiado para as sugestões: peças "equivalentes"
+   * entre marcas não necessariamente têm a mesma janela de fitment por ano — propagar sem
+   * o override alargaria silenciosamente uma restrição real (ex: peça A só serve 2027,
+   * sugestão para a peça B equivalente não deveria virar "serve 2026 e 2027" sem revisão).
    */
-  async propagate(productId: string, vehicleId: string): Promise<void> {
+  async propagate(productId: string, vehicleId: string, yearsOverride?: number[]): Promise<void> {
     try {
       if (!Types.ObjectId.isValid(productId)) return;
 
@@ -72,6 +77,7 @@ export class CompatibilityGroupPropagationService {
           needsReview: true,
           status: 'active',
           syncedWithMarketplace: false,
+          yearsOverride,
         }));
 
       if (toInsert.length === 0) return;

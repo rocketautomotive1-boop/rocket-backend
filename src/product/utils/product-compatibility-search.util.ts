@@ -14,6 +14,9 @@ interface VehicleSearchInput {
   versionDisplay?: string;
   years?: number[];
   aliases?: string[];
+  /** Quando presente, restringe os anos indexados na busca a este subconjunto —
+   *  ver ProductCompatibilityModel.yearsOverride. */
+  yearsOverride?: number[];
 }
 
 /** attributeId usado para cross-reference de equivalência entre marcas de peça (curadoria manual). */
@@ -42,7 +45,10 @@ export function buildProductCompatibilitySearchText(
     vehicle?.make,
     vehicle?.model,
     vehicle?.versionDisplay ?? vehicle?.version,
-    ...(vehicle?.years ?? []).map(String),
+    // yearsOverride (subconjunto real desta peça) vence years (range completo do
+    // veículo) quando presente — senão "palheta toro 2026" acharia peças que só
+    // servem em 2027 dentro do mesmo range de anos do veículo.
+    ...(vehicle?.yearsOverride?.length ? vehicle.yearsOverride : vehicle?.years ?? []).map(String),
     ...(vehicle?.aliases ?? []),
   ]
     .map((s) => toLowerClean(String(s ?? '')))

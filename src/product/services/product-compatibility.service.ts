@@ -28,6 +28,29 @@ export class ProductCompatibilityService {
     return new Map(vehicles.map((v: any) => [String(v._id), v]));
   }
 
+  /**
+   * yearsOverride só faz sentido como SUBCONJUNTO dos anos do veículo — "essa peça
+   * serve só em 2027" não tem significado se o veículo vinculado nem existiu em 2027.
+   * Retorna undefined (= "todos os anos do veículo") quando o caller não restringiu nada.
+   */
+  private validateYearsOverride(
+    yearsOverride: number[] | undefined,
+    vehicle: VehicleCompatibilityDocument | undefined,
+  ): number[] | undefined {
+    if (!yearsOverride || yearsOverride.length === 0) return undefined;
+
+    const vehicleYears = new Set((vehicle as any)?.years ?? []);
+    const invalid = yearsOverride.filter((y) => !vehicleYears.has(y));
+    if (invalid.length > 0) {
+      throw new HttpException(
+        `yearsOverride contém ano(s) fora do range do veículo: ${invalid.join(', ')}. ` +
+          `Anos válidos para este veículo: ${[...vehicleYears].join(', ') || '(nenhum cadastrado)'}.`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return yearsOverride;
+  }
+
   async createCompatibility(createDto: CreateCompatibilityDto): Promise<ProductCompatibilityModel> {
     try {
       this.logger.log(`Criando compatibilidade para veículo ${createDto.vehicleId}`);
@@ -41,15 +64,26 @@ export class ProductCompatibilityService {
         whereConditions.product = createDto.productId as any;
       }
 
+      const vehicle = (await this.resolveVehiclesByIds([createDto.vehicleId])).get(createDto.vehicleId);
+      const yearsOverride = this.validateYearsOverride(createDto.yearsOverride, vehicle);
+
       const existingCompatibility = await this.compatibilityModel.findOne(whereConditions).exec();
 
       if (existingCompatibility) {
-        // Log removed for brevity or keep it if critical
+        // Vínculo já existe — se o caller mandou yearsOverride diferente do que já
+        // está salvo, atualiza em vez de devolver o registro antigo silenciosamente
+        // (senão restringir/ampliar o range de uma compatibilidade já cadastrada
+        // nunca teria efeito, já que este early-return sempre venceria).
+        const currentOverride = (existingCompatibility as any).yearsOverride ?? undefined;
+        const changed = JSON.stringify(currentOverride) !== JSON.stringify(yearsOverride);
+        if (changed) {
+          existingCompatibility.set('yearsOverride', yearsOverride);
+          await existingCompatibility.save();
+        }
         return existingCompatibility;
       }
 
-      const vehicle = (await this.resolveVehiclesByIds([createDto.vehicleId])).get(createDto.vehicleId);
-      const searchText = await this.buildSearchText(createDto, vehicle);
+      const searchText = await this.buildSearchText(createDto, vehicle, yearsOverride);
 
       const compatibility = new this.compatibilityModel({
         vehicleId: createDto.vehicleId,
@@ -65,6 +99,7 @@ export class ProductCompatibilityService {
         syncedWithMarketplace: createDto.syncedWithMarketplace,
         product: createDto.productId,
         searchText,
+        yearsOverride,
       });
       const savedCompatibility = await compatibility.save();
 
@@ -77,7 +112,7 @@ export class ProductCompatibilityService {
 
       if (createDto.productId) {
         await this.recomputeCompatibilitySummary(createDto.productId);
-        this.groupPropagationService.propagate(createDto.productId, createDto.vehicleId).catch(() => undefined);
+        this.groupPropagationService.propagate(createDto.productId, createDto.vehicleId, yearsOverride).catch(() => undefined);
       }
 
       return savedCompatibility;
@@ -553,6 +588,7 @@ export class ProductCompatibilityService {
   private async buildSearchText(
     dto: CreateCompatibilityDto,
     vehicle?: VehicleCompatibilityDocument,
+    yearsOverride?: number[],
   ): Promise<string> {
     const productSearchFields = dto.productId ? await this.getProductSearchFields(dto.productId) : undefined;
     return buildProductCompatibilitySearchText(
@@ -564,6 +600,7 @@ export class ProductCompatibilityService {
             version: (vehicle as any).version,
             versionDisplay: (vehicle as any).versionDisplay,
             years: (vehicle as any).years,
+            yearsOverride,
             aliases: (vehicle as any).aliases,
           }
         : undefined,

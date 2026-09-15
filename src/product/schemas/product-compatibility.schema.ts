@@ -95,6 +95,27 @@ export class ProductCompatibilityModel {
     /** groupId de cross_reference_groups que originou esta sugestão (só quando origin='group-suggestion'). */
     @Prop({ type: Types.ObjectId, ref: 'CrossReferenceGroupModel' })
     sourceGroupId?: Types.ObjectId;
+
+    /**
+     * Restringe esta compatibilidade a um SUBCONJUNTO dos anos do veículo vinculado —
+     * caso real: fabricante troca a peça no meio do ciclo do mesmo trim (ex: Denza
+     * B5 GS existe em [2026,2027], mas uma peça específica só serve em 2027, sem
+     * mudar de versão/trim). Ausente/vazio = vale para TODOS os years do veículo
+     * (comportamento padrão, preserva todo dado existente sem migração).
+     *
+     * Validado como subconjunto de vehicle.years na escrita (ver
+     * ProductCompatibilityService.validateYearsOverride) — nunca é a fonte de
+     * verdade de "quais anos o carro existiu", só de "em quais desses anos ESTA
+     * peça especificamente serve".
+     *
+     * IMPORTANTE: não tem efeito no envio ao Mercado Livre — o catalog_product_id
+     * do ML já embute o range de anos do veículo inteiro, e a API deles não aceita
+     * restringir por ano dentro do mesmo id (ver pushCompatibilitiesToMercadoLivre
+     * em product.service.ts, que manda o vehicleId como um todo). yearsOverride é
+     * só para busca/exibição/relatório dentro do próprio app.
+     */
+    @Prop({ type: [Number] })
+    yearsOverride?: number[];
 }
 
 export const ProductCompatibilitySchema = SchemaFactory.createForClass(ProductCompatibilityModel);
