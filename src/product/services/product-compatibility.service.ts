@@ -88,9 +88,7 @@ export class ProductCompatibilityService {
         return existingCompatibility;
       }
 
-      this.logger.warn(`DEBUG yearsOverride antes de buildSearchText: ${JSON.stringify(yearsOverride)} | vehicle.years: ${JSON.stringify((vehicle as any)?.years)} | vehicle.aliases: ${JSON.stringify((vehicle as any)?.aliases)}`);
       const searchText = await this.buildSearchText(createDto, vehicle, yearsOverride);
-      this.logger.warn(`DEBUG searchText resultante: ${searchText}`);
 
       const compatibility = new this.compatibilityModel({
         vehicleId: createDto.vehicleId,
