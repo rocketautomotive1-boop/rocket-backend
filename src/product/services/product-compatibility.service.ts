@@ -117,6 +117,11 @@ export class ProductCompatibilityService {
 
       return savedCompatibility;
     } catch (error) {
+      // Exceções conhecidas (ex: validateYearsOverride lançando BAD_REQUEST) devem
+      // chegar ao cliente com o status/mensagem reais — reembalar tudo como 500
+      // genérico escondia a mensagem de validação (bug real: 400 virava 500 sem
+      // explicação nenhuma, confirmado ao vivo ao testar yearsOverride inválido).
+      if (error instanceof HttpException) throw error;
       this.logger.error('Erro ao criar compatibilidade:', error);
       throw new HttpException(
         'Erro ao criar compatibilidade',
