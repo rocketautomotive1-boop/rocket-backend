@@ -108,9 +108,6 @@ describe('OrderReconciler (end-to-end)', () => {
     // Cria a collection + índices antes da 1ª escrita transacional (evita "catalog changes; retry")
     await orderModel.createCollection();
     await orderModel.init();
-
-    // Impede o reconciler de re-armar setTimeout durante o teste
-    jest.spyOn(reconciler as any, 'scheduleNext').mockImplementation(() => {});
   });
 
   afterAll(async () => {

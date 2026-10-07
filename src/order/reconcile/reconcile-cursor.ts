@@ -2,7 +2,18 @@ export const RECONCILE = {
   FLOOR_MS: 5 * 60 * 1000, // 5 min
   CEILING_MS: 20 * 60 * 1000, // 20 min
   BOOTSTRAP_WINDOW_MS: 7 * 24 * 60 * 60 * 1000, // 7 days
+  TICK_MS: 30 * 1000, // frequência com que o supervisor procura checkpoints vencidos
+  TARGET_REFRESH_MS: 5 * 60 * 1000, // redescobre marketplaces/contas (conta nova não exige restart)
+  MAX_FAILED_ATTEMPTS: 8, // após isso o pedido vira `dead` (alerta), nunca é descartado
+  RETRY_BASE_MS: 60 * 1000,
+  RETRY_CEILING_MS: 60 * 60 * 1000,
+  STALE_AFTER_MS: 3 * 20 * 60 * 1000, // 3× o teto de intervalo sem rodar = reconciler parado
 };
+
+/** Backoff exponencial por pedido que falhou: 1min, 2min, 4min… até 1h. */
+export function failedRefBackoff(attempts: number): number {
+  return Math.min(RECONCILE.RETRY_BASE_MS * 2 ** Math.max(0, attempts - 1), RECONCILE.RETRY_CEILING_MS);
+}
 
 /**
  * Adaptive interval: on a clean run (no gaps found) the interval doubles up to the ceiling;
