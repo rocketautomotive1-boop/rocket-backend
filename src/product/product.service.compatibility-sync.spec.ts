@@ -63,7 +63,6 @@ describe('ProductService — sync de compatibilidades com Mercado Livre (chunkin
       productRepository as any,
       noop, // STOCK_QUERY_PORT
       noop, // STORE_AWARE_STOCK_QUERY_PORT
-      noop, // STORE_OWNER_LOOKUP_PORT
       storePort, // STORE_PORT
       noop, // PRICING_PORT
       noop, // queueService
@@ -210,7 +209,6 @@ describe('ProductService — remoção de compatibilidade propaga pro Mercado Li
       productRepository as any,
       noop, // STOCK_QUERY_PORT
       noop, // STORE_AWARE_STOCK_QUERY_PORT
-      noop, // STORE_OWNER_LOOKUP_PORT
       storePort, // STORE_PORT
       noop, // PRICING_PORT
       queueService as any,
@@ -329,7 +327,7 @@ describe('ProductService — catch-up de compatibilidades ao publicar/atualizar 
 
     service = new ProductService(
       productRepository as any,
-      noop, noop, noop, // STOCK_QUERY_PORT, STORE_AWARE_STOCK_QUERY_PORT, STORE_OWNER_LOOKUP_PORT
+      noop, noop, // STOCK_QUERY_PORT, STORE_AWARE_STOCK_QUERY_PORT
       storePort as any,
       noop, // PRICING_PORT
       noop, // queueService

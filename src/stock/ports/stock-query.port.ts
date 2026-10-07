@@ -66,6 +66,8 @@ export const STORE_AWARE_STOCK_QUERY_PORT = Symbol('STORE_AWARE_STOCK_QUERY_PORT
  * know this variant exists.
  */
 export interface StoreAwareStockQueryPort {
+  /** Total onHand do produto somando TODAS as suas lojas (readiness/publicação sem usuário/loja). */
+  getProductOnHandAcrossStores(productId: string): Promise<number>;
   getStoreStockSummary(
     productId: string,
     storeId: string,

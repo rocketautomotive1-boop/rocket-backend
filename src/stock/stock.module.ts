@@ -40,7 +40,7 @@ import { AuthModule } from '../auth/auth.module';
  * isso sem forwardRef: StoreListingModule injeta o port sem importar o módulo.
  *
  * DI cycle fix (2026-08-29): StoreListingStockQueryService (o que STOCK_QUERY_PORT resolve) e
- * StockLedgerProvider injetam STORE_OWNER_LOOKUP_PORT (port folha, só findStoreIdByProduct), não
+ * StockLedgerProvider injetam STORE_OWNER_LOOKUP_PORT (port folha, só resolveStoreForSale), não
  * STORE_LISTING_PORT — usar o port completo aqui criava um ciclo real de instanciação com
  * StoreListingService (que injeta STOCK_QUERY_PORT para getAllocationProducts), travando o boot
  * silenciosamente em produção. StockService injeta STORE_LISTING_PORT completo (createOrGetStoreListing,

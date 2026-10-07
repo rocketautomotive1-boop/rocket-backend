@@ -2,7 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProductReadinessService } from './product-readiness.service';
 import { ProductRepository } from '../product.repository';
-import { STORE_OWNER_LOOKUP_PORT } from '../../store-listing/ports/store-owner-lookup.port';
 import { STORE_AWARE_STOCK_QUERY_PORT } from '../../stock/ports/stock-query.port';
 import { PRICING_PORT } from '../../pricing/ports/pricing.port';
 import { ProductTitleService } from './product-title.service';
@@ -10,8 +9,7 @@ import { ProductTitleService } from './product-title.service';
 describe('ProductReadinessService.compute — inventory store-aware', () => {
   let service: ProductReadinessService;
   let productRepository: { findByIdClean: jest.Mock };
-  let storeOwnerLookup: { findStoreIdByProduct: jest.Mock };
-  let stockQuery: { getStoreStockSummary: jest.Mock };
+  let stockQuery: { getStoreStockSummary: jest.Mock; getProductOnHandAcrossStores: jest.Mock };
   let pricing: { getBasePrice: jest.Mock };
   let productTitleService: { findByProductId: jest.Mock; findByProductIdAndStore: jest.Mock };
 
@@ -27,8 +25,7 @@ describe('ProductReadinessService.compute — inventory store-aware', () => {
 
   beforeEach(async () => {
     productRepository = { findByIdClean: jest.fn().mockResolvedValue(BASE_PRODUCT) };
-    storeOwnerLookup = { findStoreIdByProduct: jest.fn() };
-    stockQuery = { getStoreStockSummary: jest.fn() };
+    stockQuery = { getStoreStockSummary: jest.fn(), getProductOnHandAcrossStores: jest.fn() };
     pricing = { getBasePrice: jest.fn().mockResolvedValue(50) };
     productTitleService = {
       findByProductId: jest.fn().mockResolvedValue([{ id: 't1' }]),
@@ -39,7 +36,6 @@ describe('ProductReadinessService.compute — inventory store-aware', () => {
       providers: [
         ProductReadinessService,
         { provide: ProductRepository, useValue: productRepository },
-        { provide: STORE_OWNER_LOOKUP_PORT, useValue: storeOwnerLookup },
         { provide: STORE_AWARE_STOCK_QUERY_PORT, useValue: stockQuery },
         { provide: PRICING_PORT, useValue: pricing },
         { provide: ProductTitleService, useValue: productTitleService },
@@ -50,8 +46,8 @@ describe('ProductReadinessService.compute — inventory store-aware', () => {
     service = module.get(ProductReadinessService);
   });
 
-  it('inventory é false quando o produto não tem NENHUM StoreListing ainda (nenhuma loja com estoque)', async () => {
-    storeOwnerLookup.findStoreIdByProduct.mockResolvedValue(null);
+  it('inventory é false quando o produto não tem estoque em NENHUMA loja (total 0)', async () => {
+    stockQuery.getProductOnHandAcrossStores.mockResolvedValue(0);
 
     const result = await service.compute('P1');
 
@@ -60,19 +56,18 @@ describe('ProductReadinessService.compute — inventory store-aware', () => {
     expect(result?.readyToPublish).toBe(false);
   });
 
-  it('inventory é false quando a loja dona do produto não tem saldo próprio (onHand 0)', async () => {
-    storeOwnerLookup.findStoreIdByProduct.mockResolvedValue('store-maxeshop');
-    stockQuery.getStoreStockSummary.mockResolvedValue({ onHand: 0, reserved: 0, available: 0, avgCost: 0 });
+  it('sem storeId, inventory vem do total do produto somando as lojas (nunca de "a loja mais antiga")', async () => {
+    stockQuery.getProductOnHandAcrossStores.mockResolvedValue(0);
 
     const result = await service.compute('P1');
 
-    expect(stockQuery.getStoreStockSummary).toHaveBeenCalledWith('P1', 'store-maxeshop');
+    expect(stockQuery.getProductOnHandAcrossStores).toHaveBeenCalledWith('P1');
+    expect(stockQuery.getStoreStockSummary).not.toHaveBeenCalled();
     expect(result?.inventory).toBe(false);
   });
 
-  it('inventory é true quando a loja dona do produto tem saldo próprio e preço', async () => {
-    storeOwnerLookup.findStoreIdByProduct.mockResolvedValue('store-rocket');
-    stockQuery.getStoreStockSummary.mockResolvedValue({ onHand: 10, reserved: 0, available: 10, avgCost: 5 });
+  it('regressão 7086768: estoque só numa loja NOVA (a antiga está zerada/negativa) conta como inventory sem storeId', async () => {
+    stockQuery.getProductOnHandAcrossStores.mockResolvedValue(37); // loja nova 37 + antiga 1 - ... = total do produto
 
     const result = await service.compute('P1');
 
@@ -81,8 +76,7 @@ describe('ProductReadinessService.compute — inventory store-aware', () => {
   });
 
   it('inventory é false quando há estoque mas o preço base é zero', async () => {
-    storeOwnerLookup.findStoreIdByProduct.mockResolvedValue('store-rocket');
-    stockQuery.getStoreStockSummary.mockResolvedValue({ onHand: 10, reserved: 0, available: 10, avgCost: 5 });
+    stockQuery.getProductOnHandAcrossStores.mockResolvedValue(10);
     pricing.getBasePrice.mockResolvedValue(0);
 
     const result = await service.compute('P1');
@@ -90,16 +84,15 @@ describe('ProductReadinessService.compute — inventory store-aware', () => {
     expect(result?.inventory).toBe(false);
   });
 
-  describe('com storeId explícito (usuário logado) — não usa findStoreIdByProduct nem outra loja', () => {
+  describe('com storeId explícito (usuário logado) — só a loja pedida, nunca o total nem outra loja', () => {
     it('regressão: produto com StoreListing vazio numa loja mais antiga e saldo real noutra — storeId explícito ignora a mais antiga', async () => {
-      // Reproduz o bug real: findStoreIdByProduct pegaria sempre o StoreListing mais antigo
-      // (Rocket, vazio); com storeId explícito de MAXESHOP, nunca deve nem chamar
-      // findStoreIdByProduct — vai direto no saldo da loja pedida.
+      // Reproduz o bug real: a leitura sem loja pegava sempre o StoreListing mais antigo
+      // (Rocket, vazio); com storeId explícito de MAXESHOP vai direto no saldo da loja pedida.
       stockQuery.getStoreStockSummary.mockResolvedValue({ onHand: 1, reserved: 0, available: 1, avgCost: 5 });
 
       const result = await service.compute('P1', 'store-maxeshop');
 
-      expect(storeOwnerLookup.findStoreIdByProduct).not.toHaveBeenCalled();
+      expect(stockQuery.getProductOnHandAcrossStores).not.toHaveBeenCalled();
       expect(stockQuery.getStoreStockSummary).toHaveBeenCalledWith('P1', 'store-maxeshop');
       expect(result?.inventory).toBe(true);
     });
@@ -136,8 +129,7 @@ describe('ProductReadinessService.compute — inventory store-aware', () => {
     });
 
     it('sem storeId (gate de publish/listener), mantém comportamento anterior via findByProductId', async () => {
-      storeOwnerLookup.findStoreIdByProduct.mockResolvedValue('store-rocket');
-      stockQuery.getStoreStockSummary.mockResolvedValue({ onHand: 1, reserved: 0, available: 1, avgCost: 5 });
+      stockQuery.getProductOnHandAcrossStores.mockResolvedValue(1);
 
       const result = await service.compute('P1');
 

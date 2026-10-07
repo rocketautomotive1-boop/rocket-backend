@@ -1,7 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { STORE_OWNER_LOOKUP_PORT, StoreOwnerLookupPort } from '../store-listing/ports/store-owner-lookup.port';
 import { StoreListingModel, StoreListingDocument } from '../store-listing/schemas/store-listing.schema';
 import { StoreListingStockBalanceModel, StoreListingStockBalanceDocument } from '../store-listing/schemas/store-listing-stock-balance.schema';
 import { StoreListingStockMovementModel, StoreListingStockMovementDocument } from '../store-listing/schemas/store-listing-stock-movement.schema';
@@ -13,11 +12,15 @@ import { StockQueryPort, StoreAwareStockQueryPort, ProductStockSummary, Conditio
  * stock_movements) were removed (Contract complete, 2026-08-29).
  *
  * These consumers have no storeId in their calling context (public search, checkout, bot, AI,
- * orchestrator — no authenticated user). Store is resolved as "the owning store of the product's
- * listing" via STORE_OWNER_LOOKUP_PORT (StoreOwnerLookupService), a small leaf port — never
- * STORE_LISTING_PORT: injecting that here used to create a real DI instantiation cycle
- * (StoreListingService depends on STOCK_QUERY_PORT for getAllocationProducts, and this class is
- * what STOCK_QUERY_PORT resolves to), which froze app boot silently in production with no error.
+ * orchestrator — no authenticated user). Reads WITHOUT an explicit store see the WHOLE product:
+ * they aggregate across ALL of the product's StoreListings (same semantics as getAvailableBulk and
+ * getProductIdsWith{Min,Max}Stock). They used to resolve "the oldest StoreListing" instead, which
+ * showed only one store of a multi-store product (incidente 7086768: 86 un. na loja nova, -48 na
+ * antiga — a leitura mostrava só a antiga). This class deliberately does NOT depend on
+ * STORE_LISTING_PORT nor on the owner-lookup port: injecting STORE_LISTING_PORT here used to create
+ * a real DI instantiation cycle (StoreListingService depends on STOCK_QUERY_PORT for
+ * getAllocationProducts, and this class is what STOCK_QUERY_PORT resolves to), which froze app boot
+ * silently in production with no error.
  *
  * The store-aware methods below (getStoreStockSummary, getStoreStockByCondition,
  * getStoreStockByLocation, listStoreStockMovements, getStoreStockMovementStatistics — explicit
@@ -26,13 +29,12 @@ import { StockQueryPort, StoreAwareStockQueryPort, ProductStockSummary, Conditio
  * here 2026-08-29 as the other half of the cycle fix: that logic is Stock's, not StoreListing's,
  * and having it split across the two services was the structural reason the cycle existed at all.
  *
- * A product has at most one StoreListing today; no cross-store aggregation, no fallback to a
- * default store: a product without any StoreListing yields zeroed stock, never an exception.
+ * Store-aware reads (explicit storeId) stay isolated: no fallback to a default store, no inheriting
+ * another store's stock. A product without any StoreListing yields zeroed stock, never an exception.
  */
 @Injectable()
 export class StoreListingStockQueryService implements StockQueryPort, StoreAwareStockQueryPort {
   constructor(
-    @Inject(STORE_OWNER_LOOKUP_PORT) private readonly storeOwnerLookup: StoreOwnerLookupPort,
     @InjectModel(StoreListingModel.name)
     private readonly storeListingModel: Model<StoreListingDocument>,
     @InjectModel(StoreListingStockBalanceModel.name)
@@ -42,22 +44,21 @@ export class StoreListingStockQueryService implements StockQueryPort, StoreAware
   ) {}
 
   async getProductStock(productId: string): Promise<ProductStockSummary> {
-    const storeId = await this.resolveStoreId(productId);
-    if (!storeId) return { productId, onHand: 0, reserved: 0, available: 0 };
-    const { onHand, reserved, available } = await this.getStoreStockSummary(productId, storeId);
-    return { productId, onHand, reserved, available };
+    const ids = await this.storeListingIds(productId);
+    const { onHand, reserved } = await this.sumBalances(ids);
+    return { productId, onHand, reserved, available: onHand - reserved };
+  }
+
+  async getProductOnHandAcrossStores(productId: string): Promise<number> {
+    return (await this.getProductStock(productId)).onHand;
   }
 
   async getByCondition(productId: string): Promise<ConditionBalance[]> {
-    const storeId = await this.resolveStoreId(productId);
-    if (!storeId) return [];
-    return this.getStoreStockByCondition(productId, storeId);
+    return this.balancesBy(await this.storeListingIds(productId), '$condition', 'condition');
   }
 
   async getByLocation(productId: string): Promise<LocationBalance[]> {
-    const storeId = await this.resolveStoreId(productId);
-    if (!storeId) return [];
-    return this.getStoreStockByLocation(productId, storeId);
+    return this.balancesBy(await this.storeListingIds(productId), '$boxId', 'boxId');
   }
 
   async getAvailableBulk(productIds: string[]): Promise<Map<string, number>> {
@@ -115,28 +116,20 @@ export class StoreListingStockQueryService implements StockQueryPort, StoreAware
   }
 
   async getProductCost(productId: string): Promise<number> {
-    const storeId = await this.resolveStoreId(productId);
-    if (!storeId) return 0;
-    const { avgCost } = await this.getStoreStockSummary(productId, storeId);
-    return avgCost;
+    return this.avgCost(await this.storeListingIds(productId));
   }
 
   async listMovements(productId: string, limit = 50) {
-    const storeId = await this.resolveStoreId(productId);
-    if (!storeId) return [];
-    return this.listStoreStockMovements(productId, storeId, limit);
+    const storeListings = await this.storeListingModel.find({ productId }).select('_id storeId').lean().exec();
+    return this.fetchMovements(storeListings, limit);
   }
 
   async getMovementStatistics(productId: string): Promise<Record<string, { count: number; quantity: number }>> {
-    const storeId = await this.resolveStoreId(productId);
-    if (!storeId) return {};
-    return this.getStoreStockMovementStatistics(productId, storeId);
+    return this.movementStats(await this.storeListingIds(productId));
   }
 
   async getListingSnapshot(productId: string): Promise<{ condition: string } | null> {
-    const storeId = await this.resolveStoreId(productId);
-    if (!storeId) return null;
-    const [last] = await this.listStoreStockMovements(productId, storeId, 1);
+    const [last] = await this.listMovements(productId, 1);
     return last ? { condition: last.condition } : null;
   }
 
@@ -160,16 +153,74 @@ export class StoreListingStockQueryService implements StockQueryPort, StoreAware
   ): Promise<{ onHand: number; reserved: number; available: number; avgCost: number }> {
     const storeListingId = await this.resolveStoreListingId(productId, storeId);
     if (!storeListingId) return { onHand: 0, reserved: 0, available: 0, avgCost: 0 };
+    const ids = [storeListingId];
+    const { onHand, reserved } = await this.sumBalances(ids);
+    return { onHand, reserved, available: onHand - reserved, avgCost: await this.avgCost(ids) };
+  }
 
-    const balances = await this.balanceModel.aggregate([
-      { $match: { storeListingId } },
-      { $group: { _id: '$storeListingId', onHand: { $sum: '$onHand' }, reserved: { $sum: '$reserved' } } },
+  async getStoreStockByCondition(productId: string, storeId: string): Promise<ConditionBalance[]> {
+    const storeListingId = await this.resolveStoreListingId(productId, storeId);
+    if (!storeListingId) return [];
+    return this.balancesBy([storeListingId], '$condition', 'condition');
+  }
+
+  async getStoreStockByLocation(productId: string, storeId: string): Promise<LocationBalance[]> {
+    const storeListingId = await this.resolveStoreListingId(productId, storeId);
+    if (!storeListingId) return [];
+    return this.balancesBy([storeListingId], '$boxId', 'boxId');
+  }
+
+  async listStoreStockMovements(
+    productId: string,
+    storeId: string,
+    limit = 50,
+  ): Promise<Array<{ id: string; type: string; quantity: number; date: Date; unitCost?: number; salePrice?: number; condition: string; reason?: string; storeId?: string }>> {
+    const storeListingId = await this.resolveStoreListingId(productId, storeId);
+    if (!storeListingId) return [];
+    return this.fetchMovements([{ _id: storeListingId, storeId }], limit);
+  }
+
+  async getStoreStockMovementStatistics(
+    productId: string,
+    storeId: string,
+  ): Promise<Record<string, { count: number; quantity: number }>> {
+    const storeListingId = await this.resolveStoreListingId(productId, storeId);
+    if (!storeListingId) return {};
+    return this.movementStats([storeListingId]);
+  }
+
+  // ── helpers compartilhados: operam sobre UM OU VÁRIOS storeListingIds ────────────────────────
+
+  private async storeListingIds(productId: string): Promise<Types.ObjectId[]> {
+    const rows = await this.storeListingModel.find({ productId }).select('_id').lean().exec();
+    return rows.map((r: any) => new Types.ObjectId(String(r._id)));
+  }
+
+  private async sumBalances(ids: Types.ObjectId[]): Promise<{ onHand: number; reserved: number }> {
+    if (!ids.length) return { onHand: 0, reserved: 0 };
+    const rows = await this.balanceModel.aggregate([
+      { $match: { storeListingId: { $in: ids } } },
+      { $group: { _id: null, onHand: { $sum: '$onHand' }, reserved: { $sum: '$reserved' } } },
     ]);
-    const onHand = balances[0]?.onHand ?? 0;
-    const reserved = balances[0]?.reserved ?? 0;
+    return { onHand: rows[0]?.onHand ?? 0, reserved: rows[0]?.reserved ?? 0 };
+  }
 
+  private async balancesBy(ids: Types.ObjectId[], groupBy: string, field: 'condition'): Promise<ConditionBalance[]>;
+  private async balancesBy(ids: Types.ObjectId[], groupBy: string, field: 'boxId'): Promise<LocationBalance[]>;
+  private async balancesBy(ids: Types.ObjectId[], groupBy: string, field: 'condition' | 'boxId'): Promise<any[]> {
+    if (!ids.length) return [];
+    return this.balanceModel.aggregate([
+      { $match: { storeListingId: { $in: ids } } },
+      { $group: { _id: groupBy, onHand: { $sum: '$onHand' }, reserved: { $sum: '$reserved' } } },
+      { $project: { _id: 0, [field]: '$_id', onHand: 1, reserved: 1 } },
+    ]);
+  }
+
+  /** Custo médio ponderado pela quantidade (>0) de cada lote — pode abranger lotes de várias lojas. */
+  private async avgCost(ids: Types.ObjectId[]): Promise<number> {
+    if (!ids.length) return 0;
     const costRows = await this.balanceModel.aggregate([
-      { $match: { storeListingId } },
+      { $match: { storeListingId: { $in: ids } } },
       { $group: { _id: '$lotId', onHand: { $sum: '$onHand' } } },
       { $lookup: { from: 'store_listing_stock_lots', localField: '_id', foreignField: '_id', as: 'lot' } },
       { $unwind: '$lot' },
@@ -182,43 +233,17 @@ export class StoreListingStockQueryService implements StockQueryPort, StoreAware
       totalQty += qty;
       totalCost += qty * (r.unitCost ?? 0);
     }
-    const avgCost = totalQty > 0 ? totalCost / totalQty : 0;
-
-    return { onHand, reserved, available: onHand - reserved, avgCost };
+    return totalQty > 0 ? totalCost / totalQty : 0;
   }
 
-  async getStoreStockByCondition(productId: string, storeId: string): Promise<ConditionBalance[]> {
-    const storeListingId = await this.resolveStoreListingId(productId, storeId);
-    if (!storeListingId) return [];
-
-    return this.balanceModel.aggregate([
-      { $match: { storeListingId } },
-      { $group: { _id: '$condition', onHand: { $sum: '$onHand' }, reserved: { $sum: '$reserved' } } },
-      { $project: { _id: 0, condition: '$_id', onHand: 1, reserved: 1 } },
-    ]);
-  }
-
-  async getStoreStockByLocation(productId: string, storeId: string): Promise<LocationBalance[]> {
-    const storeListingId = await this.resolveStoreListingId(productId, storeId);
-    if (!storeListingId) return [];
-
-    return this.balanceModel.aggregate([
-      { $match: { storeListingId } },
-      { $group: { _id: '$boxId', onHand: { $sum: '$onHand' }, reserved: { $sum: '$reserved' } } },
-      { $project: { _id: 0, boxId: '$_id', onHand: 1, reserved: 1 } },
-    ]);
-  }
-
-  async listStoreStockMovements(
-    productId: string,
-    storeId: string,
-    limit = 50,
-  ): Promise<Array<{ id: string; type: string; quantity: number; date: Date; unitCost?: number; salePrice?: number; condition: string; reason?: string }>> {
-    const storeListingId = await this.resolveStoreListingId(productId, storeId);
-    if (!storeListingId) return [];
-
+  private async fetchMovements(
+    storeListings: Array<{ _id: any; storeId?: any }>,
+    limit: number,
+  ): Promise<Array<{ id: string; type: string; quantity: number; date: Date; unitCost?: number; salePrice?: number; condition: string; reason?: string; storeId?: string }>> {
+    if (!storeListings.length) return [];
+    const storeBySl = new Map(storeListings.map((sl) => [String(sl._id), sl.storeId != null ? String(sl.storeId) : undefined]));
     const rows = await this.movementModel
-      .find({ storeListingId })
+      .find({ storeListingId: { $in: storeListings.map((sl) => new Types.ObjectId(String(sl._id))) } })
       .sort({ date: -1 })
       .limit(limit)
       .lean()
@@ -233,27 +258,19 @@ export class StoreListingStockQueryService implements StockQueryPort, StoreAware
       salePrice: m.metadata?.salePrice != null ? Number(m.metadata.salePrice) : undefined,
       condition: m.condition ?? 'new',
       reason: m.reason,
+      storeId: storeBySl.get(String(m.storeListingId)),
     }));
   }
 
-  async getStoreStockMovementStatistics(
-    productId: string,
-    storeId: string,
-  ): Promise<Record<string, { count: number; quantity: number }>> {
-    const storeListingId = await this.resolveStoreListingId(productId, storeId);
-    if (!storeListingId) return {};
-
+  private async movementStats(ids: Types.ObjectId[]): Promise<Record<string, { count: number; quantity: number }>> {
+    if (!ids.length) return {};
     const rows = await this.movementModel.aggregate([
-      { $match: { storeListingId } },
+      { $match: { storeListingId: { $in: ids } } },
       { $group: { _id: '$type', count: { $sum: 1 }, quantity: { $sum: '$quantity' } } },
     ]);
     const out: Record<string, { count: number; quantity: number }> = {};
     for (const r of rows) out[r._id] = { count: r.count, quantity: r.quantity };
     return out;
-  }
-
-  private async resolveStoreId(productId: string): Promise<string | null> {
-    return this.storeOwnerLookup.findStoreIdByProduct(productId);
   }
 
   private async resolveStoreListingId(productId: string, storeId: string): Promise<Types.ObjectId | null> {

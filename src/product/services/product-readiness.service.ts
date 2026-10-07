@@ -4,7 +4,6 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ProductRepository } from '../product.repository';
-import { STORE_OWNER_LOOKUP_PORT, StoreOwnerLookupPort } from '../../store-listing/ports/store-owner-lookup.port';
 import { STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from '../../stock/ports/stock-query.port';
 import { PRICING_PORT, PricingPort } from '../../pricing/ports/pricing.port';
 import { ProductTitleService } from './product-title.service';
@@ -37,7 +36,6 @@ export class ProductReadinessService {
 
   constructor(
     private readonly productRepository: ProductRepository,
-    @Inject(STORE_OWNER_LOOKUP_PORT) private readonly storeOwnerLookup: StoreOwnerLookupPort,
     @Inject(STORE_AWARE_STOCK_QUERY_PORT) private readonly stockQuery: StoreAwareStockQueryPort,
     @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     private readonly productTitleService: ProductTitleService,
@@ -119,10 +117,11 @@ export class ProductReadinessService {
 
     const category = !!(product as any).category;
 
-    const resolvedStoreId = storeId ?? (await this.storeOwnerLookup.findStoreIdByProduct(productId));
-    const stockQty = resolvedStoreId
-      ? (await this.stockQuery.getStoreStockSummary(productId, String(resolvedStoreId))).onHand
-      : 0;
+    // Com storeId (usuário logado): exatamente essa loja. Sem storeId (gate de publish/listener
+    // assíncrono): o produto inteiro (soma das lojas) — nunca "a loja mais antiga".
+    const stockQty = storeId
+      ? (await this.stockQuery.getStoreStockSummary(productId, String(storeId))).onHand
+      : await this.stockQuery.getProductOnHandAcrossStores(productId);
     // Sale price lives in PricingModule (removed from Product in the pricing refactor).
     const priceRaw = await this.pricing.getBasePrice(productId);
     const inventory = stockQty > 0 && priceRaw > 0;

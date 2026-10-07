@@ -14,7 +14,6 @@ import { PaginatedResponseDto, ProductFilterDto, ProductStatus } from './dto/pro
 import { MarketplaceRegistryService } from '../marketplace/services/marketplace-registry.service';
 import { ProductRepository } from './product.repository';
 import { STOCK_QUERY_PORT, StockQueryPort, STORE_AWARE_STOCK_QUERY_PORT, StoreAwareStockQueryPort } from '../stock/ports/stock-query.port';
-import { STORE_OWNER_LOOKUP_PORT, StoreOwnerLookupPort } from '../store-listing/ports/store-owner-lookup.port';
 import { STORE_PORT, StorePort } from '../store/ports/store.port';
 import { STOCK_WRITE_PORT, StockWritePort } from '../stock/ports/stock-write.port';
 import { resolveMovementCondition, resolveMovementType } from '../stock-shared/movement-type';
@@ -70,7 +69,6 @@ export class ProductService {
     private readonly productRepository: ProductRepository,
     @Inject(STOCK_QUERY_PORT) private readonly stockQuery: StockQueryPort,
     @Inject(STORE_AWARE_STOCK_QUERY_PORT) private readonly storeAwareStockQuery: StoreAwareStockQueryPort,
-    @Inject(STORE_OWNER_LOOKUP_PORT) private readonly storeOwnerLookup: StoreOwnerLookupPort,
     @Inject(STORE_PORT) private readonly storePort: StorePort,
     @Inject(PRICING_PORT) private readonly pricing: PricingPort,
     private readonly queueService: QueueService,
@@ -215,11 +213,10 @@ export class ProductService {
 
     // Estoque store-aware (mesmo critério de ProductReadinessService.compute): com storeId
     // (usuário logado), lê exatamente essa loja, sem fallback. Sem storeId (chamadores sem
-    // usuário), cai na primeira loja com StoreListing — comportamento anterior preservado.
-    const resolvedStoreId = storeId ?? (await this.storeOwnerLookup.findStoreIdByProduct(id));
-    const stockQty = resolvedStoreId
-      ? (await this.storeAwareStockQuery.getStoreStockSummary(id, String(resolvedStoreId))).onHand
-      : 0;
+    // usuário), o produto inteiro (soma das lojas) — nunca "a loja mais antiga".
+    const stockQty = storeId
+      ? (await this.storeAwareStockQuery.getStoreStockSummary(id, String(storeId))).onHand
+      : await this.storeAwareStockQuery.getProductOnHandAcrossStores(id);
     const priceRaw = await this.pricing.getBasePrice(id);
     const inventory = stockQty > 0 && priceRaw > 0;
 
@@ -1134,6 +1131,8 @@ export class ProductService {
       id: string;
       mlVehicleId?: string;
       name?: string;
+      /** Ver ProductCompatibilityModel.yearsOverride — repassado tal qual ao batch. */
+      yearsOverride?: number[];
     }>
   ): Promise<{ compatibilities: any[]; mlSync: any }> {
     try {

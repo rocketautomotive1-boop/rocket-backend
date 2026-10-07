@@ -7,14 +7,14 @@ import { StockMovementType } from '../stock-shared/movement-type';
 describe('StockLedgerProvider', () => {
   let provider: StockLedgerProvider;
   let stock: { move: jest.Mock };
-  let storeOwnerLookup: { findStoreIdByProduct: jest.Mock; resolveStoreForSale: jest.Mock };
+  let storeOwnerLookup: { resolveStoreForSale: jest.Mock };
 
   const P1 = 'product-1';
   const STORE_A = 'store-a';
 
   beforeEach(async () => {
     stock = { move: jest.fn() };
-    storeOwnerLookup = { findStoreIdByProduct: jest.fn(), resolveStoreForSale: jest.fn() };
+    storeOwnerLookup = { resolveStoreForSale: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [

@@ -45,7 +45,7 @@ import { PricingModule } from '../pricing/pricing.module';
  * (sem import de domínio), sem risco de ciclo.
  *
  * STORE_OWNER_LOOKUP_PORT (StoreOwnerLookupService): port folha só com
- * findStoreIdByProduct — existe para que consumidores que só precisam da loja
+ * resolveStoreForSale — existe para que consumidores que só precisam da loja
  * dona de um produto (StockLedgerProvider, StoreListingStockQueryService) não
  * injetem STORE_LISTING_PORT inteiro. Extraído em 2026-08-29 depois de um
  * ciclo real de instanciação: StoreListingService injeta STOCK_QUERY_PORT

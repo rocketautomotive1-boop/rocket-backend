@@ -30,10 +30,4 @@ export interface StoreOwnerLookupPort {
    * "a mais antiga" (era o que mandava a baixa do 7086768 para a loja sem estoque).
    */
   resolveStoreForSale(query: SaleStoreQuery): Promise<StoreResolution>;
-
-  /**
-   * Loja dona do produto, se houver. Só para LEITURA/legado: com múltiplas StoreListing devolve a
-   * mais antiga (arbitrário). Movimentação de venda deve usar resolveStoreForSale.
-   */
-  findStoreIdByProduct(productId: string): Promise<string | null>;
 }
