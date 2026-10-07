@@ -5,6 +5,12 @@ export const STOCK_LEDGER_PORT = Symbol('STOCK_LEDGER_PORT');
 export interface StockItem {
   productId: string;
   quantity: number;
+  /**
+   * Identificam o ANÚNCIO vendido. O ledger resolve a loja da movimentação por eles (a loja do
+   * anúncio), não pela StoreListing "mais antiga" do produto — ver StoreOwnerLookupPort.
+   */
+  marketplaceId?: string;
+  listingExternalId?: string;
 }
 
 export interface StockLedgerPort {

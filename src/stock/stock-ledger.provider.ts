@@ -30,8 +30,13 @@ export class StockLedgerProvider implements StockLedgerPort {
     @Inject(STORE_OWNER_LOOKUP_PORT) private readonly storeOwnerLookup: StoreOwnerLookupPort,
   ) {}
 
-  private async resolveStoreId(productId: string): Promise<string | null> {
-    return this.storeOwnerLookup.findStoreIdByProduct(productId);
+  private async resolveStoreId(it: StockItem): Promise<string | null> {
+    const r = await this.storeOwnerLookup.resolveStoreForSale({
+      productId: it.productId,
+      marketplaceId: it.marketplaceId,
+      listingExternalId: it.listingExternalId,
+    });
+    return r.storeId;
   }
 
   async deductAndLink(
@@ -45,9 +50,9 @@ export class StockLedgerProvider implements StockLedgerPort {
     const deducted: StockItem[] = [];
     for (const it of items) {
       if (!it.productId || it.quantity <= 0) continue;
-      const storeId = await this.resolveStoreId(it.productId);
+      const storeId = await this.resolveStoreId(it);
       if (!storeId) {
-        this.logger.error(`[Stock] loja não resolvida para produto ${it.productId} — item não deduzido para o pedido ${orderId}.`);
+        this.logger.error(`[Stock] loja da venda não resolvida (ambígua ou inexistente) para produto ${it.productId} — item não deduzido para o pedido ${orderId}.`);
         continue;
       }
       const res = await this.stock.move(
@@ -86,7 +91,7 @@ export class StockLedgerProvider implements StockLedgerPort {
   ): Promise<void> {
     for (const it of items) {
       if (!it.productId) continue;
-      const storeId = await this.resolveStoreId(it.productId);
+      const storeId = await this.resolveStoreId(it);
       if (!storeId) {
         this.logger.error(`[Stock] loja não resolvida para produto ${it.productId} — reversão do pedido ${orderId} não aplicada para este item.`);
         continue;
@@ -118,9 +123,9 @@ export class StockLedgerProvider implements StockLedgerPort {
     let count = 0;
     for (const it of items) {
       if (!it.productId || it.quantity <= 0) continue;
-      const storeId = await this.resolveStoreId(it.productId);
+      const storeId = await this.resolveStoreId(it);
       if (!storeId) {
-        this.logger.error(`[Stock] loja não resolvida para produto ${it.productId} — item não deduzido para o pedido ${orderId}.`);
+        this.logger.error(`[Stock] loja da venda não resolvida (ambígua ou inexistente) para produto ${it.productId} — item não deduzido para o pedido ${orderId}.`);
         continue;
       }
       const res = await this.stock.move({

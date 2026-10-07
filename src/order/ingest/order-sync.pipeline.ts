@@ -227,7 +227,13 @@ export class OrderSyncPipeline {
                 if (isConfirmedSale) {
                     const stockItems = savedOrder.items
                         .filter(i => i.productId)
-                        .map(i => ({ productId: i.productId.toString(), quantity: i.quantity }));
+                        .map(i => ({
+                            productId: i.productId.toString(),
+                            quantity: i.quantity,
+                            marketplaceId,
+                            listingExternalId: (i as any).externalId,
+                        }));
+                    let skippedItems = 0;
 
                     if (stockItems.length > 0) {
                         const result = await this.stock.deductAndLink(
@@ -238,10 +244,21 @@ export class OrderSyncPipeline {
                             session,
                         );
                         movementIds = result.movementIds;
+                        skippedItems = stockItems.length - result.items.length;
+                        if (skippedItems > 0) {
+                            this.logger.error(
+                                `[Pipeline] Order ${externalId}: ${skippedItems}/${stockItems.length} item(ns) NÃO baixado(s) (loja da venda não resolvida) — pedido fica 'unresolved' p/ revisão.`,
+                            );
+                        }
                     }
 
                     // 2c. Final logistics status
-                    if (movementIds.length > 0) {
+                    if (skippedItems > 0) {
+                        // baixa parcial/ausente por loja ambígua: nunca marcar 'deducted' em silêncio
+                        savedOrder.logisticsStatus = 'unresolved';
+                        savedOrder.processingStatus = 'completed';
+                        if (movementIds.length > 0) savedOrder.stockMovementIds = movementIds.map(id => new Types.ObjectId(id));
+                    } else if (movementIds.length > 0) {
                         savedOrder.logisticsStatus = 'deducted';
                         savedOrder.processingStatus = 'completed';
                         savedOrder.stockMovementIds = movementIds.map(id => new Types.ObjectId(id));
@@ -377,6 +394,8 @@ export class OrderSyncPipeline {
                         productId: i.productId.toString(),
                         quantity: i.quantity,
                         unitPrice: i.unitPrice,
+                        marketplaceId,
+                        listingExternalId: (i as any).externalId,
                     })),
                     `cancel:${externalId}`,
                 );

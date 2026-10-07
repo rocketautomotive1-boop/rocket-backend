@@ -168,4 +168,47 @@ describe('OrderSyncPipeline (integration)', () => {
     expect(cancelled!.shipping.status).toBe('cancelled');
     expect(cancelled!.shipping.substatus).toBe('cancelled');
   });
+
+  describe('loja da baixa vem do anúncio vendido (incidente 7086768)', () => {
+    const fetched = (id: string) => ({
+      id,
+      marketplaceId: '650000000000000000000099',
+      marketplaceName: 'ML',
+      status: 'paid',
+      date_created: new Date().toISOString(),
+      total_amount: 100,
+      items: [{ id: 'MLB7624411768', sku: 'S1', title: 'X', quantity: 5, unit_price: 20 }],
+    });
+
+    it('passa marketplaceId e o externalId do anúncio de cada item ao ledger', async () => {
+      gateway.fetchOrder.mockResolvedValue(fetched('EXT-LISTING'));
+      stock.deductAndLink.mockResolvedValue({
+        movementIds: ['650000000000000000000abc'],
+        items: [{ productId: '650000000000000000000001', quantity: 5 }],
+      });
+
+      await pipeline.execute('EXT-LISTING', '650000000000000000000099', 'webhook');
+
+      const itemsArg = stock.deductAndLink.mock.calls[0][1];
+      expect(itemsArg).toEqual([
+        expect.objectContaining({
+          productId: '650000000000000000000001',
+          quantity: 5,
+          marketplaceId: '650000000000000000000099',
+          listingExternalId: 'MLB7624411768',
+        }),
+      ]);
+    });
+
+    it('se o ledger NÃO conseguiu baixar um item (loja ambígua), o pedido fica unresolved — nunca "deducted" em silêncio', async () => {
+      gateway.fetchOrder.mockResolvedValue(fetched('EXT-AMBIG'));
+      stock.deductAndLink.mockResolvedValue({ movementIds: [], items: [] });
+
+      await pipeline.execute('EXT-AMBIG', '650000000000000000000099', 'webhook');
+
+      const saved: any = await moduleRef.get<Model<any>>(getModelToken(OrderModel.name)).findOne({ externalId: 'EXT-AMBIG' }).lean();
+      expect(saved.logisticsStatus).toBe('unresolved');
+      expect(saved.stockMovementIds ?? []).toHaveLength(0);
+    });
+  });
 });

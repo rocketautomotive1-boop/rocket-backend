@@ -116,7 +116,12 @@ export class OrderRectifyService {
         if (isConfirmed && anyNewlyResolved) {
             const stockItems = order.items
                 .filter(i => i.productId)
-                .map(i => ({ productId: i.productId.toString(), quantity: i.quantity }));
+                .map(i => ({
+                    productId: i.productId.toString(),
+                    quantity: i.quantity,
+                    marketplaceId: order.marketplaceId?.toString(),
+                    listingExternalId: (i as any).externalId,
+                }));
 
             if (stockItems.length > 0) {
                 const session: ClientSession = await this.orderRepository.getConnection().startSession();

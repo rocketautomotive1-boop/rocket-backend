@@ -104,6 +104,8 @@ export class OrderCancellationService {
               productId: i.productId.toString(),
               quantity: i.quantity,
               unitPrice: i.unitPrice,
+              marketplaceId: order.marketplaceId?.toString(),
+              listingExternalId: (i as any).externalId,
             })),
             `cancel:${order.externalId}`,
           );
